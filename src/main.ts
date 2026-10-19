@@ -1,0 +1,943 @@
+import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from './chart.ts';
+import { TFS, streamTickers, fetch24h, fetchSymbols, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type Ticker24, type RemoteMarket } from './data.ts';
+import { INDICATORS } from './indicators.ts';
+import { CHART_TYPES } from './charttypes.ts';
+import { TOOL_MAP } from './tools/index.ts';
+import type { Drawing } from './tools/types.ts';
+import { renderLeftToolbar, wireLeftToolbar, renderFloating, drawingMenu, openProps, copyDrawings, pasteDrawings, setTool, setZoomOut, templateFor, type DrawUIHost } from './drawui.ts';
+import { loadSettings, DEFAULT_SETTINGS, SETTINGS_TABS, renderSettingsForm, readSettingsInput, type Settings } from './settings.ts';
+import { History, Snapshots } from './history.ts';
+import { styleFor } from './drawings.ts';
+import { isExpr, parse } from './symmath.ts';
+import { showMenu, type MenuItem } from './menu.ts';
+import { newAccount, placeOrder, cancelOrder, closePosition, onPrice, equity, type Account, type OrderType, type Side } from './trading.ts';
+import { store, $, $$, esc, toast, calcPrec, fmtVol } from './store.ts';
+import { initTesterUI } from './testerui.ts';
+import { defaultOF, type OFCfg } from './orderflow/layer.ts';
+import { hasOrderFlow } from './orderflow/feed.ts';
+import { initDom, domSync } from './orderflow/domui.ts';
+import { initJournal, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
+import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults } from './pineui.ts';
+
+// ---------- layouts (grid arrangements) ----------
+interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
+const ARR: Record<string, Arrangement> = {
+  '1': { n: 1, cols: 1, rows: 1 }, '2': { n: 2, cols: 2, rows: 1 }, '2v': { n: 2, cols: 1, rows: 2 },
+  '3': { n: 3, cols: 2, rows: 2, areas: ['a b', 'a c'] }, '3h': { n: 3, cols: 3, rows: 1 }, '3v': { n: 3, cols: 1, rows: 3 },
+  '1+3': { n: 4, cols: 3, rows: 2, areas: ['a a a', 'b c d'] }, '4': { n: 4, cols: 2, rows: 2 }, '4h': { n: 4, cols: 4, rows: 1 },
+  '6': { n: 6, cols: 3, rows: 2 }, '8': { n: 8, cols: 4, rows: 2 }, '9': { n: 9, cols: 3, rows: 3 }, '16': { n: 16, cols: 4, rows: 4 },
+};
+const LINK_COLORS = ['', '#f23645', '#2962ff', '#089981', '#ff9800', '#9c27b0'];
+interface Layout {
+  mode: string; panes: (PaneCfg & { link?: string })[]; active: number;
+  sync: { symbol: boolean; tf: boolean; crosshair: boolean; time: boolean };
+  colFr?: number[]; rowFr?: number[];
+}
+const DEFAULT_LAYOUT: Layout = { mode: '1', panes: [{ symbol: 'BTCUSDT', tf: '1h', type: 'candles', ind: ['ema50', 'rsi'] }], active: 0, sync: { symbol: false, tf: false, crosshair: true, time: false } };
+
+// ---------- state ----------
+const st = {
+  settings: loadSettings(),
+  layout: store.get<Layout>('layout', DEFAULT_LAYOUT),
+  layoutName: store.get<string>('layoutName', 'Unnamed'),
+  layouts: store.get<Record<string, Layout>>('layouts', {}),
+  autosave: store.get<boolean>('autosave', true),
+  drawings: store.get<Record<string, Drawing[]>>('drawings', {}),
+  alerts: store.get<Alert[]>('alerts', []),
+  acct: store.get<Account>('acct', newAccount()),
+  watch: store.get<string[]>('watch', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT']),
+  side: store.get<string>('side', 'watch'),
+  favTfs: store.get<string[]>('favTfs', ['1m', '5m', '15m', '1h', '4h', '1d', '1w']),
+  customTfs: store.get<string[]>('customTfs', []),
+  recent: store.get<string[]>('recentSymbols', []),
+  indTemplates: store.get<Record<string, string[]>>('indTemplates', {}),
+  chartTemplates: store.get<Record<string, Partial<PaneCfg> & { settings?: Partial<Settings> }>>('chartTemplates', {}),
+  hidden: { indicators: false, positions: false },
+  maximized: false,
+};
+st.layout = { ...DEFAULT_LAYOUT, ...st.layout, sync: { ...DEFAULT_LAYOUT.sync, ...st.layout.sync } };
+let panes: ChartPane[] = [];
+const lastPx: Record<string, number> = {}, tick24: Record<string, Ticker> = {}, alertLog: string[] = [];
+const active = () => panes[st.layout.active] ?? panes[0];
+const pxOf = (sym: string) => lastPx[sym] ?? panes.find(p => p.cfg.symbol === sym)?.lastPrice();
+const saveAcct = () => { store.set('acct', st.acct); journalSync(st.acct) };
+const saveLayout = () => {
+  st.layout.panes = panes.map((p, i) => ({ ...p.cfg, link: st.layout.panes[i]?.link }));
+  store.set('layout', st.layout);
+  if (st.autosave && st.layoutName !== 'Unnamed') { st.layouts[st.layoutName] = structuredClone(st.layout); store.set('layouts', st.layouts) }
+};
+const pending = new Set<() => void>();
+function later(fn: () => void) { if (!pending.size) setTimeout(() => { const f = [...pending]; pending.clear(); f.forEach(x => x()) }, 250); pending.add(fn) }
+
+// ---------- undo / redo ----------
+const history = new History();
+const drawSnaps = new Snapshots<string>(history, sym => st.drawings[sym] ?? [], (sym, v) => {
+  st.drawings[sym] = v as Drawing[]; store.set('drawings', st.drawings);
+  panes.forEach(p => { if (p.cfg.symbol === sym) { p.layer.drawings = st.drawings[sym]; p.layer.select([]); p.layer.update() } });
+  renderTree();
+});
+history.onChange = () => {
+  const { undo, redo } = history.peek();
+  $<HTMLButtonElement>('#undoBtn').disabled = !history.canUndo; $('#undoBtn').title = `Undo ${undo ?? ''} (Ctrl+Z)`;
+  $<HTMLButtonElement>('#redoBtn').disabled = !history.canRedo; $('#redoBtn').title = `Redo ${redo ?? ''} (Ctrl+Y)`;
+};
+/** Change a pane's config with undo support. */
+function applyCfg(p: ChartPane, patch: Partial<PaneCfg>, label = 'chart change') {
+  const before = structuredClone(p.cfg);
+  p.set(patch);
+  const after = structuredClone(p.cfg);
+  history.push({ label, undo: () => panes.includes(p) && p.set(before), redo: () => panes.includes(p) && p.set(after) });
+}
+
+// ---------- hooks shared by every chart ----------
+const hooks: Hooks = {
+  settings: () => st.settings,
+  drawings: sym => (st.drawings[sym] ??= []),
+  alerts: () => st.alerts,
+  account: () => st.acct,
+  hidden: () => st.hidden,
+  onPrice: handlePrice,
+  onCrosshair(src, time) {
+    if (st.layout.sync.crosshair) for (const p of panes) if (p !== src) p.syncCrosshair(time);
+    later(renderDataWindow);
+  },
+  onRange(src) {
+    if (!st.layout.sync.time || src !== active() || syncingTime) return;
+    const r = src.chart.timeScale().getVisibleRange(); if (!r) return;
+    syncingTime = true;
+    for (const p of panes) if (p !== src) try { p.chart.timeScale().setVisibleRange(r) } catch {}
+    syncingTime = false;
+  },
+  onActivate(p) { const i = panes.indexOf(p); if (i >= 0 && i !== st.layout.active) { st.layout.active = i; saveLayout(); syncUI(); domSync() } },
+  onCfgChange() { saveLayout(); syncUI(); connectTickers() },
+  setupLayer(p) {
+    const l = p.layer;
+    l.magnet = st.settings.magnet; l.keepDrawing = st.settings.keepDrawing;
+    l.templates = templateFor;
+    l.onChange = () => {
+      const sym = p.cfg.symbol;
+      st.drawings[sym] = l.drawings; store.set('drawings', st.drawings);
+      for (const o of panes) if (o !== p && o.cfg.symbol === sym) { o.layer.drawings = l.drawings; o.layer.update() }
+      drawSnaps.commit(sym, 'drawing');
+      renderTree(); renderFloating(p.cell, drawHost, l);
+    };
+    l.onSelect = () => { renderFloating(p.cell, drawHost, l); renderTree() };
+    l.onToolDone = () => renderLeftToolbar(drawHost);
+    l.onEdit = (d, tab) => openProps(d, l, drawHost, tab);
+    l.onContext = (d, e) => drawingMenu(e.clientX, e.clientY, d, l, drawHost);
+    drawSnaps.seed(p.cfg.symbol);
+    if (p === active()) { renderLeftToolbar(drawHost); renderTree() }
+  },
+  quickOrder(p, side) {
+    const px = pxOf(p.cfg.symbol); if (!px) return;
+    const qty = +$<HTMLInputElement>('#tQty').value;
+    if (!st.settings.instantOrders && !confirm(`${side.toUpperCase()} ${qty} ${p.cfg.symbol} at market (~${px})? (paper)`)) return;
+    submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p);
+  },
+  chartMenu: (p, e, price) => chartMenu(p, e, price),
+  script: id => scriptById(id),
+  compileMql: id => compileById(id),
+  compileNinja: () => compileNinjaScripts(),
+  onScripts: p => { if (p === active()) { renderPineResults(p); p.legend(p.disp.at(-1)) } },
+  scriptSettings: (p, id) => openInputs(p, id),
+};
+let syncingTime = false;
+
+// ---------- grid ----------
+function buildLayout() {
+  panes.forEach(p => p.destroy());
+  const A = ARR[st.layout.mode] ?? ARR['1'], grid = $('#grid');
+  grid.innerHTML = '';
+  if (st.layout.colFr?.length !== A.cols) st.layout.colFr = Array(A.cols).fill(1);
+  if (st.layout.rowFr?.length !== A.rows) st.layout.rowFr = Array(A.rows).fill(1);
+  applyGridTemplate();
+  document.body.classList.toggle('multi', A.n > 1);
+  panes = Array.from({ length: A.n }, (_, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    if (A.areas) cell.style.gridArea = 'abcdefghijklmnop'[i];
+    grid.append(cell);
+    const cfg = st.layout.panes[i] ?? { ...st.layout.panes[0], ind: [...st.layout.panes[0].ind], compare: [] };
+    const p = new ChartPane(cell, cfg, hooks);
+    const link = document.createElement('button');
+    link.className = 'link'; link.title = 'Symbol link group';
+    link.onclick = e => { e.stopPropagation(); linkMenu(i, link) };
+    cell.append(link);
+    p.load();
+    return p;
+  });
+  st.layout.active = Math.min(st.layout.active, A.n - 1);
+  renderSplitters(); saveLayout(); syncUI(); connectTickers();
+}
+function applyGridTemplate() {
+  const A = ARR[st.layout.mode] ?? ARR['1'], grid = $('#grid');
+  if (st.maximized) { grid.style.cssText = 'grid-template:1fr/1fr'; return }
+  grid.style.gridTemplateColumns = st.layout.colFr!.map(f => `${f}fr`).join(' ');
+  grid.style.gridTemplateRows = st.layout.rowFr!.map(f => `${f}fr`).join(' ');
+  grid.style.gridTemplateAreas = A.areas ? A.areas.map(a => `"${a}"`).join(' ') : '';
+}
+/** Draggable splitters between grid columns/rows; they adjust fr weights. */
+function renderSplitters() {
+  $$('.split').forEach(s => s.remove());
+  if (st.maximized) return;
+  const grid = $('#grid');
+  const mk = (axis: 'col' | 'row', i: number) => {
+    const s = document.createElement('div');
+    s.className = `split ${axis}`;
+    const fr = axis === 'col' ? st.layout.colFr! : st.layout.rowFr!, total = fr.reduce((a, b) => a + b, 0);
+    const pos = fr.slice(0, i + 1).reduce((a, b) => a + b, 0) / total * 100;
+    s.style[axis === 'col' ? 'left' : 'top'] = `calc(${pos}% - 3px)`;
+    s.onmousedown = e => {
+      e.preventDefault();
+      const rect = grid.getBoundingClientRect(), size = axis === 'col' ? rect.width : rect.height, start = axis === 'col' ? e.clientX : e.clientY;
+      const a0 = fr[i], b0 = fr[i + 1];
+      const move = (m: MouseEvent) => {
+        const d = ((axis === 'col' ? m.clientX : m.clientY) - start) / size * total;
+        fr[i] = Math.max(0.15, a0 + d); fr[i + 1] = Math.max(0.15, b0 - d);
+        applyGridTemplate(); renderSplitters();
+      };
+      const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up); saveLayout() };
+      addEventListener('mousemove', move); addEventListener('mouseup', up);
+    };
+    grid.append(s);
+  };
+  st.layout.colFr!.slice(0, -1).forEach((_, i) => mk('col', i));
+  st.layout.rowFr!.slice(0, -1).forEach((_, i) => mk('row', i));
+}
+function toggleMaximize() {
+  st.maximized = !st.maximized;
+  panes.forEach((p, i) => (p.cell.style.display = st.maximized && i !== st.layout.active ? 'none' : ''));
+  applyGridTemplate(); renderSplitters();
+}
+function linkMenu(i: number, el: HTMLElement) {
+  const r = el.getBoundingClientRect();
+  showMenu(r.left, r.bottom, LINK_COLORS.map(c => ({
+    label: c ? 'Link group' : 'No link', icon: c ? '●' : '○', checked: (st.layout.panes[i]?.link ?? '') === c,
+    action: () => { st.layout.panes[i] = { ...panes[i].cfg, link: c }; store.set('layout', st.layout); syncUI() },
+  })));
+  // color the bullet glyphs
+  $$('.ctx .ci').forEach((x, k) => { if (LINK_COLORS[k]) x.style.color = LINK_COLORS[k] });
+}
+/** Panes affected by a symbol/interval change: sync-all, or the active pane's colour link group. */
+function targets(kind: 'symbol' | 'tf'): ChartPane[] {
+  if (st.layout.sync[kind]) return panes;
+  const link = st.layout.panes[st.layout.active]?.link;
+  return kind === 'symbol' && link ? panes.filter((_, i) => st.layout.panes[i]?.link === link) : [active()];
+}
+
+// ---------- prices, alerts, paper fills ----------
+function handlePrice(sym: string, px: number, ts: number) {
+  const prev = lastPx[sym];
+  lastPx[sym] = px;
+  journalMark(sym, px);
+  if (prev != null) for (const a of st.alerts) {
+    if (!a.on || a.sym !== sym) continue;
+    const level = a.drawingId != null ? drawingPrice(a) : a.price;
+    if (level == null) continue;
+    if ((a.dir === 'up' && prev < level && px >= level) || (a.dir === 'down' && prev > level && px <= level)) fireAlert(a, px, level);
+  }
+  const fills = onPrice(st.acct, sym, px, ts);
+  if (fills.length) {
+    saveAcct();
+    fills.forEach(f => toast(`Filled ${f.orderType} ${f.side} ${f.qty} ${f.sym} @ ${f.px.toFixed(calcPrec(f.px))}`, 5000));
+    panes.forEach(p => p.tradeOverlay());
+  }
+  if (fills.length || st.acct.pos[sym]) later(renderTrading);
+}
+/** Current price level of a drawing-based alert (trend lines extend through time). */
+function drawingPrice(a: Alert): number | null {
+  const p = panes.find(x => x.cfg.symbol === a.sym); if (!p) return null;
+  const d = (st.drawings[a.sym] ?? []).find(x => x.id === a.drawingId); if (!d) return null;
+  return TOOL_MAP.get(d.type)?.priceAt?.(d, Date.now() / 1000, p.layer.geo()) ?? null;
+}
+let unsubTickers = () => {}, tickKey = '';
+function connectTickers() {
+  const syms = [...new Set([...st.watch, ...panes.flatMap(p => isExpr(p.cfg.symbol) ? [] : [p.cfg.symbol]), ...st.alerts.filter(a => a.on).map(a => a.sym), ...Object.keys(st.acct.pos), ...st.acct.orders.map(o => o.sym)])];
+  const key = syms.filter(x => !isRemote(x)).join();   // remote symbols get prices from their candle feed
+  if (key === tickKey) return;
+  tickKey = key; unsubTickers();
+  unsubTickers = streamTickers(syms.filter(x => !isRemote(x)), (s, t) => {
+    tick24[s] = t;
+    if (!panes.some(p => p.cfg.symbol === s)) handlePrice(s, t.c, Date.now() / 1000);
+    later(renderWatch);
+  });
+}
+function beep() {
+  try {
+    const a = new AudioContext(), o = a.createOscillator(), g = a.createGain();
+    g.gain.value = st.settings.alertVolume; o.frequency.value = 880; o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime + 0.3);
+  } catch {}
+}
+function addAlert(a: Omit<Alert, 'id' | 'on' | 'dir'> & { dir?: Alert['dir'] }) {
+  const last = pxOf(a.sym);
+  if (!(a.price > 0) || last == null) return toast('Invalid alert price');
+  st.alerts.push({ ...a, id: Date.now(), on: true, dir: a.dir ?? (a.price >= last ? 'up' : 'down') });
+  store.set('alerts', st.alerts);
+  try { if (Notification.permission === 'default') Notification.requestPermission() } catch {}
+  panes.forEach(p => p.tradeOverlay()); connectTickers(); renderAlerts();
+  toast(`Alert: ${a.sym} ${a.note ?? 'crossing'} ${a.price >= last ? '↑' : '↓'} ${a.price}`);
+}
+function fireAlert(a: Alert, px: number, level: number) {
+  a.on = false; store.set('alerts', st.alerts);
+  const msg = `${a.sym} crossed ${a.note ? a.note + ' ' : ''}${a.dir} ${level.toFixed(calcPrec(level))} (now ${px})`;
+  alertLog.unshift(`${new Date().toLocaleTimeString()} · ${msg}`);
+  toast('⏰ ' + msg, st.settings.autoHideToasts ? 20000 : 120000); beep();
+  try { if (Notification.permission === 'granted') new Notification('Price alert', { body: msg }) } catch {}
+  panes.forEach(p => p.tradeOverlay()); renderAlerts();
+}
+
+// ---------- drawing UI host ----------
+const drawHost: DrawUIHost = {
+  layer: () => active()?.layer,
+  layers: () => panes.map(p => p.layer),
+  tf: () => active().cfg.tf,
+  magnet: () => st.settings.magnet,
+  setMagnet(m) { st.settings.magnet = m; store.set('settings', st.settings); panes.forEach(p => (p.layer.magnet = m)) },
+  keepDrawing: () => st.settings.keepDrawing,
+  setKeepDrawing(on) { st.settings.keepDrawing = on; store.set('settings', st.settings); panes.forEach(p => (p.layer.keepDrawing = on)) },
+  hide(what) {
+    if (what === 'drawings' || what === 'all') { const on = !active().layer.hideAll; panes.forEach(p => { p.layer.hideAll = on; p.layer.update() }) }
+    if (what === 'indicators' || what === 'all') { st.hidden.indicators = !st.hidden.indicators; panes.forEach(p => p.setIndicatorsVisible(!st.hidden.indicators)) }
+    if (what === 'positions' || what === 'all') { st.hidden.positions = !st.hidden.positions; panes.forEach(p => p.tradeOverlay()) }
+    renderLeftToolbar(drawHost);
+  },
+  remove(what) {
+    const p = active();
+    if ((what === 'drawings' || what === 'all') && p.layer.drawings.length && confirm(`Remove ${p.layer.drawings.length} drawings on ${p.cfg.symbol}?`)) { p.layer.drawings = []; p.layer.select([]); p.layer.onChange(); p.layer.update() }
+    if (what === 'indicators' || what === 'all') applyCfg(p, { ind: [] }, 'remove indicators');
+  },
+  commit: () => active().layer.onChange(),
+  alertOn(d) {
+    const p = active(), def = TOOL_MAP.get(d.type), price = def?.priceAt?.(d, Date.now() / 1000, p.layer.geo());
+    if (price == null) return toast('This drawing has no price level right now');
+    addAlert({ sym: p.cfg.symbol, price, drawingId: d.id, note: def!.name });
+  },
+};
+setZoomOut(() => { const ts = active().chart.timeScale(), r = ts.getVisibleLogicalRange(); if (r) { const w = r.to - r.from; ts.setVisibleLogicalRange({ from: r.from - w / 2, to: r.to + w / 2 }) } });
+wireLeftToolbar(drawHost);
+
+// ---------- top bar ----------
+function setSymbol(raw: string) {
+  const s = raw.trim().toUpperCase().replace(/\s+/g, '');
+  try { if (isExpr(s)) parse(s); else if (!/^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/.test(s)) throw Error('Invalid symbol') } catch (e) { return toast((e as Error).message) }
+  st.recent = [s, ...st.recent.filter(x => x !== s)].slice(0, 12); store.set('recentSymbols', st.recent);
+  targets('symbol').forEach(p => applyCfg(p, { symbol: s }, 'symbol change'));
+}
+function setTf(tf: string) { targets('tf').forEach(p => applyCfg(p, { tf }, 'interval change')) }
+function syncUI() {
+  const p = active(); if (!p) return;
+  panes.forEach((x, i) => {
+    x.cell.classList.toggle('active', i === st.layout.active);
+    const link = st.layout.panes[i]?.link ?? '', b = x.cell.querySelector<HTMLElement>('.link');
+    if (b) { b.style.background = link || 'transparent'; b.style.borderColor = link || 'var(--muted)' }
+  });
+  $('#symBtn').textContent = p.cfg.symbol;
+  const tfs = [...new Set([...st.favTfs, p.cfg.tf])].sort((a, b) => tfSeconds(a) - tfSeconds(b));
+  $('#tfs').innerHTML = tfs.map(t => `<button data-tf="${t}" class="${t === p.cfg.tf ? 'on' : ''}">${t}</button>`).join('');
+  $('#typeBtn').textContent = CHART_TYPES.find(t => t.id === p.cfg.type)?.name ?? p.cfg.type;
+  $('#layoutBtn').textContent = `⊞ ${st.layout.mode}`;
+  $('#layoutName').textContent = st.layoutName;
+  $('#replayBar').classList.toggle('open', !!p.replay);
+  $('#replayBtn').classList.toggle('on', !!p.replay);
+  $('#rpPlay').textContent = p.replay?.timer ? '⏸' : '▶';
+  $('#tSym').textContent = p.cfg.symbol;
+  $('#pctBtn').classList.toggle('on', st.settings.scaleMode === 'percent');
+  $('#logBtn').classList.toggle('on', st.settings.scaleMode === 'log');
+  renderLeftToolbar(drawHost); renderTree(); renderTicket(); renderTrading(); renderWatch(); renderDataWindow();
+  panes.forEach(x => x.layer && renderFloating(x.cell, drawHost, x.layer));
+}
+$('#symBtn').onclick = () => openSearch('');
+$('#cmpBtn').onclick = () => openSearch('', 'compare');
+$('#tfs').onclick = e => { const tf = (e.target as HTMLElement).dataset.tf; if (tf) setTf(tf) };
+$('#tfMore').onclick = e => {
+  const r = (e.target as HTMLElement).getBoundingClientRect(), cur = active().cfg.tf;
+  const all = [...new Set([...TFS, ...st.customTfs])].sort((a, b) => tfSeconds(a) - tfSeconds(b));
+  const m = showMenu(r.left, r.bottom + 2, [
+    ...all.map(t => ({ label: tfLabel(t), hint: t, checked: t === cur, action: () => setTf(t) })),
+    { sep: true },
+    { label: 'Add custom interval…', action: () => { const t = parseTf(prompt('Interval, e.g. 45m, 3h, 2d, 2w') ?? ''); if (t) { st.customTfs = [...new Set([...st.customTfs, t])]; store.set('customTfs', st.customTfs); setTf(t) } else toast('Invalid interval') } },
+  ]);
+  $$('.ctx-i', m).slice(0, all.length).forEach((row, i) => {
+    const star = document.createElement('span'), t = all[i];
+    star.className = 'star' + (st.favTfs.includes(t) ? ' on' : ''); star.textContent = '★'; star.title = 'Favorite (show in toolbar)';
+    star.onclick = ev => { ev.stopPropagation(); st.favTfs = st.favTfs.includes(t) ? st.favTfs.filter(x => x !== t) : [...st.favTfs, t]; store.set('favTfs', st.favTfs); star.classList.toggle('on'); syncUI() };
+    row.append(star);
+  });
+};
+$('#typeBtn').onclick = e => {
+  const r = (e.target as HTMLElement).getBoundingClientRect(), cur = active().cfg.type;
+  showMenu(r.left, r.bottom + 2, [
+    ...CHART_TYPES.filter(t => t.group === 'time').map(t => ({ label: t.name, checked: t.id === cur, action: () => applyCfg(active(), { type: t.id as ChartType }, 'chart type') })),
+    { sep: true },
+    ...CHART_TYPES.filter(t => t.group === 'price').map(t => ({ label: t.name, checked: t.id === cur, action: () => applyCfg(active(), { type: t.id as ChartType }, 'chart type') })),
+  ]);
+};
+$('#indBtn').onclick = e => indicatorsMenu(e.target as HTMLElement);
+function indicatorsMenu(el: HTMLElement) {
+  const r = el.getBoundingClientRect(), cur = active().cfg.ind;
+  const toggle = (k: string) => () => applyCfg(active(), { ind: active().cfg.ind.includes(k) ? active().cfg.ind.filter(x => x !== k) : [...active().cfg.ind, k] }, 'indicators');
+  showMenu(r.left, r.bottom + 2, [
+    { label: 'Overlays', disabled: true },
+    ...Object.entries(INDICATORS).filter(([, d]) => !d.pane).map(([k, d]) => ({ label: d.name, checked: cur.includes(k), action: toggle(k) })),
+    { sep: true }, { label: 'Oscillators', disabled: true },
+    ...Object.entries(INDICATORS).filter(([, d]) => d.pane).map(([k, d]) => ({ label: d.name, checked: cur.includes(k), action: toggle(k) })),
+  ]);
+}
+$('#tplBtn').onclick = e => {
+  const r = (e.target as HTMLElement).getBoundingClientRect(), p = active();
+  const items: MenuItem[] = [
+    { label: 'Save indicator template…', action: () => { const n = prompt('Template name'); if (n) { st.indTemplates[n] = [...p.cfg.ind]; store.set('indTemplates', st.indTemplates) } } },
+    ...Object.entries(st.indTemplates).map(([n, ind]) => ({ label: `ƒx ${n}`, action: () => applyCfg(p, { ind: [...ind] }, 'indicator template') })),
+    { sep: true },
+    { label: 'Save chart template…', action: () => {
+      const n = prompt('Chart template name'); if (!n) return;
+      const withSym = confirm('Include symbol and interval?');
+      st.chartTemplates[n] = { type: p.cfg.type, ind: [...p.cfg.ind], settings: { upColor: st.settings.upColor, downColor: st.settings.downColor, bgColor: st.settings.bgColor, vertGrid: st.settings.vertGrid, horzGrid: st.settings.horzGrid }, ...(withSym ? { symbol: p.cfg.symbol, tf: p.cfg.tf } : {}) };
+      store.set('chartTemplates', st.chartTemplates);
+    } },
+    ...Object.entries(st.chartTemplates).map(([n, t]) => ({ label: `▤ ${n}`, action: () => { const { settings, ...cfg } = t; if (settings) applySettings(settings); applyCfg(p, cfg, 'chart template') } })),
+  ];
+  showMenu(r.left, r.bottom + 2, items);
+};
+$('#alertBtn').onclick = () => { const p = active(), px = p.lastPrice(); if (px) { const v = prompt(`Alert price for ${p.cfg.symbol}`, (px * 1.01).toFixed(p.prec)); if (v) addAlert({ sym: p.cfg.symbol, price: +v }) } };
+$('#undoBtn').onclick = () => history.undo();
+$('#redoBtn').onclick = () => history.redo();
+$('#layoutBtn').onclick = e => {
+  const r = (e.target as HTMLElement).getBoundingClientRect();
+  showMenu(r.left, r.bottom + 2, Object.entries(ARR).map(([k, a]) => ({ label: `${k} — ${a.n} chart${a.n > 1 ? 's' : ''}`, checked: k === st.layout.mode, action: () => { st.layout.mode = k; st.layout.colFr = st.layout.rowFr = undefined; st.maximized = false; buildLayout() } })));
+};
+$('#syncBtn').onclick = e => {
+  const r = (e.target as HTMLElement).getBoundingClientRect(), s = st.layout.sync;
+  const t = (k: keyof Layout['sync']) => () => { s[k] = !s[k]; saveLayout() };
+  showMenu(r.left, r.bottom + 2, [
+    { label: 'Symbol', checked: s.symbol, action: t('symbol') }, { label: 'Interval', checked: s.tf, action: t('tf') },
+    { label: 'Crosshair', checked: s.crosshair, action: t('crosshair') }, { label: 'Time / date range', checked: s.time, action: t('time') },
+    { sep: true }, { label: 'Link groups: use the dot in each chart’s corner', disabled: true },
+  ]);
+};
+$('#fullBtn').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
+$('#shotBtn').onclick = e => {
+  const r = (e.target as HTMLElement).getBoundingClientRect(), p = active(), canvas = () => p.chart.takeScreenshot();
+  showMenu(r.left, r.bottom + 2, [
+    { label: 'Download image', hint: 'Ctrl+Alt+S', action: () => downloadShot(canvas(), p) },
+    { label: 'Copy image', hint: 'Ctrl+Shift+S', action: () => copyShot(canvas()) },
+    { label: 'Export chart data (CSV)', action: () => p.exportCsv() },
+  ]);
+};
+function downloadShot(c: HTMLCanvasElement, p: ChartPane) { const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = `${p.cfg.symbol}_${p.cfg.tf}_${new Date().toISOString().slice(0, 16)}.png`; a.click() }
+function copyShot(c: HTMLCanvasElement) { c.toBlob(b => b && navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(() => toast('Chart image copied'), () => toast('Clipboard not available'))) }
+$('#themeBtn').onclick = () => applySettings({ theme: st.settings.theme === 'dark' ? 'light' : 'dark', bgColor: '', gridColor: '', scaleTextColor: '', separatorColor: '' });
+
+// ---------- replay ----------
+$('#replayBtn').onclick = () => { const p = active(); if (p.replay) p.exitReplay(); else p.startReplay(); syncUI() };
+$('#ofBtn').onclick = e => {
+  const p = active(), of = { ...defaultOF(), ...p.cfg.of }, r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const set = (patch: Partial<OFCfg>, label = 'order flow') => applyCfg(p, { of: { ...of, ...patch } }, label);
+  if (!hasOrderFlow(p.cfg.symbol) || isExpr(p.cfg.symbol)) return toast('Order flow needs a crypto symbol (Binance or an exchange via the data server)');
+  const num = (q: string, cur: number) => { const v = prompt(q, String(cur)); return v == null || v.trim() === '' || !Number.isFinite(+v) || +v < 0 ? null : +v };
+  showMenu(r.left, r.bottom + 2, [
+    { label: 'Footprint', sub: (['off', 'bidask', 'delta', 'volume'] as const).map(m => ({ label: { off: 'Off', bidask: 'Bid × Ask', delta: 'Delta', volume: 'Volume profile per bar' }[m], checked: of.footprint === m, action: () => set({ footprint: m }) })) },
+    { label: 'Liquidity heatmap (order book history)', checked: of.heatmap, action: () => set({ heatmap: !of.heatmap }) },
+    { label: 'Big trades (bubbles)', checked: of.bubbles, action: () => set({ bubbles: !of.bubbles }) },
+    { label: 'Cumulative delta (CVD) pane', checked: of.cvd, action: () => set({ cvd: !of.cvd }) },
+    { label: 'Delta per bar pane', checked: of.delta, action: () => set({ delta: !of.delta }) },
+    { sep: true },
+    { label: 'Row size…', hint: of.row ? String(of.row) : 'auto', action: () => { const v = num('Price per footprint row (0 = automatic)', of.row); if (v != null) set({ row: v }) } },
+    { label: 'Imbalance ratio', hint: `${of.ratio}×`, sub: [1.5, 2, 2.5, 3, 4, 5].map(x => ({ label: `${x}×`, checked: of.ratio === x, action: () => set({ ratio: x }) })) },
+    { label: 'Big trade size…', hint: of.bigMin ? `≥ ${of.bigMin.toLocaleString()}` : 'auto', action: () => { const v = num('Minimum trade value (quote currency, e.g. USDT). 0 = automatic (top 0.5%)', of.bigMin); if (v != null) set({ bigMin: v }) } },
+    { label: 'Load older trades', disabled: !p.of?.fp || p.of.firstId == null, action: () => p.of?.loadMore() },
+    { sep: true },
+    { label: 'DOM / Level 2 panel', icon: '≣', action: () => { if (st.side !== 'dom') showSide('dom') } },
+  ]);
+};
+$('#rpSelect').onclick = () => { active().startReplay(); syncUI() };
+$('#rpDate').onchange = e => { const v = (e.target as HTMLInputElement).value; if (v) active().startReplayAt(new Date(v).getTime() / 1000) };
+$('#rpRandom').onclick = () => active().replayRandom();
+$('#rpFirst').onclick = () => active().replayFirst();
+$('#rpBack').onclick = () => active().stepBack();
+$('#rpStep').onclick = () => active().stepReplay();
+const togglePlay = () => { const p = active(); if (p.replay?.timer) p.pauseReplay(); else p.playReplay(+$<HTMLSelectElement>('#rpSpeed').value); syncUI() };
+$('#rpPlay').onclick = togglePlay;
+$('#rpSpeed').onchange = () => { const p = active(); if (p.replay?.timer) p.playReplay(+$<HTMLSelectElement>('#rpSpeed').value) };
+$('#rpExit').onclick = () => { active().exitReplay(); syncUI() };
+
+// ---------- bottom toolbar ----------
+const RANGES: [string, string, number | 'ytd' | 'all'][] = [['1D', '1m', 86400], ['5D', '5m', 5 * 86400], ['1M', '30m', 30 * 86400], ['3M', '1h', 90 * 86400], ['6M', '2h', 182 * 86400], ['YTD', '1d', 'ytd'], ['1Y', '1d', 365 * 86400], ['5Y', '1w', 5 * 365 * 86400], ['All', '1M', 'all']];
+$('#ranges').innerHTML = RANGES.map(([n]) => `<button data-r="${n}">${n}</button>`).join('');
+$('#ranges').onclick = async e => {
+  const r = RANGES.find(x => x[0] === (e.target as HTMLElement).dataset.r); if (!r) return;
+  const p = active(), now = Date.now() / 1000;
+  const from = r[2] === 'all' ? 0 : r[2] === 'ytd' ? Date.UTC(new Date().getUTCFullYear(), 0, 1) / 1000 : now - r[2];
+  if (p.cfg.tf !== r[1]) { applyCfg(p, { tf: r[1] }, 'date range'); await new Promise(res => setTimeout(res, 1200)) }
+  if (r[2] === 'all') p.chart.timeScale().fitContent(); else p.showSince(from);
+};
+$('#gotoBtn').onclick = () => openGoto();
+function openGoto() { $<HTMLDialogElement>('#gotoDlg').showModal() }
+$<HTMLFormElement>('#gotoForm').addEventListener('submit', e => {
+  if ((e.submitter as HTMLButtonElement)?.value !== 'go') return;
+  const v = $<HTMLInputElement>('#gotoIn').value; if (v) active().goTo(new Date(v).getTime() / 1000);
+});
+const setScale = (mode: Settings['scaleMode']) => applySettings({ scaleMode: st.settings.scaleMode === mode ? 'normal' : mode });
+$('#pctBtn').onclick = () => setScale('percent');
+$('#logBtn').onclick = () => setScale('log');
+$('#autoBtn').onclick = () => panes.forEach(p => p.main.priceScale().setAutoScale(true));
+setInterval(() => {
+  try { $('#clock').textContent = `${new Date().toLocaleTimeString('en-GB', { timeZone: st.settings.tz, hour12: st.settings.hour12 })} (${st.settings.tz})` } catch {}
+}, 1000);
+
+// ---------- chart context menu ----------
+function chartMenu(p: ChartPane, e: MouseEvent, price: number | null) {
+  const px = price != null ? +price.toFixed(p.prec) : null, last = p.lastPrice() ?? 0;
+  showMenu(e.clientX, e.clientY, [
+    { label: 'Reset chart view', hint: 'Alt+R', action: () => p.resetView() },
+    ...(px != null ? [
+      { label: `Copy price ${px}`, action: () => navigator.clipboard.writeText(String(px)).catch(() => {}) },
+      { label: `Add alert at ${px}`, icon: '⏰', action: () => addAlert({ sym: p.cfg.symbol, price: px }) },
+      { label: `${px < last ? 'Buy limit' : 'Buy stop'} ${p.cfg.symbol} @ ${px}`, action: () => submit({ sym: p.cfg.symbol, side: 'buy', type: px < last ? 'limit' : 'stop', qty: +$<HTMLInputElement>('#tQty').value, price: px }, last, p) },
+      { label: `${px > last ? 'Sell limit' : 'Sell stop'} ${p.cfg.symbol} @ ${px}`, action: () => submit({ sym: p.cfg.symbol, side: 'sell', type: px > last ? 'limit' : 'stop', qty: +$<HTMLInputElement>('#tQty').value, price: px }, last, p) },
+      { label: `Draw horizontal line at ${px}`, action: () => { const def = TOOL_MAP.get('hline')!; p.layer.add({ id: Date.now(), type: 'hline', pts: [{ t: p.disp.at(-1)?.time ?? 0, p: px }], style: { ...(templateFor('hline') ?? {}), ...styleOf(def.id, p.layer.color) } }) } },
+    ] : []),
+    { sep: true },
+    { label: 'Add to watchlist', hint: 'Alt+W', action: () => addWatch(p.cfg.symbol) },
+    { label: 'Indicators…', hint: '/', action: () => indicatorsMenu($('#indBtn')) },
+    { label: 'Compare symbol…', action: () => openSearch('', 'compare') },
+    ...((p.cfg.compare?.length ?? 0) ? [{ label: 'Remove compared symbols', action: () => applyCfg(p, { compare: [] }, 'compare') }] : []),
+    { sep: true },
+    { label: drawHost.layer().hideAll ? 'Show drawings' : 'Hide drawings', hint: 'Ctrl+Alt+H', action: () => drawHost.hide('drawings') },
+    { label: 'Remove drawings', action: () => drawHost.remove('drawings') },
+    { label: 'Remove indicators', action: () => drawHost.remove('indicators') },
+    { sep: true },
+    { label: 'Settings…', icon: '⚙', action: () => openSettings() },
+  ]);
+}
+const styleOf = (type: string, color: string) => styleFor(TOOL_MAP.get(type)!, color, templateFor(type));
+
+// ---------- symbol search ----------
+let allSymbols: string[] = [];
+fetchSymbols().then(s => (allSymbols = s.sort())).catch(() => {});
+let searchMode: 'symbol' | 'compare' = 'symbol', searchQuote = 'USDT', searchEx = store.get<string>('searchEx', 'binance');
+const marketCache = new Map<string, RemoteMarket[]>();
+let exchangesLoaded = false;
+async function loadExchanges() {
+  if (exchangesLoaded) return;
+  try {
+    const ex = await fetchExchanges();
+    exchangesLoaded = true;
+    $('#searchEx').innerHTML = '<option value="binance">Binance (direct)</option>' + ex.map(x => `<option value="${esc(x.id)}">${x.id === 'fx' ? 'Forex, metals, indices &amp; stocks' : esc(x.id)}</option>`).join('');
+    $<HTMLSelectElement>('#searchEx').value = searchEx;
+  } catch (e) { if (searchEx !== 'binance') toast((e as Error).message, 6000) }
+}
+function openSearch(initial: string, mode: 'symbol' | 'compare' = 'symbol') {
+  searchMode = mode;
+  $('#searchMode').textContent = mode === 'compare' ? '· compare / add' : '';
+  const i = $<HTMLInputElement>('#searchIn'); i.value = initial;
+  $<HTMLSelectElement>('#searchEx').value = searchEx;
+  $<HTMLDialogElement>('#searchDlg').showModal(); i.focus();
+  loadExchanges();
+  renderSearch();
+}
+async function renderSearch() {
+  const q = $<HTMLInputElement>('#searchIn').value.trim().toUpperCase();
+  const row = (sym: string, desc: string, i: number) => `<div class="sl${i === 0 ? ' sel' : ''}" data-s="${esc(sym)}"><b>${esc(sym)}</b><span class="muted">${esc(desc)}</span></div>`;
+  if (searchEx !== 'binance') {
+    const tabs = searchEx === 'fx' ? ['all', 'forex', 'metal', 'energy', 'index', 'commodity'] : ['all', 'spot', 'swap', 'future'];
+    if (!tabs.includes(searchQuote)) searchQuote = 'all';
+    $('#searchTabs').innerHTML = tabs.map(x => `<button type="button" data-q="${x}" class="${x === searchQuote ? 'on' : ''}">${x === 'swap' ? 'perpetual' : x}</button>`).join('');
+    let ms = marketCache.get(searchEx);
+    if (!ms) {
+      $('#searchList').innerHTML = '<div class="muted sl-h">Loading markets…</div>';
+      try { ms = await fetchMarkets(searchEx); marketCache.set(searchEx, ms) }
+      catch (e) { $('#searchList').innerHTML = `<div class="dn sl-h">${esc((e as Error).message)}</div>`; return }
+    }
+    const EX = searchEx.toUpperCase(), qq = q.replace('/', '_');
+    const list = ms.filter(m => (searchQuote === 'all' || m.type === searchQuote) && (!q || m.sym.includes(qq) || (m.name ?? '').toUpperCase().includes(q)))
+      .sort((a, b) => (a.sym.startsWith(qq) ? 0 : 1) - (b.sym.startsWith(qq) ? 0 : 1) || a.sym.length - b.sym.length).slice(0, 100);
+    // FX also accepts any stock ticker typed in.
+    const extra = searchEx === 'fx' && q && /^[A-Z0-9.]{1,12}$/.test(q) && !list.some(m => m.sym === q) ? row(`FX:${q}`, 'Stock or other Yahoo ticker', list.length ? 1 : 0) : '';
+    $('#searchList').innerHTML = (list.map((m, i) => row(`${EX}:${m.sym}`, `${m.name ?? `${m.base} / ${m.quote}`} · ${m.type} · ${searchEx}`, i)).join('') + extra) || '<div class="muted sl-h">No matches</div>';
+    return;
+  }
+  const quotes = ['USDT', 'USDC', 'FDUSD', 'BTC', 'ETH', 'TRY', 'EUR'];
+  if (!quotes.includes(searchQuote)) searchQuote = 'USDT';
+  $('#searchTabs').innerHTML = quotes.map(x => `<button type="button" data-q="${x}" class="${x === searchQuote ? 'on' : ''}">${x}</button>`).join('');
+  let list: string[];
+  if (!q) list = st.recent.length ? st.recent : allSymbols.filter(s => s.endsWith(searchQuote)).slice(0, 60);
+  else if (isExpr(q) || q.includes(':')) list = [q];
+  else list = allSymbols.filter(s => s.includes(q) && (q.length > 3 || s.endsWith(searchQuote))).sort((a, b) => (a.startsWith(q) ? 0 : 1) - (b.startsWith(q) ? 0 : 1) || a.length - b.length).slice(0, 80);
+  const desc = (s: string) => {
+    if (isExpr(s)) return 'Spread';
+    if (s.includes(':')) return s.split(':')[0].toLowerCase();
+    const qu = quotes.find(x => s.endsWith(x)) ?? '';
+    return `${s.slice(0, s.length - qu.length)} / ${qu} · Binance · spot`;
+  };
+  $('#searchList').innerHTML = (!q && st.recent.length ? '<div class="muted sl-h">Recent</div>' : '') + list.map((s, i) => row(s, desc(s), i)).join('');
+}
+function pickSymbol(s: string) {
+  $<HTMLDialogElement>('#searchDlg').close();
+  if (searchMode === 'compare') { const p = active(); if (!isExpr(s)) applyCfg(p, { compare: [...new Set([...(p.cfg.compare ?? []), s])] }, 'compare') }
+  else setSymbol(s);
+}
+$('#searchIn').oninput = () => { renderSearch() };
+$('#searchEx').onchange = e => { searchEx = (e.target as HTMLSelectElement).value; store.set('searchEx', searchEx); searchQuote = ''; renderSearch() };
+$('#searchIn').onkeydown = e => {
+  const rows = $$('#searchList .sl'), i = rows.findIndex(r => r.classList.contains('sel'));
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const j = Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))); rows.forEach((r, k) => r.classList.toggle('sel', k === j)); rows[j]?.scrollIntoView({ block: 'nearest' }) }
+  if (e.key === 'Enter') { e.preventDefault(); const s = rows[i]?.dataset.s ?? $<HTMLInputElement>('#searchIn').value; if (s) pickSymbol(s) }
+};
+$('#searchList').onclick = e => { const s = (e.target as HTMLElement).closest<HTMLElement>('[data-s]')?.dataset.s; if (s) pickSymbol(s) };
+$('#searchTabs').onclick = e => { const q = (e.target as HTMLElement).dataset.q; if (q) { searchQuote = q; renderSearch() } };
+
+// ---------- interval dialog (type a number on the chart) ----------
+function openTfDialog(first: string) {
+  const i = $<HTMLInputElement>('#tfIn'); i.value = first;
+  $<HTMLDialogElement>('#tfDlg').showModal(); i.focus();
+  i.setSelectionRange(1, 1); tfHint();
+}
+const tfHint = () => { const t = parseTf($<HTMLInputElement>('#tfIn').value); $('#tfHint').textContent = t ? tfLabel(t) : 'Not a valid interval' };
+$('#tfIn').oninput = tfHint;
+$<HTMLFormElement>('#tfForm').addEventListener('submit', () => { const t = parseTf($<HTMLInputElement>('#tfIn').value); if (t) setTf(t) });
+
+// ---------- layout manager ----------
+function renderLayouts() {
+  $<HTMLInputElement>('#lyAuto').checked = st.autosave;
+  $('#lyT').innerHTML = '<tr><th>Layout</th><th>Charts</th><th>Symbols</th><th></th></tr>' + (Object.entries(st.layouts).map(([n, l]) =>
+    `<tr class="click${n === st.layoutName ? ' sel' : ''}" data-n="${esc(n)}"><td><b>${esc(n)}</b></td><td>${esc(l.mode)}</td><td class="muted">${esc([...new Set(l.panes.map(p => p.symbol))].join(', '))}</td>
+     <td><button type="button" class="x" data-a="rename">✎</button><button type="button" class="x" data-a="copy">⧉</button><button type="button" class="x" data-a="del">×</button></td></tr>`).join('') || '<tr><td class="muted" colspan="4">No saved layouts yet</td></tr>');
+}
+function saveAs(name: string) { st.layoutName = name; store.set('layoutName', name); st.layouts[name] = structuredClone(st.layout); store.set('layouts', st.layouts); renderLayouts(); syncUI(); toast(`Layout “${name}” saved`) }
+function loadLayout(name: string) {
+  const l = st.layouts[name]; if (!l) return;
+  st.layout = structuredClone({ ...DEFAULT_LAYOUT, ...l }); st.layoutName = name; store.set('layoutName', name);
+  st.maximized = false; buildLayout();
+}
+$('#layoutsBtn').onclick = () => { renderLayouts(); $<HTMLDialogElement>('#layoutsDlg').showModal() };
+$('#lySave').onclick = () => (st.layoutName === 'Unnamed' ? $('#lySaveAs').click() : saveAs(st.layoutName));
+$('#lySaveAs').onclick = () => { const n = prompt('Layout name', st.layoutName === 'Unnamed' ? '' : st.layoutName + ' copy')?.trim(); if (n) saveAs(n) };
+$('#lyNew').onclick = () => { st.layout = structuredClone(DEFAULT_LAYOUT); st.layoutName = 'Unnamed'; store.set('layoutName', 'Unnamed'); buildLayout(); renderLayouts() };
+$('#lyAuto').onchange = e => { st.autosave = (e.target as HTMLInputElement).checked; store.set('autosave', st.autosave) };
+$('#lyExport').onclick = () => {
+  const syms = new Set(st.layout.panes.map(p => p.symbol));
+  const blob = new Blob([JSON.stringify({ name: st.layoutName, layout: st.layout, drawings: Object.fromEntries([...syms].map(s => [s, st.drawings[s] ?? []])) }, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${st.layoutName}.layout.json`; a.click();
+};
+$('#lyImport').onchange = async e => {
+  const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text());
+    if (!j.layout?.panes) throw Error('Not a layout file');
+    for (const [s, d] of Object.entries(j.drawings ?? {})) st.drawings[s] = [...(st.drawings[s] ?? []), ...(d as Drawing[])];
+    store.set('drawings', st.drawings);
+    const n = `${j.name ?? 'Imported'} (imported)`; st.layouts[n] = j.layout; store.set('layouts', st.layouts); loadLayout(n); renderLayouts();
+  } catch (err) { toast((err as Error).message) }
+};
+$('#lyT').onclick = e => {
+  const el = e.target as HTMLElement, n = el.closest<HTMLElement>('[data-n]')?.dataset.n; if (!n) return;
+  if (el.dataset.a === 'del') { if (confirm(`Delete layout “${n}”? This can’t be undone.`)) { delete st.layouts[n]; store.set('layouts', st.layouts); if (st.layoutName === n) { st.layoutName = 'Unnamed'; store.set('layoutName', 'Unnamed'); syncUI() } renderLayouts() } return }
+  if (el.dataset.a === 'rename') { const m = prompt('New name', n)?.trim(); if (m && m !== n) { st.layouts[m] = st.layouts[n]; delete st.layouts[n]; if (st.layoutName === n) { st.layoutName = m; store.set('layoutName', m) } store.set('layouts', st.layouts); renderLayouts(); syncUI() } return }
+  if (el.dataset.a === 'copy') { st.layouts[`${n} copy`] = structuredClone(st.layouts[n]); store.set('layouts', st.layouts); renderLayouts(); return }
+  loadLayout(n); renderLayouts();
+};
+
+// ---------- side panel ----------
+function showSide(name: string) {
+  st.side = st.side === name ? '' : name; store.set('side', st.side);
+  $$('#rail [data-side]').forEach(b => b.classList.toggle('on', b.dataset.side === st.side));
+  $$('.side').forEach(s => s.classList.toggle('on', s.id === 's-' + st.side));
+  $('#body').classList.toggle('no-panel', !st.side);
+  if (st.side === 'screener') renderScreener();
+  if (st.side === 'journal') renderJournal();
+  domSync();
+}
+$('#rail').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) showSide(s) };
+$('#keysBtn').onclick = () => openKeys();
+
+function addWatch(s: string) { if (!st.watch.includes(s) && !isExpr(s)) { st.watch.push(s); store.set('watch', st.watch); connectTickers(); renderWatch(); toast(`${s} added to watchlist`) } }
+function renderWatch() {
+  $('#watchT').innerHTML = '<tr><th>Symbol</th><th>Last</th><th>Chg%</th><th></th></tr>' + st.watch.map(s => {
+    const t = tick24[s] ?? (lastPx[s] ? { c: lastPx[s], o: NaN } : undefined), ch = t && Number.isFinite(t.o) ? ((t.c - t.o) / t.o) * 100 : null;
+    const [ex, name] = s.includes(':') ? s.split(':') : ['', s];
+    return `<tr class="click${s === active()?.cfg.symbol ? ' sel' : ''}" data-sym="${esc(s)}"><td><b>${esc(name.replace(/_?USDT(\.P)?$/, '$1').replace(/_/g, '/'))}</b><span class="muted">${/_?USDT/.test(name) ? 'USDT' : ''}${ex ? ' · ' + esc(ex) : ''}</span></td>
+      <td>${t ? t.c.toFixed(calcPrec(t.c)) : '–'}</td><td class="${(ch ?? 0) >= 0 ? 'up' : 'dn'}">${ch == null ? '–' : ch.toFixed(2) + '%'}</td>
+      <td><button class="x" data-rm="${esc(s)}" title="Remove">×</button></td></tr>`;
+  }).join('');
+}
+$('#watchAdd').onclick = () => addWatch(active().cfg.symbol);
+$('#watchT').onclick = e => {
+  const el = e.target as HTMLElement, rm = el.dataset.rm;
+  if (rm) { st.watch = st.watch.filter(s => s !== rm); store.set('watch', st.watch); connectTickers(); renderWatch(); return }
+  const s = el.closest<HTMLElement>('[data-sym]')?.dataset.sym; if (s) setSymbol(s);
+};
+
+function renderAlerts() {
+  $('#alertT').innerHTML = '<tr><th>Symbol</th><th>Condition</th><th>Status</th><th></th></tr>' + st.alerts.map(a =>
+    `<tr><td>${esc(a.sym)}</td><td>${a.note ? esc(a.note) + ' ' : ''}${a.dir === 'up' ? 'Crossing ↑' : 'Crossing ↓'} ${a.drawingId != null ? '' : a.price}</td><td class="${a.on ? '' : 'muted'}">${a.on ? 'Active' : 'Triggered'}</td>
+     <td>${a.on ? '' : `<button class="x" data-re="${a.id}" title="Restart">↻</button>`}<button class="x" data-alert="${a.id}" title="Delete">×</button></td></tr>`).join('');
+  $('#alertLog').innerHTML = alertLog.slice(0, 30).map(esc).join('<br>') || '—';
+}
+$('#alertAdd').onclick = () => addAlert({ sym: active().cfg.symbol, price: +$<HTMLInputElement>('#alertPx').value });
+$('#alertT').onclick = e => {
+  const el = e.target as HTMLElement;
+  if (el.dataset.re) { const a = st.alerts.find(x => x.id === +el.dataset.re!); if (a) a.on = true }
+  if (el.dataset.alert) st.alerts = st.alerts.filter(a => a.id !== +el.dataset.alert!);
+  store.set('alerts', st.alerts); panes.forEach(p => p.tradeOverlay()); connectTickers(); renderAlerts();
+};
+
+// Object tree + data window
+let treeTab = 'tree';
+$('#treeTabs').onclick = e => {
+  const t = (e.target as HTMLElement).dataset.t; if (!t) return;
+  treeTab = t; $$('#treeTabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  $('#treeView').hidden = t !== 'tree'; $('#dataView').hidden = t !== 'data'; renderDataWindow();
+};
+function renderTree() {
+  const p = active(), l = p?.layer; if (!l) return;
+  const groups = new Map<string, Drawing[]>();
+  l.drawings.forEach(d => { const g = d.group ?? ''; groups.set(g, [...(groups.get(g) ?? []), d]) });
+  const row = (d: Drawing) => {
+    const i = l.drawings.indexOf(d), name = d.name ?? TOOL_MAP.get(d.type)?.name ?? d.type;
+    return `<tr class="click${l.selected.has(d) ? ' sel' : ''}" data-i="${i}"><td><span style="color:${esc(d.style.color)}">■</span> ${esc(name)}${d.style.text && !d.name ? ` <span class="muted">“${esc(String(d.style.text).slice(0, 18))}”</span>` : ''}${d.vis ? ' <span class="muted" title="Limited interval visibility">◔</span>' : ''}</td>
+     <td><button class="x" data-act="hide" title="Show/hide">${d.hidden ? '◌' : '👁'}</button><button class="x" data-act="lock" title="Lock">${d.locked ? '🔒' : '🔓'}</button><button class="x" data-act="ren" title="Rename">✎</button><button class="x" data-act="grp" title="Group">⊂</button><button class="x" data-act="del" title="Delete">×</button></td></tr>`;
+  };
+  $('#treeT').innerHTML = `<tr><td><b>${esc(p.cfg.symbol)}</b> <span class="muted">${esc(p.cfg.tf)} · ${esc(CHART_TYPES.find(t => t.id === p.cfg.type)?.name ?? '')}</span></td><td></td></tr>` +
+    p.ind.map(e => `<tr><td>ƒx ${esc(e.name)}</td><td><button class="x" data-ind="${esc(e.key)}" title="Remove">×</button></td></tr>`).join('') +
+    [...groups].map(([g, ds]) => (g ? `<tr><td class="muted">▾ ${esc(g)}</td><td><button class="x" data-ungroup="${esc(g)}" title="Ungroup">⊄</button></td></tr>` : '') + ds.map(row).join('')).join('') +
+    (l.drawings.length ? '' : '<tr><td class="muted">No drawings on this symbol</td><td></td></tr>');
+}
+$('#treeT').onclick = e => {
+  const el = e.target as HTMLElement, l = active().layer;
+  if (el.dataset.ind) { applyCfg(active(), { ind: active().cfg.ind.filter(k => k !== el.dataset.ind) }, 'remove indicator'); return }
+  if (el.dataset.ungroup) { l.drawings.forEach(d => { if (d.group === el.dataset.ungroup) delete d.group }); l.onChange(); return }
+  const row = el.closest<HTMLElement>('[data-i]'); if (!row) return;
+  const d = l.drawings[+row.dataset.i!];
+  switch (el.dataset.act) {
+    case 'del': return l.remove(d);
+    case 'hide': d.hidden = !d.hidden; break;
+    case 'lock': d.locked = !d.locked; break;
+    case 'ren': { const n = prompt('Name', d.name ?? TOOL_MAP.get(d.type)?.name)?.trim(); if (n) d.name = n; break }
+    case 'grp': { const g = prompt('Group name (applies to the selected drawings)', d.group ?? 'Group 1')?.trim(); if (g) (l.selected.size ? [...l.selected] : [d]).forEach(x => (x.group = g)); break }
+    default: l.select([d], e.ctrlKey); return;
+  }
+  l.onChange(); l.update();
+};
+function renderDataWindow() {
+  if (treeTab !== 'data' || st.side !== 'tree') return;
+  const p = active(); if (!p) return;
+  $('#dataT').innerHTML = `<tr><th colspan="2">${esc(p.cfg.symbol)} · ${esc(p.cfg.tf)}</th></tr>` + p.dataWindow().map(r => `<tr><td class="muted">${esc(r.name)}</td><td>${esc(r.value)}</td></tr>`).join('');
+}
+
+let screener: Ticker24[] | null = null, scrSort: keyof Ticker24 = 'qv';
+async function renderScreener() {
+  if (!screener) {
+    $('#scrT').innerHTML = '<tr><td class="muted">Loading…</td></tr>';
+    try { screener = (await fetch24h()).sort((a, b) => b.qv - a.qv).slice(0, 100) }
+    catch (e) { $('#scrT').innerHTML = `<tr><td class="dn">${esc((e as Error).message)}</td></tr>`; return }
+  }
+  const rows = [...screener].sort((a, b) => (scrSort === 's' ? a.s.localeCompare(b.s) : (b[scrSort] as number) - (a[scrSort] as number)));
+  $('#scrT').innerHTML = '<tr><th data-sort="s">Symbol</th><th data-sort="c">Price</th><th data-sort="ch">Chg%</th><th data-sort="qv">Vol $</th></tr>' +
+    rows.map(r => `<tr class="click" data-sym="${esc(r.s)}"><td>${esc(r.s)}</td><td>${r.c.toFixed(calcPrec(r.c))}</td><td class="${r.ch >= 0 ? 'up' : 'dn'}">${r.ch.toFixed(2)}%</td><td>${fmtVol(r.qv)}</td></tr>`).join('');
+}
+$('#scrT').onclick = e => {
+  const el = e.target as HTMLElement;
+  if (el.dataset.sort) { scrSort = el.dataset.sort as keyof Ticker24; renderScreener(); return }
+  const s = el.closest<HTMLElement>('[data-sym]')?.dataset.sym; if (s) setSymbol(s);
+};
+
+// ---------- order ticket & trading panel ----------
+const ticket = { side: 'buy' as Side, type: 'market' as OrderType };
+function submit(o: Parameters<typeof placeOrder>[1], px: number, p: ChartPane) {
+  const err = placeOrder(st.acct, o, px, p.vb().at(-1)?.time ?? Date.now() / 1000);
+  if (err) return toast(err, 5000);
+  saveAcct(); connectTickers(); panes.forEach(x => x.tradeOverlay()); renderTrading();
+  toast(o.type === 'market' ? 'Order filled (paper)' : 'Order placed (paper)');
+}
+function renderTicket() {
+  $$('#tSide button').forEach(b => b.classList.toggle('on', b.dataset.side === ticket.side));
+  $$('#tType button').forEach(b => b.classList.toggle('on', b.dataset.type === ticket.type));
+  $('#tPriceRow').style.display = ticket.type === 'market' ? 'none' : '';
+  const btn = $('#tSubmit');
+  btn.className = (ticket.side === 'buy' ? 'buyc' : 'sellc') + ' big-btn';
+  btn.textContent = `${ticket.side === 'buy' ? 'Buy' : 'Sell'} ${ticket.type === 'market' ? 'market' : ticket.type}`;
+  const qty = +$<HTMLInputElement>('#tQty').value, px = ticket.type === 'market' ? pxOf(active()?.cfg.symbol ?? '') : +$<HTMLInputElement>('#tPrice').value;
+  $('#tInfo').textContent = px && qty ? `Value ≈ ${(px * qty).toFixed(2)} USDT · fee ≈ ${(px * qty * 0.001).toFixed(2)}` : '';
+}
+$('#tSide').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) { ticket.side = s as Side; renderTicket() } };
+$('#tType').onclick = e => {
+  const t = (e.target as HTMLElement).dataset.type; if (!t) return;
+  ticket.type = t as OrderType;
+  const px = pxOf(active().cfg.symbol);
+  if (t !== 'market' && px) $<HTMLInputElement>('#tPrice').value = px.toFixed(active().prec);
+  renderTicket();
+};
+$('#s-trade').addEventListener('input', renderTicket);
+$('#tSubmit').onclick = () => {
+  const p = active(), sym = p.cfg.symbol, px = pxOf(sym);
+  if (!px) return toast('No price yet');
+  if (isExpr(sym)) return toast('Spread symbols cannot be traded');
+  const num = (id: string) => +$<HTMLInputElement>(id).value;
+  submit({
+    sym, side: ticket.side, type: ticket.type, qty: num('#tQty'),
+    price: ticket.type === 'market' ? undefined : num('#tPrice'),
+    tp: $<HTMLInputElement>('#tTpOn').checked ? num('#tTp') : undefined,
+    sl: $<HTMLInputElement>('#tSlOn').checked ? num('#tSl') : undefined,
+  }, px, p);
+};
+$('#resetAcct').onclick = () => { if (confirm('Reset paper account to 10,000 USDT?')) { st.acct = newAccount(); saveAcct(); panes.forEach(p => p.tradeOverlay()); renderTrading() } };
+function renderTrading() {
+  const a = st.acct, { equity: eq, unrealized } = equity(a, lastPx);
+  $('#acctLine').innerHTML = `Paper · Equity <b>${eq.toFixed(2)}</b> · Balance ${a.cash.toFixed(2)} · uPnL <span class="${unrealized >= 0 ? 'up' : 'dn'}">${unrealized.toFixed(2)}</span>`;
+  const f = (x: number) => x.toFixed(calcPrec(x));
+  $('#posT').innerHTML = '<tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg price</th><th>Last</th><th>Unrealized PnL</th><th></th></tr>' + (Object.entries(a.pos).map(([s, p]) => {
+    const px = lastPx[s], u = px ? (px - p.avg) * p.qty : 0;
+    return `<tr><td>${esc(s)}</td><td class="${p.qty > 0 ? 'up' : 'dn'}">${p.qty > 0 ? 'Long' : 'Short'}</td><td>${Math.abs(p.qty)}</td><td>${f(p.avg)}</td><td>${px ? f(px) : '–'}</td>
+      <td class="${u >= 0 ? 'up' : 'dn'}">${u.toFixed(2)} (${((u / Math.abs(p.avg * p.qty)) * 100).toFixed(2)}%)</td><td><button class="x" data-close="${esc(s)}">Close</button></td></tr>`;
+  }).join('') || '<tr><td class="muted" colspan="7">No open positions</td></tr>');
+  $('#ordT').innerHTML = '<tr><th>Symbol</th><th>Type</th><th>Side</th><th>Qty</th><th>Price</th><th></th></tr>' + (a.orders.map(o =>
+    `<tr><td>${esc(o.sym)}</td><td>${o.reduceOnly ? (o.type === 'limit' ? 'Take profit' : 'Stop loss') : o.type}</td><td class="${o.side === 'buy' ? 'up' : 'dn'}">${o.side}</td><td>${o.qty}</td><td>${f(o.price!)}</td>
+     <td><button class="x" data-cancel="${o.id}">Cancel</button></td></tr>`).join('') || '<tr><td class="muted" colspan="6">No working orders</td></tr>');
+  $('#histT').innerHTML = '<tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Price</th><th>Fee</th><th>PnL</th></tr>' + (a.fills.slice(0, 100).map(x =>
+    `<tr><td>${new Date(x.ts * 1000).toLocaleString()}</td><td>${esc(x.sym)}</td><td class="${x.side === 'buy' ? 'up' : 'dn'}">${x.side}</td><td>${x.orderType}</td><td>${x.qty}</td><td>${f(x.px)}</td><td>${x.fee.toFixed(2)}</td>
+     <td class="${x.realized >= 0 ? 'up' : 'dn'}">${x.realized ? x.realized.toFixed(2) : ''}</td></tr>`).join('') || '<tr><td class="muted" colspan="8">No fills yet</td></tr>');
+}
+function showBottom(tab: string) {
+  $$('#bTabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  $$('.bpane').forEach(p => p.classList.toggle('on', p.id === 'b-' + tab));
+  $('#bottom').classList.remove('collapsed');
+  if ((tab === 'pine' || tab === 'tester') && $('#bottom').offsetHeight < 300) setBottomHeight(360);
+  if (tab === 'tester') renderPineResults(active());
+}
+function setBottomHeight(h: number) { const v = Math.max(80, Math.min(innerHeight - 200, h)); $('#bottom').style.setProperty('--bottom-h', v + 'px'); store.set('bottomH', v) }
+setBottomHeight(store.get('bottomH', 220));
+$('#bResize').onmousedown = e => {
+  e.preventDefault();
+  const y0 = e.clientY, h0 = $('#bottom').offsetHeight;
+  const move = (m: MouseEvent) => setBottomHeight(h0 + y0 - m.clientY);
+  const up = () => { removeEventListener('mousemove', move); removeEventListener('mouseup', up) };
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
+};
+$('#bottom').onclick = e => {
+  const el = e.target as HTMLElement;
+  if (el.dataset.tab) showBottom(el.dataset.tab);
+  if (el.id === 'bToggle') { $('#bottom').classList.toggle('collapsed'); el.textContent = $('#bottom').classList.contains('collapsed') ? '▴' : '▾' }
+  const s = el.dataset.close;
+  if (s) { const px = pxOf(s); if (px) closePosition(st.acct, s, px, Date.now() / 1000) }
+  if (el.dataset.cancel) cancelOrder(st.acct, +el.dataset.cancel);
+  if (s || el.dataset.cancel) { saveAcct(); panes.forEach(p => p.tradeOverlay()); renderTrading() }
+};
+
+// ---------- chart settings dialog ----------
+let settingsTab = 'symbol';
+function openSettings(tab = settingsTab) { settingsTab = tab; renderSettings(); $<HTMLDialogElement>('#settingsDlg').showModal() }
+function renderSettings() {
+  const css = getComputedStyle(document.documentElement), v = (n: string) => css.getPropertyValue(n).trim();
+  const fallback: Partial<Record<keyof Settings, string>> = { bgColor: v('--bg'), bgColor2: v('--panel'), gridColor: v('--grid'), scaleTextColor: v('--muted'), separatorColor: v('--line') };
+  $('#settingsTabs').innerHTML = SETTINGS_TABS.map(t => `<button type="button" data-tab="${t.id}" class="${t.id === settingsTab ? 'on' : ''}">${esc(t.name)}</button>`).join('');
+  $('#settingsForm').innerHTML = renderSettingsForm(st.settings, settingsTab, k => fallback[k] ?? '#000000');
+}
+function applySettings(patch: Partial<Settings>) {
+  Object.assign(st.settings, patch);
+  store.set('settings', st.settings);
+  document.documentElement.dataset.theme = st.settings.theme;
+  panes.forEach(p => p.build());
+  syncUI();
+}
+$('#settingsTabs').onclick = e => { const t = (e.target as HTMLElement).dataset.tab; if (t) { settingsTab = t; renderSettings() } };
+$('#settingsForm').oninput = e => { applySettings(readSettingsInput(e.target as HTMLInputElement)); if ((e.target as HTMLElement).dataset.k === 'theme') renderSettings() };
+$('#settingsBtn').onclick = () => openSettings();
+$('#settingsReset').onclick = e => { e.preventDefault(); if (confirm('Reset all chart settings to defaults?')) { applySettings({ ...DEFAULT_SETTINGS }); renderSettings() } };
+
+// ---------- keyboard ----------
+const KEYS: [string, string][] = [
+  ['Type letters', 'Symbol search'], ['Type a number or ,', 'Change interval'], ['/', 'Indicators'], ['Ctrl+K', 'Symbol search'],
+  ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'], ['Ctrl+S', 'Save layout'], ['.', 'Load layout'], ['Alt+R', 'Reset chart'], ['Alt+G', 'Go to date'],
+  ['Alt+I / Alt+L / Alt+P', 'Invert / Log / Percent scale'], ['Alt+A', 'Add alert'], ['Alt+W', 'Add to watchlist'], ['Alt+S', 'Copy chart image'],
+  ['Ctrl+Alt+S / Ctrl+Shift+S', 'Download / copy snapshot'], ['Alt+T / H / J / V / C / F', 'Trend line / Horizontal line / ray / Vertical / Cross line / Fib'],
+  ['Alt+Shift+R', 'Rectangle'], ['Shift+click', 'Measure'], ['Ctrl+Alt+H', 'Hide all drawings'], ['Ctrl+C / Ctrl+V', 'Copy / paste drawings'],
+  ['Ctrl+drag', 'Clone drawing'], ['Shift+drag', 'Move along one axis'], ['Ctrl (while drawing)', 'Invert magnet'], ['Arrow keys', 'Nudge selected drawing'],
+  ['Del / Backspace', 'Remove selected drawing'], ['Esc', 'Cursor / cancel'], ['← / →', 'Scroll one bar'], ['Ctrl+↑ / Ctrl+↓', 'Zoom in / out'],
+  ['Alt+Enter', 'Maximize active chart'], ['Tab / Shift+Tab', 'Next / previous chart'], ['Shift+↓ / Shift+→', 'Replay: play-pause / step'], ['Ctrl+/', 'This list'],
+];
+function openKeys() { $('#keysT').innerHTML = KEYS.map(([k, v]) => `<tr><td><kbd>${esc(k)}</kbd></td><td>${esc(v)}</td></tr>`).join(''); $<HTMLDialogElement>('#keysDlg').showModal() }
+document.addEventListener('keydown', e => {
+  if ((e.target as HTMLElement).matches('input,textarea,select') || document.querySelector('dialog[open]')) return;
+  const p = active(), l = p?.layer; if (!p) return;
+  const k = e.key, ctrl = e.ctrlKey || e.metaKey;
+  const combo = `${ctrl ? 'Ctrl+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey && (e.altKey || ctrl) ? 'Shift+' : ''}${k.length === 1 ? k.toUpperCase() : k}`;
+  const tool = [...TOOL_MAP.values()].find(t => t.key === combo);
+  const act = (fn: () => void) => { e.preventDefault(); fn() };
+  if (tool) return act(() => setTool(drawHost, tool.id));
+  switch (combo) {
+    case 'Escape': return act(() => { setTool(drawHost, 'cursor'); l.select([]); if (p.replay?.picking) { p.exitReplay(); syncUI() } });
+    case 'Ctrl+Z': return act(() => history.undo());
+    case 'Ctrl+Y': case 'Ctrl+Shift+Z': return act(() => history.redo());
+    case 'Ctrl+C': return l.selected.size ? act(() => copyDrawings(l)) : undefined;
+    case 'Ctrl+V': return act(() => pasteDrawings(l));
+    case 'Ctrl+S': return act(() => $('#lySave').click());
+    case 'Ctrl+K': return act(() => openSearch(''));
+    case 'Ctrl+/': return act(openKeys);
+    case 'Ctrl+Alt+H': return act(() => drawHost.hide('drawings'));
+    case 'Ctrl+Alt+S': return act(() => downloadShot(p.chart.takeScreenshot(), p));
+    case 'Ctrl+Shift+S': case 'Alt+S': return act(() => copyShot(p.chart.takeScreenshot()));
+    case 'Alt+R': return act(() => p.resetView());
+    case 'Alt+G': return act(openGoto);
+    case 'Alt+I': return act(() => applySettings({ invert: !st.settings.invert }));
+    case 'Alt+L': return act(() => setScale('log'));
+    case 'Alt+P': return act(() => setScale('percent'));
+    case 'Alt+A': return act(() => $('#alertBtn').click());
+    case 'Alt+W': return act(() => addWatch(p.cfg.symbol));
+    case 'Alt+Enter': return act(toggleMaximize);
+    case 'Tab': case 'Shift+Tab': return act(() => { if (panes.length > 1) hooks.onActivate(panes[(st.layout.active + (e.shiftKey ? panes.length - 1 : 1)) % panes.length]) });
+    case 'Shift+ArrowDown': return p.replay ? act(togglePlay) : undefined;
+    case 'Shift+ArrowRight': return p.replay ? act(() => p.stepReplay()) : undefined;
+    case 'Delete': case 'Backspace': return l.selected.size ? act(() => l.remove(...l.selected)) : undefined;
+    case 'Ctrl+ArrowUp': case 'Ctrl+ArrowDown': return act(() => { const ts = p.chart.timeScale(), r = ts.getVisibleLogicalRange(); if (r) { const w = (r.to - r.from) * (k === 'ArrowUp' ? 0.2 : -0.25); ts.setVisibleLogicalRange({ from: r.from + w, to: r.to }) } });
+  }
+  if (k.startsWith('Arrow') && !ctrl && !e.altKey) {
+    if (l.selected.size) return act(() => l.nudge(k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : 0, k === 'ArrowUp' ? -1 : k === 'ArrowDown' ? 1 : 0));
+    if (k === 'ArrowLeft' || k === 'ArrowRight') return act(() => p.chart.timeScale().scrollToPosition(p.chart.timeScale().scrollPosition() + (k === 'ArrowLeft' ? -1 : 1), false));
+  }
+  if (ctrl || e.altKey) return;
+  if (k === '/') return act(() => indicatorsMenu($('#indBtn')));
+  if (k === '.') return act(() => $('#layoutsBtn').click());
+  if (/^[0-9,]$/.test(k)) return act(() => openTfDialog(k === ',' ? '' : k));
+  if (/^[a-zA-Z]$/.test(k)) return act(() => openSearch(k.toUpperCase()));
+});
+
+initPineUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
+initTesterUI({ paper: (p, side, qty) => { const px = pxOf(p.cfg.symbol); if (px) { journalSource('Forward test'); submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p); journalSource('') } }, watchlist: () => st.watch });
+initJournal({
+  tfOf: sym => panes.find(p => p.cfg.symbol === sym)?.cfg.tf,
+  bracketOf: sym => {
+    const ex = st.acct.orders.filter(o => o.sym === sym && o.reduceOnly);
+    return { stop: ex.find(o => o.type === 'stop')?.price, target: ex.find(o => o.type === 'limit')?.price };
+  },
+  shot: () => active()?.chart?.takeScreenshot() ?? null,
+  async show(sym, t) {
+    if (active().cfg.symbol !== sym) setSymbol(sym);
+    for (let i = 0; i < 50 && !(active().cfg.symbol === sym && active().vb().length); i++) await new Promise(r => setTimeout(r, 100));
+    active().goTo(t);
+  },
+});
+journalSync(st.acct);
+initDom({
+  symbol: () => active()?.cfg.symbol ?? '',
+  prec: () => active()?.prec ?? 2,
+  orders: sym => st.acct.orders.filter(o => o.sym === sym && o.price != null).map(o => ({ side: o.side, price: o.price!, qty: o.qty })),
+  limit(side, price) {
+    const p = active(), last = pxOf(p.cfg.symbol), qty = +$<HTMLInputElement>('#tQty').value;
+    if (!last) return toast('No price yet');
+    // Below the market a buy rests as a limit, above it as a stop (and the reverse for sells).
+    const type = (side === 'buy') === (price < last) ? 'limit' : 'stop';
+    if (!st.settings.instantOrders && !confirm(`${side.toUpperCase()} ${type} ${qty} ${p.cfg.symbol} @ ${price} (paper)?`)) return;
+    submit({ sym: p.cfg.symbol, side, type, qty, price }, last, p);
+  },
+});
+domSync();
+
+// ---------- boot ----------
+document.documentElement.dataset.theme = st.settings.theme;
+const side = st.side; st.side = ''; if (side) showSide(side); else $('#body').classList.add('no-panel');
+buildLayout();
+renderAlerts();
+history.onChange();
+
+if (import.meta.env.DEV) Object.assign(window, { __ct: { panes: () => panes, st, history } }); // debugging handle, dev server only
