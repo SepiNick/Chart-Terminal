@@ -53,7 +53,8 @@ function serveStatic(c: Ctx): boolean {
   if (!p || !existsSync(file) || statSync(file).isDirectory()) file = join(DIST, 'index.html');
   if (!existsSync(file)) return false;
   const type = MIME[extname(file)] ?? 'application/octet-stream';
-  c.res.writeHead(200, { 'content-type': type, 'cache-control': file.endsWith('index.html') || file.endsWith('sw.js') ? 'no-cache' : 'public, max-age=31536000, immutable', ...SECURITY_HEADERS });
+  // Only Vite's content-hashed files under /assets are immutable; the manifest, icons and sw.js must revalidate.
+  c.res.writeHead(200, { 'content-type': type, 'cache-control': /[\/]assets[\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache', ...SECURITY_HEADERS });
   createReadStream(file).pipe(c.res);
   return true;
 }
