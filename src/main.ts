@@ -1,5 +1,5 @@
 import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from './chart.ts';
-import { TFS, streamTickers, fetch24h, fetchSymbols, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type Ticker24, type RemoteMarket } from './data.ts';
+import { TFS, validTf, streamTickers, fetch24h, fetchSymbols, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type Ticker24, type RemoteMarket } from './data.ts';
 import { INDICATORS } from './indicators.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { TOOL_MAP } from './tools/index.ts';
@@ -333,7 +333,7 @@ function syncUI() {
   });
   $('#symBtn').textContent = p.cfg.symbol;
   const tfs = [...new Set([...st.favTfs, p.cfg.tf])].sort((a, b) => tfSeconds(a) - tfSeconds(b));
-  $('#tfs').innerHTML = tfs.map(t => `<button data-tf="${t}" class="${t === p.cfg.tf ? 'on' : ''}">${t}</button>`).join('');
+  $('#tfs').innerHTML = tfs.filter(validTf).map(t => `<button data-tf="${esc(t)}" class="${t === p.cfg.tf ? 'on' : ''}">${esc(t)}</button>`).join('');
   $('#typeBtn').textContent = CHART_TYPES.find(t => t.id === p.cfg.type)?.name ?? p.cfg.type;
   $('#layoutBtn').textContent = `⊞ ${st.layout.mode}`;
   $('#layoutName').textContent = st.layoutName;
