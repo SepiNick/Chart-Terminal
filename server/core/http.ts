@@ -54,7 +54,7 @@ function serveStatic(c: Ctx): boolean {
   if (!existsSync(file)) return false;
   const type = MIME[extname(file)] ?? 'application/octet-stream';
   // Only Vite's content-hashed files under /assets are immutable; the manifest, icons and sw.js must revalidate.
-  c.res.writeHead(200, { 'content-type': type, 'cache-control': /[\/]assets[\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache', ...SECURITY_HEADERS });
+  c.res.writeHead(200, { 'content-type': type, 'cache-control': /[\\/]assets[\\/]/.test(file) ? 'public, max-age=31536000, immutable' : 'no-cache', ...SECURITY_HEADERS });
   createReadStream(file).pipe(c.res);
   return true;
 }
