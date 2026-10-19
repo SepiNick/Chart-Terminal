@@ -5,7 +5,7 @@
 //   POST /api/auth/logout
 //   POST /api/auth/password { current, password }  → signs out every device
 //   GET  /api/auth/sessions → [{ created, last_seen, agent, ip }]
-import { HttpError, bad, route } from './core/http.ts';
+import { HttpError, bad, isLoopbackHost, route } from './core/http.ts';
 import { checkPassword, clearCookie, clientIp, createSession, endSession, hasPassword, listSessions, loginBlocked, loginFailed, loginOk, sessionCookie, sessionOf, setPassword } from './core/auth.ts';
 
 const isLocal = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
@@ -14,7 +14,8 @@ const pw = (b: unknown, k = 'password') => { const v = (b as Record<string, unkn
 route('GET', '/api/auth/status', c => ({ setup: !hasPassword(), loggedIn: !!sessionOf(c.req) }), { public: true });
 route('POST', '/api/auth/setup', c => {
   if (hasPassword()) throw new HttpError(409, 'Already set up');
-  if (!isLocal(clientIp(c.req))) throw new HttpError(403, 'Set the first password from the computer running the server');
+  // Loopback address AND loopback Host name: a rebinding page can't claim the server before the owner does.
+  if (!isLocal(clientIp(c.req)) || !isLoopbackHost(c.req)) throw new HttpError(403, 'Set the first password from the computer running the server');
   setPassword(pw(c.body));
   c.res.setHeader('set-cookie', sessionCookie(createSession(c.req), c.secure));
   return { ok: true };

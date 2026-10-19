@@ -5,6 +5,7 @@ import type { Duplex } from 'node:stream';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { networkInterfaces } from 'node:os';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { sessionOf } from './auth.ts';
 
@@ -61,6 +62,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, secure: 
   const url = new URL(req.url ?? '/', 'http://local');
   const c: Ctx = { req, res, url, params: {}, body: undefined, secure, session: null };
   try {
+    if (!allowedHost(req)) throw new HttpError(421, 'Unknown host');
     const r = routes.find(x => x.method === req.method && x.re.test(url.pathname));
     if (!r) {
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'Not found');
@@ -91,6 +93,28 @@ export function sameOrigin(req: IncomingMessage) {
   try { return new URL(o).host === req.headers.host } catch { return false }
 }
 
+/**
+ * DNS-rebinding guard: a hostile page can point its own domain at 127.0.0.1 and then talk to us "same-origin".
+ * Only accept Host names we actually serve: loopback names, this machine's own IPs (LAN access), and names listed in
+ * CT_ALLOWED_HOSTS (comma-separated, e.g. the VPS domain later).
+ */
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+let ownIps = new Set<string>(), ownIpsAt = 0;
+function machineIps() {
+  if (Date.now() - ownIpsAt > 60_000) {   // interfaces change (Wi-Fi reconnects); refresh at most once a minute
+    ownIps = new Set(Object.values(networkInterfaces()).flat().filter(Boolean).map(i => (i!.family === 'IPv6' ? `[${i!.address}]` : i!.address)));
+    ownIpsAt = Date.now();
+  }
+  return ownIps;
+}
+const extraHosts = () => new Set((process.env.CT_ALLOWED_HOSTS ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+export const hostName = (req: IncomingMessage) => String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+export const isLoopbackHost = (req: IncomingMessage) => LOOPBACK.has(hostName(req));
+export function allowedHost(req: IncomingMessage) {
+  const h = hostName(req);
+  return LOOPBACK.has(h) || machineIps().has(h) || extraHosts().has(h);
+}
+
 // ---------- WebSocket hub: one socket per client, typed messages ----------
 export interface WsClient { ws: WebSocket; session: string; send: (msg: unknown) => void; data: Map<string, unknown> }
 type WsHandler = (client: WsClient, msg: Record<string, unknown>) => void;
@@ -105,7 +129,7 @@ export function broadcast(msg: unknown, except?: WsClient) { const s = JSON.stri
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 export function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-  if (!req.url?.startsWith('/ws') || !sameOrigin(req)) { socket.destroy(); return }
+  if (!req.url?.startsWith('/ws') || !allowedHost(req) || !sameOrigin(req)) { socket.destroy(); return }
   const session = sessionOf(req);
   if (!session) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return }
   wss.handleUpgrade(req, socket, head, ws => {
