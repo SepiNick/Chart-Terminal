@@ -1,0 +1,29 @@
+// NinjaTrader enums as string-valued frozen objects (member name = value, so Print(State) shows "Historical").
+import { en } from './helpers.ts';
+
+export const State = en('State', 'SetDefaults', 'Configure', 'Active', 'DataLoaded', 'Historical', 'Transition', 'Realtime', 'Terminated', 'Finalized', 'Undefined');
+export const Calculate = en('Calculate', 'OnBarClose', 'OnEachTick', 'OnPriceChange');
+export const PlotStyle = en('PlotStyle', 'Bar', 'Block', 'Cross', 'Dot', 'Hash', 'HLine', 'Line', 'PriceBox', 'Square', 'TriangleDown', 'TriangleLeft', 'TriangleRight', 'TriangleUp');
+export const MarketPosition = en('MarketPosition', 'Flat', 'Long', 'Short');
+export const OrderAction = en('OrderAction', 'Buy', 'BuyToCover', 'Sell', 'SellShort');
+export const OrderType = en('OrderType', 'Limit', 'Market', 'MIT', 'StopLimit', 'StopMarket', 'Unknown');
+export const OrderState = en('OrderState', 'Accepted', 'Cancelled', 'CancelPending', 'CancelSubmitted', 'ChangePending', 'ChangeSubmitted', 'Filled', 'Initialized', 'PartFilled', 'Rejected', 'Submitted', 'TriggerPending', 'Unknown', 'Working');
+export const CalculationMode = en('CalculationMode', 'Currency', 'Percent', 'Pips', 'Price', 'Ticks');
+export const EntryHandling = en('EntryHandling', 'AllEntries', 'UniqueEntries');
+export const ScaleJustification = en('ScaleJustification', 'Left', 'Right', 'Overlay');
+export const TextPosition = en('TextPosition', 'BottomLeft', 'BottomRight', 'Center', 'TopLeft', 'TopRight');
+export const TextAlignment = en('TextAlignment', 'Left', 'Right', 'Center', 'Justify');
+export const MaximumBarsLookBack = en('MaximumBarsLookBack', 'TwoHundredFiftySix', 'Infinite');
+export const BarsPeriodType = en('BarsPeriodType', 'Tick', 'Volume', 'Range', 'Second', 'Minute', 'Day', 'Week', 'Month', 'Year', 'HeikenAshi', 'Kagi', 'LineBreak', 'PointAndFigure', 'Renko');
+export const MarketDataType = en('MarketDataType', 'Ask', 'Bid', 'Last');
+export const PerformanceUnit = en('PerformanceUnit', 'Currency', 'Percent', 'Pips', 'Points', 'Ticks');
+export const TimeInForce = en('TimeInForce', 'Day', 'Gtc', 'Gtd');
+export const StartBehavior = en('StartBehavior', 'AdoptAccountPosition', 'ImmediatelySubmit', 'ImmediatelySubmitSynchronizeAccount', 'WaitUntilFlat', 'WaitUntilFlatSynchronizeAccount');
+export const RealtimeErrorHandling = en('RealtimeErrorHandling', 'IgnoreAllErrors', 'StopCancelClose', 'StopCancelCloseIgnoreRejects');
+export const StopTargetHandling = en('StopTargetHandling', 'ByStrategyPosition', 'PerEntryExecution');
+export const OrderFillResolution = en('OrderFillResolution', 'Standard', 'High');
+export const LogLevel = en('LogLevel', 'Information', 'Warning', 'Error', 'Alert');
+export const Priority = en('Priority', 'High', 'Medium', 'Low');
+export const DeviationType = en('DeviationType', 'Percent', 'Points');
+export const PivotRange = en('PivotRange', 'Daily', 'Weekly', 'Monthly');
+export const HLCCalculationMode = en('HLCCalculationMode', 'CalcFromIntradayData', 'DailyBars', 'UserDefinedValues');

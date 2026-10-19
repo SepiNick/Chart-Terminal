@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chart Terminal</title>
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<header id="top">
+  <button id="symBtn" class="sym" title="Symbol search (start typing on the chart)"></button>
+  <button id="cmpBtn" title="Compare or add symbol">⊕</button>
+  <span class="sep"></span>
+  <div id="tfs" class="seg"></div>
+  <button id="tfMore" title="All intervals">▾</button>
+  <span class="sep"></span>
+  <button id="typeBtn" title="Chart type"></button>
+  <button id="indBtn" title="Indicators (/)">ƒx Indicators</button>
+  <button id="tplBtn" title="Indicator & chart templates">▤</button>
+  <button id="alertBtn" title="Create alert (Alt+A)">⏰ Alert</button>
+  <button id="replayBtn" title="Bar replay">⏪ Replay</button>
+  <button id="ofBtn" title="Footprint, order flow and liquidity heatmap">▦ Order flow</button>
+  <span class="sep"></span>
+  <button id="undoBtn" title="Undo (Ctrl+Z)">↶</button>
+  <button id="redoBtn" title="Redo (Ctrl+Y)">↷</button>
+  <span class="grow"></span>
+  <button id="layoutBtn" title="Chart layout">⊞</button>
+  <button id="syncBtn" title="Sync across charts">🔗</button>
+  <button id="layoutsBtn" title="Save / load layouts"><span id="layoutName">Unnamed</span> ▾</button>
+  <button id="settingsBtn" title="Chart settings">⚙</button>
+  <button id="fullBtn" title="Fullscreen">⛶</button>
+  <button id="shotBtn" title="Snapshot">📷</button>
+  <button id="themeBtn" title="Theme">◐</button>
+</header>
+<div id="replayBar">
+  <button id="rpSelect" title="Select bar">✂ Select bar</button>
+  <input type="datetime-local" id="rpDate" title="Start from date">
+  <button id="rpRandom" title="Random bar">🎲</button>
+  <button id="rpFirst" title="First available date">⇤</button>
+  <span class="sep"></span>
+  <button id="rpBack" title="Step back">⏮</button>
+  <button id="rpPlay" title="Play / pause (Shift+↓)">▶</button>
+  <button id="rpStep" title="Step forward (Shift+→)">⏭</button>
+  <select id="rpSpeed" title="Speed"><option value="10000">10s</option><option value="3000">3s</option><option value="1000" selected>1s</option><option value="500">0.5s</option><option value="300">0.3s</option><option value="100">0.1s</option></select>
+  <span class="grow"></span>
+  <button id="rpExit">Jump to real-time ✕</button>
+</div>
+<main id="body">
+  <nav id="tools"></nav>
+  <section id="center">
+    <div id="favBar"></div>
+    <div id="grid"></div>
+    <div id="bottomBar">
+      <div class="seg" id="ranges"></div>
+      <button id="gotoBtn" title="Go to date (Alt+G)">📅</button>
+      <span class="grow"></span>
+      <span id="clock" class="muted" title="Timezone (change in Chart settings › Symbol)"></span>
+      <span class="sep"></span>
+      <button id="pctBtn" title="Percent scale (Alt+P)">%</button>
+      <button id="logBtn" title="Log scale (Alt+L)">log</button>
+      <button id="autoBtn" title="Auto scale">auto</button>
+    </div>
+    <div id="bottom">
+      <div id="bResize" title="Drag to resize"></div>
+      <div class="tabs" id="bTabs">
+        <button data-tab="pine">Pine Editor</button><button data-tab="tester">Strategy Tester</button>
+        <button data-tab="positions" class="on">Positions</button><button data-tab="orders">Orders</button><button data-tab="history">History</button>
+        <span class="grow"></span><span id="acctLine" class="muted"></span><button id="bToggle" class="x" title="Collapse">▾</button>
+      </div>
+      <div class="bpane on" id="b-positions"><table id="posT"></table></div>
+      <div class="bpane" id="b-orders"><table id="ordT"></table></div>
+      <div class="bpane" id="b-history"><table id="histT"></table></div>
+      <div class="bpane" id="b-pine">
+        <div class="row pine-bar">
+          <button id="pnScripts" title="Open, create or install scripts">📄 <span id="pnName">Untitled</span> ▾</button>
+          <span id="pnStatus" class="muted"></span><span class="grow"></span>
+          <label class="btn" title="Install .pine / .mq4 / .mq5 / .mqh / .cs (NinjaScript) files — several at once">⤓ Install<input type="file" id="pnImport" accept=".pine,.txt,.pinescript,.mq4,.mq5,.mqh,.cs" multiple hidden></label>
+          <button id="pnExport" title="Download as .pine">⤒ Export</button>
+          <button id="pnSave" title="Save (Ctrl+S)">Save</button>
+          <button id="pnAdd" class="on">Add to chart</button>
+        </div>
+        <div class="pine-main"><div id="pnEditor"></div><div id="pnConsole"></div></div>
+      </div>
+      <div class="bpane" id="b-tester">
+        <div class="row pine-bar"><b id="tsTitle">No strategy on the chart</b>
+          <div class="tabs" id="tsTabs"><button data-ts="overview">Overview</button><button data-ts="perf">Performance</button><button data-ts="trades">List of trades</button><button data-ts="props">Properties</button><button data-ts="opt">Optimize</button><button data-ts="wfa">Walk-forward</button><button data-ts="mc">Monte Carlo</button><button data-ts="port">Portfolio</button><button data-ts="fwd">Forward test</button></div>
+          <span class="grow"></span><button id="tsNoCode" title="Build a strategy without code">＋ No-code</button><button id="tsExport" title="Download the report and trade list as CSV">⤒ CSV</button></div>
+        <div class="tspane" id="ts-overview"><div class="tester"><div id="tsMetrics"></div><div id="tsEquity"></div></div></div>
+        <div class="tspane" id="ts-perf"><table id="tsPerf"></table></div>
+        <div class="tspane" id="ts-trades"><table id="tsTrades"></table></div>
+        <div class="tspane" id="ts-props"><table id="tsProps"></table></div>
+        <div class="tspane" id="ts-opt"><div id="tsOptForm"></div><div id="tsOptOut"></div></div>
+        <div class="tspane" id="ts-wfa"><div id="tsWfaForm"></div><div id="tsWfaOut"></div></div>
+        <div class="tspane" id="ts-mc"><div id="tsMcForm"></div><div id="tsMcOut"></div></div>
+        <div class="tspane" id="ts-port"><div id="tsPortForm"></div><div id="tsPortOut"></div></div>
+        <div class="tspane" id="ts-fwd"></div>
+      </div>
+    </div>
+  </section>
+  <aside id="panel">
+    <div class="side on" id="s-watch">
+      <h3>Watchlist <button id="watchAdd" class="x" title="Add current symbol (Alt+W)">＋</button></h3>
+      <table id="watchT"></table>
+    </div>
+    <div class="side" id="s-alerts">
+      <h3>Alerts</h3>
+      <div class="row"><input id="alertPx" type="number" step="any" placeholder="Price"><button id="alertAdd">Add</button></div>
+      <table id="alertT"></table>
+      <h3>Log</h3><div id="alertLog" class="muted"></div>
+    </div>
+    <div class="side" id="s-trade">
+      <h3>Order · <span id="tSym"></span> <span class="muted">(paper)</span></h3>
+      <div class="seg" id="tSide"><button data-side="buy" class="on buyc">Buy</button><button data-side="sell" class="sellc">Sell</button></div>
+      <div class="seg" id="tType"><button data-type="market" class="on">Market</button><button data-type="limit">Limit</button><button data-type="stop">Stop</button></div>
+      <label class="field" id="tPriceRow">Price <input id="tPrice" type="number" step="any"></label>
+      <label class="field">Quantity <input id="tQty" type="number" step="any" min="0" value="0.01"></label>
+      <label class="field"><span><input type="checkbox" id="tTpOn"> Take profit</span><input id="tTp" type="number" step="any"></label>
+      <label class="field"><span><input type="checkbox" id="tSlOn"> Stop loss</span><input id="tSl" type="number" step="any"></label>
+      <div id="tInfo" class="muted"></div>
+      <button id="tSubmit" class="buyc big-btn">Buy</button>
+      <button id="resetAcct" class="x">Reset paper account</button>
+    </div>
+    <div class="side" id="s-tree">
+      <div class="tabs" id="treeTabs"><button data-t="tree" class="on">Object tree</button><button data-t="data">Data window</button></div>
+      <div id="treeView"><table id="treeT"></table></div>
+      <div id="dataView" hidden><table id="dataT"></table></div>
+    </div>
+    <div class="side" id="s-screener">
+      <h3>Screener <span class="muted">USDT · top 100 by volume</span></h3>
+      <table id="scrT"></table>
+    </div>
+    <div class="side" id="s-dom">
+      <h3>DOM · <span id="domSym">—</span><span class="grow"></span>
+        <select id="domMult" title="Group price levels"><option value="1">×1</option><option value="2">×2</option><option value="5">×5</option><option value="10">×10</option><option value="25">×25</option><option value="100">×100</option></select>
+        <button id="domCenter" class="x" title="Re-centre on the market (scroll the ladder to move it)">⌖</button></h3>
+      <div class="row" id="domStats"></div>
+      <table id="domLadder"></table>
+      <div class="muted dom-hint">Click a bid to place a paper buy limit, an ask for a sell limit. Quantity comes from the order ticket.</div>
+      <h3>Time &amp; Sales <span class="grow"></span><label class="muted"><input type="checkbox" id="domAgg"> merge</label><input id="domMin" type="number" min="0" placeholder="min value" title="Hide trades below this value (quote currency)" style="width:80px"></h3>
+      <table id="domTape"></table>
+    </div>
+    <div class="side" id="s-journal">
+      <h3>Journal <span class="grow"></span><button id="jOpen" class="x" title="Open the full journal: dashboard, journals, analyses and tools">⤢ Open</button><button id="jCsv" class="x" title="Export the filtered trades as CSV">⤒ CSV</button><button id="jMenu" class="x" title="Journal settings, backup and restore">⚙</button></h3>
+      <div class="tabs" id="jTabs"><button data-jt="trades">Trades</button><button data-jt="stats">Stats</button><button data-jt="calendar">Calendar</button><button data-jt="setups">Setups</button></div>
+      <div class="row wrap" id="jFilters"></div>
+      <div id="jView"></div>
+    </div>
+  </aside>
+  <nav id="rail">
+    <button data-side="watch" class="on" title="Watchlist">☰</button>
+    <button data-side="alerts" title="Alerts">⏰</button>
+    <button data-side="trade" title="Trade">⇅</button>
+    <button data-side="tree" title="Object tree and Data window">⧉</button>
+    <button data-side="screener" title="Screener">▤</button>
+    <button data-side="dom" title="DOM / Level 2 and Time &amp; Sales">≣</button>
+    <button data-side="journal" title="Trading journal">📓</button>
+    <span class="grow"></span>
+    <button id="keysBtn" title="Keyboard shortcuts (Ctrl+/)">⌨</button>
+  </nav>
+</main>
+
+<dialog id="settingsDlg">
+  <form method="dialog">
+    <h3>Chart settings</h3>
+    <div class="dlg-body"><div class="vtabs" id="settingsTabs"></div><div class="form" id="settingsForm"></div></div>
+    <div class="row"><button value="reset" id="settingsReset">Reset to defaults</button><span class="grow"></span><button value="ok">Ok</button></div>
+  </form>
+</dialog>
+<dialog id="drawDlg">
+  <form method="dialog">
+    <h3 id="drawDlgTitle"></h3>
+    <div class="tabs" id="drawTabs"><button type="button" data-tab="style">Style</button><button type="button" data-tab="text">Text</button><button type="button" data-tab="coords">Coordinates</button><button type="button" data-tab="vis">Visibility</button></div>
+    <div class="form" id="drawForm"></div>
+    <div class="row"><button type="button" id="drawTpl">Template ▾</button><span class="grow"></span><button type="button" id="drawCancel">Cancel</button><button value="ok">Ok</button></div>
+  </form>
+</dialog>
+<dialog id="searchDlg">
+  <form method="dialog">
+    <h3>Symbol search <span class="muted" id="searchMode"></span></h3>
+    <div class="row"><input id="searchIn" placeholder="Symbol, or an expression like BTCUSDT/ETHUSDT" spellcheck="false" autocomplete="off"><select id="searchEx" title="Exchange / data source"><option value="binance">Binance (direct)</option><option value="fx">Forex, metals, indices &amp; stocks</option></select></div>
+    <div class="seg" id="searchTabs"></div>
+    <div id="searchList"></div>
+  </form>
+</dialog>
+<dialog id="tfDlg">
+  <form method="dialog" id="tfForm">
+    <h3>Change interval</h3>
+    <input id="tfIn" placeholder="e.g. 15, 4h, 1D, 2W, 1M" autocomplete="off">
+    <div class="muted" id="tfHint"></div>
+  </form>
+</dialog>
+<dialog id="gotoDlg">
+  <form method="dialog" id="gotoForm">
+    <h3>Go to</h3>
+    <input type="datetime-local" id="gotoIn">
+    <div class="row"><span class="grow"></span><button value="cancel" formnovalidate>Cancel</button><button value="go">Go to</button></div>
+  </form>
+</dialog>
+<dialog id="layoutsDlg">
+  <form method="dialog">
+    <h3>Chart layouts</h3>
+    <div class="row"><button type="button" id="lySave">Save</button><button type="button" id="lySaveAs">Save as…</button><button type="button" id="lyNew">New</button><button type="button" id="lyExport">Export</button><label class="btn">Import<input type="file" id="lyImport" accept=".json" hidden></label><span class="grow"></span><label><input type="checkbox" id="lyAuto"> Autosave</label></div>
+    <table id="lyT"></table>
+    <div class="row"><span class="grow"></span><button value="ok">Close</button></div>
+  </form>
+</dialog>
+<dialog id="nocodeDlg" class="wide">
+  <form method="dialog">
+    <h3>No-code strategy builder</h3>
+    <div id="ncForm"></div>
+    <div class="row"><button type="button" id="ncReset">Reset</button><span class="grow"></span><button value="cancel">Cancel</button><button type="button" id="ncCreate" class="on">Create &amp; add to chart</button></div>
+  </form>
+</dialog>
+<div id="jw" hidden>
+  <nav id="jwNav" aria-label="Journal sections"></nav>
+  <div id="jwBody">
+    <header id="jwHead"><b>📓 Journal</b><div id="jwFilters" class="row"></div><span class="grow"></span><button id="jwNew" class="on">＋ New entry</button><button id="jwClose" class="x" title="Close (Esc)">✕</button></header>
+    <main id="jwMain"></main>
+  </div>
+</div>
+<dialog id="journalDlg" class="wide">
+  <form method="dialog" onsubmit="return false">
+    <h3 id="jdTitle">Trade</h3>
+    <div id="jdBody"></div>
+    <div class="row wrap"><button type="button" id="jdShot" title="Attach a snapshot of the active chart">📷 Snapshot</button><button type="button" id="jdChart">Show on chart</button><button type="button" id="jdDelete" class="dn">Delete</button>
+      <span class="grow"></span><button type="button" id="jdSkipAll">Skip all</button><button type="button" id="jdSkip">Skip</button><button type="button" id="jdSave" class="on">Save</button></div>
+  </form>
+</dialog>
+<dialog id="journalSetDlg">
+  <form method="dialog">
+    <h3>Journal</h3>
+    <div class="form">
+      <label for="jAskOpen">Ask why when a trade opens</label><input type="checkbox" id="jAskOpen">
+      <label for="jAskClose">Ask how it went when a trade closes</label><input type="checkbox" id="jAskClose">
+    </div>
+    <div class="row wrap"><button type="button" id="jBackup">Backup (.json)</button><label class="btn">Restore…<input type="file" id="jRestore" accept=".json" hidden></label><button type="button" id="jClear" class="dn">Clear journal</button><span class="grow"></span><button value="ok" class="on">Done</button></div>
+  </form>
+</dialog>
+<dialog id="inputsDlg">
+  <form method="dialog">
+    <h3 id="inputsTitle">Inputs</h3>
+    <div class="form" id="inputsForm"></div>
+    <div class="row"><button type="button" id="inputsReset">Defaults</button><span class="grow"></span><button value="ok">Ok</button></div>
+  </form>
+</dialog>
+<dialog id="keysDlg">
+  <form method="dialog"><h3>Keyboard shortcuts</h3><table id="keysT"></table><div class="row"><span class="grow"></span><button value="ok">Close</button></div></form>
+</dialog>
+<div id="toast"></div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
