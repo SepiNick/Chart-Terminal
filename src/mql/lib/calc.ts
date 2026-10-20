@@ -58,6 +58,8 @@ const tr = (c: Ctx, i: number) => { const b = c.bar(i); if (!i) return b.high - 
 
 const hi: (c: Ctx) => F = c => i => c.bar(i).high, lo: (c: Ctx) => F = c => i => c.bar(i).low;
 const med = (c: Ctx, i: number) => (c.bar(i).high + c.bar(i).low) / 2;
+/** Close location value × volume (one A/D step). */
+const clv = (b: Bar) => (b.high > b.low ? ((b.close - b.low) - (b.high - b.close)) / (b.high - b.low) * b.volume : 0);
 
 export const IND: Record<string, (...p: number[]) => Spec> = {
   ma: (n, sh = 0, m = 0) => ({ outs: 1, begin: [n - 1], shift: [sh], step: (c, i) => { c.o[0][i] = maAt(m, n, c.x, c.o[0], i) } }),
@@ -210,6 +212,34 @@ export const IND: Record<string, (...p: number[]) => Spec> = {
   gator: (jp, js, tp, ts, lp, ls, m) => ({
     outs: 3, begin: [jp - 1, tp - 1, lp - 1], shift: [js, ts, ls],
     step: (c, i) => { c.o[0][i] = maAt(m, jp, c.x, c.o[0], i); c.o[1][i] = maAt(m, tp, c.x, c.o[1], i); c.o[2][i] = maAt(m, lp, c.x, c.o[2], i) },
+  }),
+  // Accumulation/Distribution: running sum of the close location value × volume.
+  ad: () => ({ outs: 1, step: (c, i) => { c.o[0][i] = (i ? g(c.o[0], i - 1) : 0) + clv(c.bar(i)) } }),
+  // Chaikin oscillator: MA(AD, fast) − MA(AD, slow) with method m.
+  chaikin: (f, s, m = 1) => ({
+    outs: 4, begin: [Math.max(f, s) - 1],
+    step: (c, i) => { const [o, ad, a, b] = c.o; ad[i] = (i ? g(ad, i - 1) : 0) + clv(c.bar(i)); a[i] = maAt(m, f, arr(ad), a, i); b[i] = maAt(m, s, arr(ad), b, i); o[i] = a[i] - b[i] },
+  }),
+  // Bill Williams Market Facilitation Index (high − low) / volume; colour 0 green (MFI↑ vol↑), 1 fade (↓↓), 2 fake (MFI↑ vol↓), 3 squat (MFI↓ vol↑).
+  bwmfi: () => ({
+    outs: 2,
+    step: (c, i) => {
+      const b = c.bar(i), v = b.volume, m = (c.o[0][i] = v ? (b.high - b.low) / v : g(c.o[0], i - 1) || 0);
+      if (!i) { c.o[1][i] = 0; return }
+      const up = m > c.o[0][i - 1], vu = v > c.bar(i - 1).volume;
+      c.o[1][i] = up ? (vu ? 0 : 2) : vu ? 3 : 1;
+    },
+  }),
+  // Gator oscillator: |jaw − teeth| above zero, −|teeth − lips| below, using the Alligator lines as displayed (shifted).
+  gatorosc: (jp, js, tp, ts, lp, ls, m) => ({
+    outs: 7, begin: [Math.max(jp - 1 + js, tp - 1 + ts), 0, Math.max(tp - 1 + ts, lp - 1 + ls)],
+    step: (c, i) => {
+      const [up, uc, lo, lc, jaw, teeth, lips] = c.o;
+      jaw[i] = maAt(m, jp, c.x, jaw, i); teeth[i] = maAt(m, tp, c.x, teeth, i); lips[i] = maAt(m, lp, c.x, lips, i);
+      up[i] = Math.abs(g(jaw, i - js) - g(teeth, i - ts)); lo[i] = -Math.abs(g(teeth, i - ts) - g(lips, i - ls));
+      uc[i] = up[i] >= g(up, i - 1) || Number.isNaN(g(up, i - 1)) ? 0 : 1;
+      lc[i] = -lo[i] >= -g(lo, i - 1) || Number.isNaN(g(lo, i - 1)) ? 0 : 1;
+    },
   }),
   fractals: () => ({
     outs: 2,

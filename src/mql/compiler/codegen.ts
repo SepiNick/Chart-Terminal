@@ -62,6 +62,8 @@ const T = (k: Kind, n = k as string, extra: Partial<Ty> = {}): Ty => ({ k, n, ..
 const ANY = T('any'), INT = T('int'), FLOAT = T('float', 'double'), BOOL = T('bool'), STR = T('string'), VOID = T('void'), NULLT = T('null');
 const safe = (n: string) => RESERVED.has(n) || n.startsWith('__') ? '$' + n : n;
 const num = (t: Ty) => t.k === 'int' || t.k === 'float' || t.k === 'bool';
+/** JS method name for an MQL method: operator+ → __op_43 (char codes), others unchanged. */
+const mname = (n: string) => n.startsWith('operator') ? '__op_' + [...n.slice(8)].map(c => c.charCodeAt(0)).join('_') : n;
 const tyName = (t: Ty): string => t.k === 'arr' ? tyName(t.el!) + '[]'.repeat(t.dims!) : t.n;
 
 export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], warnings: Diagnostic[]): string {
@@ -220,7 +222,7 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       if (m.kind === 'ctor') c.ctors.push(mkDef(m, c, m.params.length ? `__c_${paramKey(m.params)}` : '__c'));
       else if (m.kind === 'dtor') c.dtor = mkDef(m, c, '__dtor');
       else {
-        const js = methSigs.get(m.name)!.size > 1 ? `${m.name}__${paramKey(m.params) || 'v'}` : m.name;
+        const js = methSigs.get(m.name)!.size > 1 ? `${mname(m.name)}__${paramKey(m.params) || 'v'}` : mname(m.name);
         if (!c.methods.has(m.name)) c.methods.set(m.name, []);
         c.methods.get(m.name)!.push(mkDef(m, c, js));
       }
@@ -427,6 +429,16 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
     return { c: `${fr.c}(${args.map(a => ex(a).c).join(', ')})`, ty: ANY };
   }
 
+  // ── operator overloading: a method 'operator<op>' of the left operand's class taking args.length parameters ──
+  function opMethods(t: Ty, op: string, n: number): FnDef[] {
+    if (t.k !== 'obj' || !t.cls) return [];
+    return findMethods(t.cls, 'operator' + op).filter(m => n >= m.min && n <= m.sig.params.length);
+  }
+  function opCall(self: R, op: string, args: Expr[], p: Pos): R | null {
+    const ms = opMethods(self.ty, op, args.length);
+    return ms.length ? callUser(ms, args, 'operator' + op, p, self.c) : null;
+  }
+
   // ── lvalues ──
   function lval(e: Expr, reuse: boolean): LV | null {
     switch (e.k) {
@@ -575,17 +587,34 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       }
       case 'unary': {
         if (e.op === '&' || e.op === '*') return ex(e.e, want);
-        if (e.op === '++' || e.op === '--') return incdec(e.e, e.op, true, e.pos);
+        if (e.op === '++' || e.op === '--') { const o = opCall(ex(e.e), e.op, [], e.pos); return o ?? incdec(e.e, e.op, true, e.pos) }
         const r = ex(e.e);
+        const ov = opCall(r, e.op, [], e.pos);
+        if (ov) return ov;
         if (e.op === '!') return { c: `(!${r.c})`, ty: BOOL };
         if (e.op === '~') return { c: `(~${r.c})`, ty: r.ty.k === 'int' ? r.ty : INT };
         return { c: `(${e.op}${r.c})`, ty: r.ty.k === 'bool' ? INT : r.ty };
       }
       case 'post': return incdec(e.e, e.op, false, e.pos);
-      case 'bin': return binop(e.op, ex(e.a), ex(e.b));
+      case 'bin': {
+        const A = ex(e.a);
+        if (A.ty.k === 'obj' && A.ty.cls && e.op !== '&&' && e.op !== '||') {
+          const ov = opCall(A, e.op, [e.b], e.pos);
+          if (ov) return ov;
+          const eq = e.op === '!=' ? opCall(A, '==', [e.b], e.pos) : null;
+          if (eq) return { c: `(!${eq.c})`, ty: BOOL };
+        }
+        return binop(e.op, A, ex(e.b));
+      }
       case 'assign': {
         const lv = lval(e.a, e.op !== '=');
         if (!lv) { err(e.pos, 'The left side of an assignment must be a variable, array element or field'); return { c: 'undefined', ty: ANY } }
+        if (lv.ty.k === 'obj' && lv.ty.cls) {
+          const self = { c: lv.get, ty: lv.ty }, own = opCall(self, e.op, [e.b], e.pos);
+          if (own) return own;
+          const bin = e.op !== '=' ? opCall(self, e.op.slice(0, -1), [e.b], e.pos) : null;
+          if (bin) return { c: valueObj(lv.ty) ? `${lv.get}.__set(${bin.c})` : lv.set(bin.c), ty: lv.ty };
+        }
         if (e.op === '=') return { c: assignTo(lv, e.b, e.pos), ty: lv.ty };
         const v = binop(e.op.slice(0, -1), { c: lv.get, ty: lv.ty }, ex(e.b));
         return { c: seq(lv.pre, lv.set(conv(v, lv.ty))), ty: lv.ty };
@@ -599,6 +628,8 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       case 'call': return call(e);
       case 'index': {
         const b = ex(e.e);
+        const ov = opCall(b, '[]', [e.i], e.pos);
+        if (ov) return ov;
         if (b.ty.k !== 'arr' && b.ty.k !== 'any') err(e.pos, `'${tyName(b.ty)}' value cannot be indexed`);
         return { c: `${b.c}.get(${index(e.i)})`, ty: elemTy(b.ty) };
       }

@@ -3,7 +3,7 @@
 // User enums are JS strings (the member name); `(int)e` / `(E)i` convert through E.__v / E.__n.
 import type { Diagnostic, NtInput, NtClassInfo } from '../contract.ts';
 import type {
-  Expr, Stmt, Decl, TypeRef, Pos, Arg, Pattern, ClassDecl, EnumDecl, MethodDecl, CtorDecl, IndexerDecl, FieldDecl, PropDecl, Accessor, InitItem, Hole,
+  Expr, Stmt, Decl, TypeRef, Pos, Arg, Pattern, ClassDecl, EnumDecl, DelegateDecl, MethodDecl, CtorDecl, IndexerDecl, FieldDecl, PropDecl, Accessor, InitItem, Hole,
 } from './ast.ts';
 import { PREDEF, MAX_ERRORS } from './parser.ts';
 
@@ -39,7 +39,10 @@ const INT_NAMES: Record<string, string> = { int: 'int', Int32: 'int', uint: 'uin
 const FLOAT_NAMES: Record<string, string> = { double: 'double', Double: 'double', float: 'float', Single: 'float', decimal: 'decimal', Decimal: 'decimal' };
 const OTHER_PREDEF: Record<string, string> = { bool: 'bool', Boolean: 'bool', string: 'string', String: 'string', char: 'char', Char: 'char', object: 'object', Object: 'object', void: 'void', Convert: 'Convert' };
 const IN_INT = new Set(['int', 'short', 'ushort', 'byte', 'sbyte']);
-const NS_ROOTS = new Set(['System', 'NinjaTrader', 'Windows', 'Microsoft', 'global']);
+const NS_ROOTS = new Set(['System', 'NinjaTrader', 'Windows', 'Microsoft', 'global', 'SharpDX']);
+// LINQ methods on arrays / List / Series / any sequence: dispatched at runtime by rt.__lq (Count() vs the Count property).
+const LINQ = new Set(['Where', 'Select', 'Any', 'All', 'Count', 'Sum', 'Average', 'Min', 'Max', 'First', 'FirstOrDefault', 'Last', 'LastOrDefault',
+  'OrderBy', 'OrderByDescending', 'Take', 'Skip', 'ToList', 'ToArray', 'Distinct', 'ElementAt', 'Contains']);
 const DICTS = new Set(['Dictionary', 'IDictionary', 'SortedDictionary', 'SortedList', 'ConcurrentDictionary', 'IReadOnlyDictionary']);
 const SEQS = new Set(['List', 'IList', 'IEnumerable', 'ICollection', 'IReadOnlyList', 'IReadOnlyCollection', 'Series', 'ISeries', 'HashSet', 'Queue', 'Stack', 'LinkedList', 'SortedSet', 'Collection', 'ObservableCollection']);
 const MATH_INT = new Set(['Max', 'Min', 'Abs']);
@@ -113,7 +116,7 @@ const attr = <A extends { name: string }>(attrs: A[], n: string) => attrs.find(a
 
 export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], warnings: Diagnostic[]): GenResult {
   const G = new Set(o.globals), roots = new Set([...NS_ROOTS, ...o.usings]);
-  const classes = new Map<string, ClassInfo>(), enums = new Map<string, EnumInfo>();
+  const classes = new Map<string, ClassInfo>(), enums = new Map<string, EnumInfo>(), delegates = new Map<string, DelegateDecl>();
   const warned = new Set<string>();
   const err = (p: Pos, msg: string) => { if (errors.length < MAX_ERRORS * 2) errors.push({ file: p.file, line: p.line, col: p.col, msg }) };
   const warn = (p: Pos, msg: string) => { const k = `${p.file}:${p.line}:${msg}`; if (!warned.has(k)) { warned.add(k); warnings.push({ file: p.file, line: p.line, col: p.col, msg }) } };
@@ -127,6 +130,7 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
   // ── collect types ──
   const allClasses: ClassInfo[] = [];
   const addDecl = (d: Decl, outer: ClassInfo | null) => {
+    if (d.k === 'delegate') { delegates.set(d.name, d); return }
     if (d.k === 'enum') {
       if (classes.has(d.name) || enums.has(d.name)) { err(d.pos, `The type '${d.name}' is already defined`); return }
       enums.set(d.name, { name: d.name, js: safe(d.name), d, vals: new Map() });
@@ -143,14 +147,13 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       classes.set(d.name, c);
       allClasses.push(c);
     }
-    for (const m of d.members) if (m.k === 'class' || m.k === 'enum') addDecl(m, c);
+    for (const m of d.members) if (m.k === 'class' || m.k === 'enum' || m.k === 'delegate') addDecl(m, c);
   };
   for (const d of decls) addDecl(d, null);
 
   // ── types ──
   function resolve(t: TypeRef): Ty {
     const n = t.name;
-    if (t.qual[0] === 'SharpDX') err(t.pos, 'SharpDX custom rendering is not supported');
     let b: Ty;
     if (ctx.tnames.has(n)) b = ANY;
     else if (classes.has(n)) { const c = classes.get(n)!; b = c.kind === 'interface' ? T('obj', n) : T('obj', n, { cls: c }) }
@@ -166,6 +169,12 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       const a = t.args.map(resolve);
       const ps = (n === 'Func' ? a.slice(0, -1) : a).map((ty, k): PInfo => ({ name: `a${k}`, ty, mod: '', def: null, pos: t.pos }));
       b = T('fn', n, { sig: { params: ps, ret: n === 'Func' ? a[a.length - 1] ?? ANY : n === 'Predicate' ? BOOL : VOID } });
+    } else if (delegates.has(n) && !classes.has(n)) {
+      const d = delegates.get(n)!;
+      b = T('fn', n, { sig: { params: pinfo(d.params, ctx.tnames), ret: resolve(d.ret) } });
+    } else if (n === 'EventHandler' && !G.has(n)) {
+      const ps = ['sender', 'e'].map((name): PInfo => ({ name, ty: ANY, mod: '', def: null, pos: t.pos }));
+      b = T('fn', n, { sig: { params: ps, ret: VOID } });
     } else if (n === 'Nullable' && t.args.length === 1) b = { ...resolve(t.args[0]), nul: true };
     else b = T('obj', n, { args: t.args.map(resolve) });
     if (t.nullable && b.k !== 'any') b = { ...b, nul: true };
@@ -275,7 +284,6 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
         const key = paramKey(m.params);
         let mangle = sigCount.get(m.name)!.size > 1;
         if (mangle && m.mods.has('override')) { let up = false; for (let b = c.base; b; b = b.base) if (b.decls.some(x => x.members.some(y => y.k === 'method' && y.name === m.name))) up = true; mangle = up }
-        if (m.name === 'OnRender' && c.kind !== 'interface') err(m.pos, 'OnRender custom rendering (SharpDX) is not supported');
         const list = c.methods.get(m.name) ?? [];
         if (list.some(x => x.key === key)) err(m.pos, `'${c.name}' already defines a member called '${m.name}' with the same parameter types`);
         if (c.fields.has(m.name)) err(m.pos, `'${c.name}' already contains a definition for '${m.name}'`);
@@ -401,7 +409,6 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       if (use === 'val' && inherited()) return { c: `this.${n}`, ty: NT_MEMBERS[n] ?? ANY, lv: true };
       return { c: `rt.${n}`, ty: use === 'mem' ? T('type', n, { rt: true }) : ANY, lv: use === 'val' };
     }
-    if (n === 'SharpDX') { err(e.pos, 'SharpDX custom rendering is not supported'); return { c: 'undefined', ty: ANY } }
     if (use === 'mem' && roots.has(n)) return { c: '', ty: T('ns', n) };
     if (inherited()) return { c: `this.${n}`, ty: use === 'call' ? NT_FNS[n] ?? ANY : NT_MEMBERS[n] ?? ANY, lv: true };
     err(e.pos, `The name '${n}' does not exist in the current context`);
@@ -632,7 +639,9 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
   function groupValue(g: Group, want: Ty | null): string {
     const n = want?.sig?.params.length;
     const d = g.defs.find(x => x.sig.params.length === n) ?? g.defs[0];
-    return d.isStatic ? `${d.cls.js}.${d.js}` : `((...a) => ${groupTarget(g, d)}(...a))`;
+    if (d.isStatic) return `${d.cls.js}.${d.js}`;
+    // instance method groups are cached per (object, method) so `ev -= Handler` finds the delegate `ev += Handler` added
+    return g.self === 'super' || g.sep !== '.' ? `((...a) => ${groupTarget(g, d)}(...a))` : `rt.__mg(${g.self || 'this'}, ${JSON.stringify(d.js)})`;
   }
   function fnValue(e: Expr, want: Ty): string {
     if (e.k === 'lambda') return lambda(e, want).c;
@@ -689,7 +698,11 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
     }
     if (t.k === 'string') return strCall(b, name, args, e.pos);
     if (t.nul && name === 'GetValueOrDefault') return { c: `(${b.c} ?? ${args.length ? ex(args[0].e).c : defVal({ ...t, nul: false }, e.pos)})`, ty: { ...t, nul: false } };
-    if (t.k === 'fn' && name === 'Invoke') return callOn(b, '', args, e.pos);
+    if (t.k === 'fn' && name === 'Invoke') { const r = callOn(b, '', args, e.pos); return f.cond ? { ...r, c: `(${b.c} == null ? undefined : ${r.c})` } : r }
+    if (LINQ.has(name) && (t.k === 'arr' || t.k === 'any' || (t.k === 'obj' && !t.cls && (SEQS.has(t.n) || DICTS.has(t.n) || t.n === 'Series')))) {
+      const out = argList(null, args, e.pos), ty = name === 'Count' ? INT : name === 'Any' || name === 'All' || name === 'Contains' ? BOOL : name === 'Average' ? FLOAT : ANY;
+      return wrapCall(`rt.__lq(${b.c}, ${JSON.stringify(name)}${out.list.map(x => ', ' + x).join('')})`, out, ty);
+    }
     if (num(t) || t.k === 'char' || t.k === 'bool' || t.k === 'enum') {
       const a = argsCode(args);
       if (name === 'CompareTo' && a.length === 1) return { c: `__cmp(${b.c}, ${a[0]})`, ty: INT };
@@ -820,7 +833,6 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
     if (ty.k === 'obj' && ty.cls) c = construct(ty.cls, e.args, e.pos);
     else if (ty.k === 'obj') {
       if (/Exception$/.test(ty.n) && !G.has(ty.n)) c = `__exc(${JSON.stringify(ty.n)}${e.args.length ? `, ${ex(e.args[0].e).c}` : ''})`;
-      else if (e.t && e.t.qual[0] === 'SharpDX') c = 'null';
       else c = plainCall(`new rt.${ty.n}`, e.args, e.pos).c;
     } else if (ty.k === 'fn' && e.args.length === 1) return { c: fnValue(e.args[0].e, ty), ty };
     else if (num(ty) || ty.k === 'bool' || ty.k === 'char' || ty.k === 'enum') c = defVal(ty, e.pos);
@@ -1137,9 +1149,13 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       case 'post': return incdec(e.e, e.op, false, e.pos);
       case 'bin': return binop(e.op, ex(e.a), ex(e.b, e.op === '??' ? want : undefined));
       case 'assign': {
-        if ((e.op === '+=' || e.op === '-=') && (e.b.k === 'lambda' || (e.b.k === 'id' && peekGroup(e.b)))) { err(e.pos, 'Events are not supported'); return { c: 'undefined', ty: ANY } }
         const lv = lval(e.a, e.op !== '=');
         if (!lv) { err(e.pos, 'The left-hand side of an assignment must be a variable, property or indexer'); return { c: 'undefined', ty: ANY } }
+        // delegates / events: += combines, -= removes (multicast, invoked in order)
+        if ((e.op === '+=' || e.op === '-=') && (lv.ty.k === 'fn' || e.b.k === 'lambda' || (e.b.k === 'id' && peekGroup(e.b)))) {
+          const f = fnValue(e.b, lv.ty.k === 'fn' ? lv.ty : T('fn', 'Delegate'));
+          return { c: seq(lv.pre, lv.set(`rt.${e.op === '+=' ? '__dadd' : '__drem'}(${lv.get}, ${f})`)), ty: lv.ty };
+        }
         if (e.op === '=') return { c: assignTo(lv, e.b), ty: lv.ty };
         if (e.op === '??=') return { c: seq(lv.pre, `(${lv.get} ?? (${lv.set(valueFor(e.b, lv.ty))}))`), ty: lv.ty };
         const v = binop(e.op === '>>=' ? '>>' : e.op.slice(0, -1), { c: lv.get, ty: lv.ty }, ex(e.b));

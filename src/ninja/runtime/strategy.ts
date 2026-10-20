@@ -6,6 +6,10 @@
 // - an entry opposite to the position first closes it ("Close position") then opens the new one (reversal);
 // - EntriesPerDirection is enforced per direction (AllEntries) or per signal name (UniqueEntries);
 // - commission = commissionPerContract per contract per side; profits in currency (price move × qty × point value).
+// Unmanaged approach (IsUnmanaged): SubmitOrderUnmanaged orders stay working until filled/cancelled, net the position
+// FIFO (an opposite fill closes open entries first, the rest opens a new one), and cancel their OCO siblings on fill.
+// With a trading-hours template, IsExitOnSessionCloseStrategy flattens at the close of each session's last bar.
+// Tick-by-tick runs pass each tick's price segment to step() instead of the whole bar.
 import type { Trade } from '../../pine/strategy.ts';
 import type { NtResult } from '../contract.ts';
 import { NinjaScriptBase } from './base.ts';
@@ -13,7 +17,7 @@ import { NtDateTime, NtList } from './helpers.ts';
 import type { BarsCtx } from './series.ts';
 
 interface Ent { name: string; long: boolean; qty: number; price: number; bar: number; comm: number; hi: number; lo: number; sl?: number; tp?: number; trail?: { off: number; best: number } }
-interface Ord { id: number; name: string; entry: boolean; long: boolean; qty: number; type: string; limit?: number; stop?: number; from: string; live: boolean; last: number; trig?: boolean; o: any }
+interface Ord { id: number; name: string; entry: boolean; long: boolean; qty: number; type: string; limit?: number; stop?: number; from: string; live: boolean; last: number; trig?: boolean; o: any; u?: boolean; oco?: string }
 interface Br { mode: string; value: number }
 const DEF_NAME = (entry: boolean, long: boolean) => (entry ? (long ? 'Buy' : 'Sell short') : long ? 'Sell' : 'Buy to cover');
 
@@ -71,6 +75,41 @@ export class NtBroker {
     return o.o;
   }
   cancel(order: any) { const o = this.ords.find(q => q.o === order); if (o) this.drop(o, 'Cancelled') }
+  /** SubmitOrderUnmanaged(barsInProgress, orderAction, orderType, quantity[, limitPrice, stopPrice, oco, signalName]) */
+  submitU(a: any[]) {
+    const s = this.s, [, action, type, qty = 1, limit = 0, stop = 0, oco = '', name = ''] = a;
+    if (!s.IsUnmanaged) { s.__eng.warn('SubmitOrderUnmanaged() needs IsUnmanaged = true; ignored'); return null }
+    if (this.cur < s.BarsRequiredToTrade) return null;
+    const buy = action === 'Buy' || action === 'BuyToCover', t = type === 'MIT' ? 'Limit' : String(type);
+    if (type === 'MIT') s.__eng.warn('MIT orders are simulated as limit orders');
+    const id = ++this.seq;
+    const o: Ord = {
+      id, name: name || String(action), entry: true, long: buy, qty, type: t, from: '', live: true, last: this.cur, u: true, oco: oco || undefined,
+      limit: t === 'Limit' || t === 'StopLimit' ? limit : undefined, stop: t === 'StopMarket' || t === 'StopLimit' ? stop : undefined,
+      o: {
+        Name: name || String(action), OrderId: String(id), FromEntrySignal: '', OrderType: type, OrderState: 'Working', Quantity: qty, Filled: 0, AverageFillPrice: 0,
+        LimitPrice: limit, StopPrice: stop, IsLiveUntilCancelled: true, Time: s.__ctx.Time.get(0), OrderAction: action, IsLong: buy, IsShort: !buy, Oco: oco,
+      },
+    };
+    this.ords.push(o);
+    this.notifyOrder(o.o);
+    return o.o;
+  }
+  /** ChangeOrder(order, quantity, limitPrice, stopPrice) */
+  change(order: any, qty: number, limit: number, stop: number) {
+    const o = this.ords.find(q => q.o === order); if (!o) return;
+    o.qty = qty; if (o.limit != null) o.limit = limit; if (o.stop != null) o.stop = stop;
+    Object.assign(o.o, { Quantity: qty, LimitPrice: o.limit ?? 0, StopPrice: o.stop ?? 0, OrderState: 'Working' });
+    this.notifyOrder(o.o);
+  }
+  private ufill(o: Ord, px: number, bar: number) {
+    let left = o.qty;
+    for (const e of this.ents.filter(e => e.long !== o.long)) { if (left <= 0) break; const q = Math.min(left, e.qty); left -= q; this.close(e, q, px, bar, o.name, o.o, true) }
+    if (left > 1e-12) { this.ents.push({ name: o.name, long: o.long, qty: left, price: px, bar, comm: left * this.comm, hi: px, lo: px }); this.entryBars.push({ name: o.name, bar }) }
+    this.ords.splice(this.ords.indexOf(o), 1);
+    this.exec(o.o, px, o.qty, o.long, bar);
+    if (o.oco) for (const x of [...this.ords]) if (x.oco === o.oco) this.drop(x, 'Cancelled');
+  }
   private drop(o: Ord, state: string) { this.ords.splice(this.ords.indexOf(o), 1); o.o.OrderState = state; this.notifyOrder(o.o) }
 
   // ---------- brackets ----------
@@ -103,6 +142,7 @@ export class NtBroker {
     return this.through(buy, o.limit!, lo, hi) ? (buy ? Math.min(a, o.limit!) : Math.max(a, o.limit!)) : null;
   }
   private fill(o: Ord, px: number, bar: number) {
+    if (o.u) return this.ufill(o, px, bar);
     if (o.entry) {
       for (const e of this.ents.filter(e => e.long !== o.long)) this.close(e, e.qty, px, bar, 'Close position', o.o);
       if (!this.canEnter(o.long, o.name, null)) return this.drop(o, 'Cancelled');
@@ -120,7 +160,7 @@ export class NtBroker {
     }
     this.ords.splice(this.ords.indexOf(o), 1);
   }
-  private close(e: Ent, qty: number, px: number, bar: number, name: string, order?: any) {
+  private close(e: Ent, qty: number, px: number, bar: number, name: string, order?: any, silent = false) {
     const q = Math.min(qty, e.qty), d = e.long ? 1 : -1, pv = this.ctx.pv, c = q * this.comm, ec = (e.comm * q) / e.qty;
     const gross = (px - e.price) * q * d * pv;
     this.trades.push({
@@ -132,7 +172,7 @@ export class NtBroker {
     e.comm -= ec; e.qty -= q;
     if (e.qty <= 1e-12) this.ents.splice(this.ents.indexOf(e), 1);
     this.exitBars.push({ name, bar });
-    this.exec(order ?? { Name: name, OrderType: 'StopMarket', OrderAction: e.long ? 'Sell' : 'BuyToCover', FromEntrySignal: e.name, Quantity: q }, px, q, !e.long, bar);
+    if (!silent) this.exec(order ?? { Name: name, OrderType: 'StopMarket', OrderAction: e.long ? 'Sell' : 'BuyToCover', FromEntrySignal: e.name, Quantity: q }, px, q, !e.long, bar);
   }
   private exec(order: any, px: number, qty: number, buy: boolean, bar: number) {
     this.execs.push({ time: this.t(bar), price: px, qty, side: buy ? 'buy' : 'sell', name: order.Name });
@@ -161,12 +201,12 @@ export class NtBroker {
     }
     if (e.trail) e.trail.best = e.long ? Math.max(e.trail.best, hi) : Math.min(e.trail.best, lo);
   }
-  /** Fill working orders against bar `bar` (before OnBarUpdate of that bar). */
-  step(bar: number) {
+  /** Fill working orders against bar `bar` (before OnBarUpdate of that bar): market orders at `mkt`, the rest along `path`. */
+  step(bar: number, path?: number[], mkt?: number) {
     const b = this.ctx.bars[bar];
-    for (const o of this.ords.filter(o => o.type === 'Market')) if (this.ords.includes(o)) this.fill(o, this.slip(b.open, o.entry === o.long), bar);
-    const path = Math.abs(b.open - b.high) < Math.abs(b.open - b.low) ? [b.open, b.high, b.low, b.close] : [b.open, b.low, b.high, b.close];
-    for (let k = 0; k < 3; k++) {
+    for (const o of this.ords.filter(o => o.type === 'Market')) if (this.ords.includes(o)) this.fill(o, this.slip(mkt ?? b.open, o.entry === o.long), bar);
+    path ??= Math.abs(b.open - b.high) < Math.abs(b.open - b.low) ? [b.open, b.high, b.low, b.close] : [b.open, b.low, b.high, b.close];
+    for (let k = 0; k < path.length - 1; k++) {
       const a = path[k], z = path[k + 1], lo = Math.min(a, z), hi = Math.max(a, z);
       for (const e of [...this.ents]) if (this.ents.includes(e)) this.brackets(e, a, lo, hi, bar);
       for (const o of [...this.ords]) {
@@ -182,6 +222,9 @@ export class NtBroker {
   /** After OnBarUpdate of `bar`: expire unrenewed working orders and record equity. */
   endBar(bar: number) {
     for (const o of [...this.ords]) if (!o.live && o.type !== 'Market' && o.last < bar) this.drop(o, 'Cancelled');
+    const c = this.ctx;
+    if (this.s.IsExitOnSessionCloseStrategy && c.session && bar < c.bars.length - 1 && c.isLastOfSession(bar))
+      for (const e of [...this.ents]) this.close(e, e.qty, c.bars[bar].close, bar, 'Exit on session close');
     this.equity[bar] = this.cap + this.realized - this.ents.reduce((a, e) => a + e.comm, 0) + this.openPL(this.ctx.bars[bar].close);
   }
   openPL(px: number) { return this.ents.reduce((a, e) => a + (px - e.price) * e.qty * (e.long ? 1 : -1) * this.ctx.pv, 0) }
@@ -259,6 +302,8 @@ export class Strategy extends NinjaScriptBase {
   /** SetProfitTarget(mode, value[, isMIT]) | (fromEntrySignal, mode, value[, isMIT]) */
   SetProfitTarget(...a: any[]) { typeof a[0] === 'string' && typeof a[1] === 'string' ? this.__br.setBracket('tp', a[0], a[1], a[2]) : this.__br.setBracket('tp', '', a[0], a[1]) }
   CancelOrder(o: any) { this.__br.cancel(o) }
+  SubmitOrderUnmanaged(...a: any[]) { return this.__br.submitU(a) }
+  ChangeOrder(o: any, qty: number, limit: number, stop: number) { this.__br.change(o, qty, limit, stop) }
   private __since(list: { name: string; bar: number }[], a: any[]) {
     const name = a.find(x => typeof x === 'string') ?? '', ago = typeof a[2] === 'number' ? a[2] : 0;
     const hits = list.filter(x => !name || x.name === name);

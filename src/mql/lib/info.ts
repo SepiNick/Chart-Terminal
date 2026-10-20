@@ -72,7 +72,8 @@ export function installInfo(rt: Rt, env: Env) {
       case C('SYMBOL_TRADE_TICK_VALUE'): case C('SYMBOL_TRADE_TICK_VALUE_PROFIT'): case C('SYMBOL_TRADE_TICK_VALUE_LOSS'): return A.contractSize * env.point;
       case C('SYMBOL_TRADE_CONTRACT_SIZE'): return A.contractSize;
       case C('SYMBOL_VOLUME_MIN'): return A.minLot; case C('SYMBOL_VOLUME_MAX'): return A.maxLot; case C('SYMBOL_VOLUME_STEP'): return A.lotStep;
-      case C('SYMBOL_VOLUME_LIMIT'): case C('SYMBOL_SWAP_LONG'): case C('SYMBOL_SWAP_SHORT'): case C('SYMBOL_MARGIN_INITIAL'): case C('SYMBOL_MARGIN_MAINTENANCE'): return 0;
+      case C('SYMBOL_SWAP_LONG'): return A.swapLong ?? 0; case C('SYMBOL_SWAP_SHORT'): return A.swapShort ?? 0;
+      case C('SYMBOL_VOLUME_LIMIT'): case C('SYMBOL_MARGIN_INITIAL'): case C('SYMBOL_MARGIN_MAINTENANCE'): return 0;
       case C('SYMBOL_MARGIN_HEDGED'): return A.contractSize;
       case C('SYMBOL_VOLUME_REAL'): return env.bars[env.cur()]?.volume ?? 0;
       case C('SYMBOL_SESSION_OPEN'): return env.bars[env.cur()]?.open ?? 0;
@@ -117,7 +118,7 @@ export function installInfo(rt: Rt, env: Env) {
       switch (num(mode)) {
         case 1: return env.bars[env.cur()]?.low ?? 0; case 2: return env.bars[env.cur()]?.high ?? 0; case 5: return env.now();
         case 9: return bid(); case 10: return ask(); case 11: return env.point; case 12: return env.digits; case 13: return env.spreadPoints;
-        case 14: return A.stopLevelPoints; case 15: return A.contractSize; case 16: return A.contractSize * env.point; case 17: return env.point;
+        case 14: return A.stopLevelPoints; case 15: return A.contractSize; case 18: return A.swapLong ?? 0; case 19: return A.swapShort ?? 0; case 16: return A.contractSize * env.point; case 17: return env.point;
         case 22: return 1; case 23: return A.minLot; case 24: return A.lotStep; case 25: return A.maxLot;
         case 29: return 0; case 30: return 0; case 31: return A.contractSize / 2; case 32: return (A.contractSize * ask()) / Math.max(1, A.leverage);
         default: return 0;

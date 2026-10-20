@@ -2,17 +2,23 @@
 // current bar. Reading a series owned by an indicator first brings that indicator up to date (lazy, NT-like Update()).
 import type { Bar } from '../../data.ts';
 import { NtDateTime, NtError } from './helpers.ts';
+import { sessionIds, type Session } from './session.ts';
 
 let ids = 0;
 const periodOf = (tf: number) =>
   tf % 2592000 === 0 ? { BarsPeriodType: 'Month', Value: tf / 2592000 } : tf % 604800 === 0 ? { BarsPeriodType: 'Week', Value: tf / 604800 }
     : tf % 86400 === 0 ? { BarsPeriodType: 'Day', Value: tf / 86400 } : tf % 60 === 0 ? { BarsPeriodType: 'Minute', Value: tf / 60 } : { BarsPeriodType: 'Second', Value: tf };
-const day = (t: number) => Math.floor(t / 86400);
 
 export class BarsCtx {
   bars: Bar[]; cur = -1; tfSec: number; symbol: string; tick: number; pv: number;
   Open: NtSeries; High: NtSeries; Low: NtSeries; Close: NtSeries; Volume: NtSeries; Time: NtSeries; Median: NtSeries; Typical: NtSeries; Weighted: NtSeries;
   instrument: any; period: any; barsObj: any;
+  /** Trading hours template (null = 24/7 UTC days); sid[i] = session (trading day) of bar i, -1 outside the session. */
+  session: Session | null = null; private ids: number[] | null = null;
+  setSession(s: Session | null) { this.session = s; this.ids = null }
+  get sid(): number[] { return (this.ids ??= sessionIds(this.bars, this.session)) }
+  isFirstOfSession(i: number) { const s = this.sid; return s[i] >= 0 && (i === 0 || s[i - 1] !== s[i]) }
+  isLastOfSession(i: number) { const s = this.sid; return s[i] >= 0 && (i === this.bars.length - 1 || s[i + 1] !== s[i]) }
   constructor(bars: Bar[], symbol: string, tfSec: number, tick: number, pv: number) {
     this.bars = bars; this.symbol = symbol; this.tfSec = tfSec; this.tick = tick; this.pv = pv;
     const s = (f: (b: Bar) => unknown) => NtSeries.fn(this, i => f(bars[i]));
@@ -33,10 +39,12 @@ export class BarsCtx {
       GetTime: (i: number) => NtDateTime.of((at(i).time + tfSec) * 1000), GetOpen: (i: number) => at(i).open, GetHigh: (i: number) => at(i).high,
       GetLow: (i: number) => at(i).low, GetClose: (i: number) => at(i).close, GetVolume: (i: number) => at(i).volume,
       GetBar: (t: NtDateTime) => ctx.indexAt(t),
-      get IsFirstBarOfSession() { return ctx.cur <= 0 || day(bars[ctx.cur].time) !== day(bars[ctx.cur - 1].time) },
-      get IsLastBarOfSession() { return ctx.cur === bars.length - 1 || day(bars[ctx.cur].time) !== day(bars[ctx.cur + 1].time) },
-      get BarsSinceNewTradingDay() { let k = 0; while (ctx.cur - k > 0 && day(bars[ctx.cur - k].time) === day(bars[ctx.cur - k - 1].time)) k++; return k },
-      PercentComplete: 1,
+      get IsFirstBarOfSession() { return ctx.cur <= 0 || ctx.isFirstOfSession(ctx.cur) },
+      get IsLastBarOfSession() { return ctx.isLastOfSession(ctx.cur) },
+      get BarsSinceNewTradingDay() { const s = ctx.sid; let k = 0; while (ctx.cur - k > 0 && s[ctx.cur - k] === s[ctx.cur - k - 1]) k++; return k },
+      get IsResetOnNewTradingDay() { return true },
+      get TradingHours() { return { Name: ctx.session?.name ?? 'Default 24 x 7', TimeZone: ctx.session?.tz ?? 'UTC' } },
+      __ctx: ctx, PercentComplete: 1,
     };
   }
   /** Index of the bar whose close time is the last one <= t (first bar when t is earlier). */

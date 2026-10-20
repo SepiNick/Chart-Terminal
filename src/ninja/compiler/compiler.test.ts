@@ -330,9 +330,7 @@ test('errors carry line numbers and resync', () => {
   assert.deepEqual(r.errors.slice(0, 3).map(e => e.line), [2, 3, 4]);
   fails('class A {\n void F() { G(1, 2); }\n void G(int a) { }\n}', /expects 1 argument/, 2);
   fails('class A { void F() { var q = from x in xs select x; } }', /LINQ query syntax/);
-  fails('class A { public event EventHandler E; }', /Events are not supported/);
   fails('class A { unsafe void F() { } }', /Unsafe code/);
-  fails('class A : Indicator {\n protected override void OnRender(ChartControl c, ChartScale s) { } }', /OnRender/, 2);
   fails('class A {\n void F() { Foo(); }\n}', /The name 'Foo' does not exist/, 2);
   fails('class B { public int X; }\nclass A { void F() { var b = new B(); b.Y = 1; } }', /does not contain a definition for 'Y'/, 2);
   fails('class A { void F() { int x = 1; goto done; } }', /goto/);
