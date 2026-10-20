@@ -1,4 +1,4 @@
-// Worker thread for server-side scripts (forward tests and script alerts): compiles and runs them off the main thread
+// One of the engine pool's worker threads for server-side scripts (forward tests and script alerts): compiles and runs them off the main thread
 // so a slow script can't stall HTTP, WebSocket and the rest. engine.ts sends a job's sources once, then only bars.
 import { parentPort } from 'node:worker_threads';
 import { buildJob, runFills, runJob, type ScriptSource } from './scripts.ts';
