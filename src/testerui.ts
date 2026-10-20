@@ -11,6 +11,8 @@ import type { WorkerMsg } from './tester/worker.ts';
 import type { Metrics, OptResult, ParamSpec, TesterData, Trade, WalkForwardResult } from './tester/types.ts';
 import type { PineValue } from './pine/types.ts';
 import { $, calcPrec, esc, store, toast } from './store.ts';
+import { api, onServer, serverMode } from './sync.ts';
+import type { Script } from './pineui.ts';
 
 export interface TesterHost {
   /** Market order into the paper account at the chart's last price. */
@@ -328,8 +330,55 @@ function forward() {
   }
   if (fresh.length) { fwd.done = fwd.done.slice(-500); fwd.log = fwd.log.slice(0, 200); saveFwd(); toast(`Forward test: ${fresh.length} order(s) sent to the paper account`) }
 }
+// Server mode: forward tests run on the server (no open tab needed) — list/start/stop them through /api/forward.
+interface SrvFwd { id: string; name: string; sym: string; tf: string; qtyMult: number; channels: string[]; start: number | null; status: string; fills: number; lastError: string | null }
+interface SrvLog { at: number; t: number; side: 'buy' | 'sell'; qty: number; px: number; error: string | null }
+let srvList: SrvFwd[] | null = null, srvLog: { id: string; rows: SrvLog[] } | null = null;
+onServer('forward', m => { srvList = m.list as SrvFwd[]; if (tab === 'fwd') forwardView() });
+const CHANNELS = ['push', 'telegram', 'email', 'webhook'];
+const fwdOpts = { qty: 1, channels: ['push'] };   // kept across the re-renders live ticks cause
+function serverForwardView(el: HTMLElement) {
+  if (!srvList) { api<SrvFwd[]>('/api/forward').then(l => { srvList = l; forwardView() }).catch(e => { el.innerHTML = `<span class="dn">${esc((e as Error).message)}</span>` }); el.innerHTML = '<span class="muted">Loading…</span>'; return }
+  el.innerHTML = `${cur ? `<div class="row wrap">
+      <label>Size multiplier <input type="number" id="fwdQty" value="${esc(fwdOpts.qty)}" min="0" step="any" style="width:70px"></label>
+      <span class="muted">Notify:</span> ${CHANNELS.map(c => `<label><input type="checkbox" data-fch="${c}"${fwdOpts.channels.includes(c) ? " checked" : ""}> ${c}</label>`).join(" ")}
+      <span class="muted">Runs ${esc(cur.run.name)} on ${esc(cur.p.cfg.symbol)} ${esc(cur.p.cfg.tf)} on the server and sends each new fill as a market order to the paper account, even when this app is closed.</span>
+      <span class="grow"></span><button id="fwdStart" class="on">Start forward test</button></div>` : '<div class="muted">Add a strategy to the chart to start a forward test.</div>'}
+    ${fwd ? `<div class="row"><span class="warn">A browser-only forward test is still running (${esc(fwd.sym)} ${esc(fwd.tf)}).</span><button id="fwdStop">Stop it</button></div>` : ''}
+    ${srvList.length ? `<table><tr><th>Name</th><th>Symbol</th><th>Since</th><th>Size ×</th><th>Fills</th><th>Status</th><th></th></tr>${srvList.map(f => `<tr>
+      <td>${esc(f.name)}</td><td>${esc(f.sym)} ${esc(f.tf)}</td><td>${f.start ? date(f.start) : '—'}</td><td>${esc(f.qtyMult)}</td><td>${esc(f.fills)}</td>
+      <td class="${f.lastError ? 'dn' : 'up'}" title="${esc(f.lastError ?? '')}">${f.lastError ? `Error: ${esc(f.lastError.slice(0, 80))}` : esc(f.status)}</td>
+      <td><button data-flog="${esc(f.id)}">Log</button> <button data-fdel="${esc(f.id)}">Stop</button></td></tr>`).join('')}</table>` : '<div class="muted">No forward tests running on the server.</div>'}
+    ${srvLog ? `<table><tr><th>Time</th><th>Side</th><th>Qty sent</th><th>Price</th><th></th></tr>${srvLog.rows.map(l => `<tr><td>${date(l.at / 1000)}</td><td class="${l.side === 'buy' ? 'up' : 'dn'}">${esc(l.side)}</td><td>${esc(l.qty)}</td><td>${esc(l.px)}</td><td class="dn">${esc(l.error ?? '')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No fills yet.</td></tr>'}</table>` : ''}`;
+  el.querySelector<HTMLElement>('#fwdStart')?.addEventListener('click', async () => {
+    if (!jobOf() || !cur) return;   // jobOf: same compile check (and error toast) as the optimizer
+    // The server compiles sources itself: send the script plus every installed file of its language (#include / other classes).
+    const all = store.get<Record<string, Script>>('scripts', {}), s = all[cur.run.id];
+    if (!s) { toast('Save the script first'); return }
+    const lang = s.lang ?? 'pine', fam = (l: string) => (l === 'mql4' || l === 'mql5' || l === 'mqh' ? 'mql' : l);
+    const main = lang === 'pine' ? 'main.pine' : s.name, files = lang === 'pine' ? { [main]: s.src } : Object.fromEntries(Object.values(all).filter(x => fam(x.lang ?? 'pine') === fam(lang)).map(x => [x.name, x.src]));
+    try {
+      await api('/api/forward', { body: { name: cur.run.name, sym: cur.p.cfg.symbol, tf: cur.p.cfg.tf, lang, files, main, prec: cur.p.prec, inputs: baseInputs(), qtyMult: fwdOpts.qty, channels: fwdOpts.channels } });
+      toast('Forward test started on the server (paper account)');
+    } catch (e) { toast(`Could not start: ${(e as Error).message}`) }
+  });
+  el.querySelector('.row')?.addEventListener('change', () => {
+    fwdOpts.qty = Math.max(0, +$<HTMLInputElement>('#fwdQty').value || 1);
+    fwdOpts.channels = [...el.querySelectorAll<HTMLInputElement>('[data-fch]:checked')].map(c => c.dataset.fch!);
+  });
+  el.querySelector<HTMLElement>('#fwdStop')?.addEventListener('click', () => { fwd = null; saveFwd(); forwardView() });
+  el.querySelectorAll<HTMLElement>('[data-fdel]').forEach(b => b.addEventListener('click', () => {
+    if (!confirm('Stop this forward test? Its log is deleted; paper fills stay in the account.')) return;
+    api(`/api/forward/${encodeURIComponent(b.dataset.fdel!)}`, { method: 'DELETE' }).then(() => { if (srvLog?.id === b.dataset.fdel) srvLog = null; toast('Forward test stopped') }).catch(e => toast((e as Error).message));
+  }));
+  el.querySelectorAll<HTMLElement>('[data-flog]').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.flog!;
+    api<SrvLog[]>(`/api/forward/${encodeURIComponent(id)}/log`).then(rows => { srvLog = { id, rows }; forwardView() }).catch(e => toast((e as Error).message));
+  }));
+}
 function forwardView() {
   const el = $('#ts-fwd');
+  if (serverMode) return serverForwardView(el);
   const active = fwd && cur && fwd.scriptId === cur.run.id;
   const live = active ? cur!.data.trades.filter(t => t.entryTime >= fwd!.start) : [];
   const fm2 = live.length ? metrics({ ...cur!.data, trades: live, equity: [], openPL: 0, openCount: 0 }, cur!.p.vb()) : null;
