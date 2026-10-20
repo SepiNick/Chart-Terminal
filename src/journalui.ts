@@ -19,14 +19,13 @@ export interface JournalHost {
   show(sym: string, t: number): void;
 }
 let host: JournalHost;
-const KEY = 'ct.journal';
-let j: Journal = migrate((() => { try { return { ...newJournal(), ...JSON.parse(localStorage.getItem(KEY) ?? 'null') } } catch { return newJournal() } })());
+let j: Journal = migrate({ ...newJournal(), ...store.get<Partial<Journal> | null>('journal', null) });
 const cfg = store.get('journalCfg', { askOpen: true, askClose: true, tab: 'trades', period: 'all', sym: '', setup: '', result: '', group: 'bySetup' });
 let source = '';
 let saveTimer = 0;
 function save(now = false) {
   clearTimeout(saveTimer);
-  const go = () => { try { localStorage.setItem(KEY, JSON.stringify(j)) } catch { toast('Journal storage is full — remove some chart snapshots or export and clear old trades', 8000) } };
+  const go = () => { if (!store.set('journal', j)) toast('Journal storage is full — remove some chart snapshots or export and clear old trades', 8000) };
   if (now) go(); else saveTimer = window.setTimeout(go, 1000);
 }
 const money = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;

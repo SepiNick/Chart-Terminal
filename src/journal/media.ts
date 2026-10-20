@@ -1,4 +1,7 @@
-// Pictures and voice notes for journal entries, kept in IndexedDB (localStorage is too small for media).
+// Pictures and voice notes for journal entries. Server mode: stored on the server (/api/media); offline, or when an
+// upload can't reach the server, kept in this browser's IndexedDB and uploaded at the next server-mode start.
+import { serverMode } from '../sync.ts';
+
 const DB = 'ct-journal-media', STORE = 'blobs';
 let dbp: Promise<IDBDatabase> | null = null;
 function db(): Promise<IDBDatabase> {
@@ -12,21 +15,64 @@ function db(): Promise<IDBDatabase> {
 function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
   return db().then(d => new Promise<T>((res, rej) => { const q = fn(d.transaction(STORE, mode).objectStore(STORE)); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error) }));
 }
+const localBlob = (id: string) => tx<Blob | undefined>('readonly', s => s.get(id)).catch(() => undefined);
+/** POST a blob to the server → its new id. Errors carry `.status` when the server answered. */
+export async function uploadBlob(blob: Blob): Promise<string> {
+  const r = await fetch('/api/media', { method: 'POST', body: blob, headers: { 'content-type': blob.type || 'application/octet-stream' }, credentials: 'same-origin' });
+  const j = await r.json().catch(() => ({})) as { id?: string; error?: string };
+  if (!r.ok || !j.id) throw Object.assign(Error(j.error ?? `Upload failed (${r.status})`), { status: r.status });
+  return j.id;
+}
 export async function putMedia(blob: Blob): Promise<string> {
+  if (serverMode) try { return await uploadBlob(blob) } catch (e) { if ((e as { status?: number }).status) throw e }   // unreachable: keep it here for now
   const id = `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   await tx('readwrite', s => s.put(blob, id));
   return id;
 }
 const urls = new Map<string, string>();
-/** Object URL for a stored blob (cached for the session). */
+/** URL for a stored picture / voice note (this browser's copy first, then the server). */
 export async function mediaUrl(id: string): Promise<string | null> {
   if (urls.has(id)) return urls.get(id)!;
-  const b = await tx<Blob | undefined>('readonly', s => s.get(id)).catch(() => undefined);
-  if (!b) return null;
+  const b = await localBlob(id);
+  if (!b) return serverMode ? `/api/media/${encodeURIComponent(id)}` : null;
   const u = URL.createObjectURL(b); urls.set(id, u);
   return u;
 }
-export async function delMedia(id: string) { await tx('readwrite', s => s.delete(id)).catch(() => {}); const u = urls.get(id); if (u) { URL.revokeObjectURL(u); urls.delete(id) } }
+export async function delMedia(id: string) {
+  await tx('readwrite', s => s.delete(id)).catch(() => {});
+  const u = urls.get(id); if (u) { URL.revokeObjectURL(u); urls.delete(id) }
+  if (serverMode) await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+}
+
+type MediaHolder = { trades?: { media?: { id: string }[] }[] };
+/** Media ids a journal refers to. */
+export const mediaIdsOf = (j: MediaHolder | null | undefined) => (j?.trades ?? []).flatMap(t => (t.media ?? []).map(m => m.id));
+/** Replace media ids in place (old → new); returns whether anything changed. */
+export function rewriteMediaIds(j: MediaHolder | null | undefined, map: Map<string, string>): boolean {
+  let n = 0;
+  for (const t of j?.trades ?? []) for (const m of t.media ?? []) { const id = map.get(m.id); if (id) { m.id = id; n++ } }
+  return n > 0;
+}
+/**
+ * Upload the blobs this browser still holds for the journal in localStorage (the old IndexedDB store, or pictures taken
+ * while the server was unreachable), point the journal at the new ids and drop the local copies.
+ * Returns the rewritten journal, or null when nothing changed. The caller sends it to the server.
+ */
+export async function uploadLocalMedia(onProgress?: (done: number, total: number) => void): Promise<unknown | null> {
+  let j: MediaHolder | null = null;
+  try { j = JSON.parse(localStorage.getItem('ct.journal') ?? 'null') } catch {}
+  if (typeof indexedDB === 'undefined') return null;
+  const map = new Map<string, string>(), ids = mediaIdsOf(j);
+  for (const [i, id] of ids.entries()) {
+    onProgress?.(i, ids.length);
+    const b = await localBlob(id); if (!b) continue;
+    try { map.set(id, await uploadBlob(b)) } catch { /* stays local; retried next start */ }
+  }
+  if (!rewriteMediaIds(j, map)) return null;
+  try { localStorage.setItem('ct.journal', JSON.stringify(j)) } catch { return null }   // keep the local blobs until the journal points elsewhere
+  for (const id of map.keys()) await tx('readwrite', s => s.delete(id)).catch(() => {});
+  return j;
+}
 
 /** Shrink an image to at most `max` px wide as JPEG (screenshots and photos). */
 export async function shrink(src: Blob | HTMLCanvasElement, max = 1280): Promise<Blob> {

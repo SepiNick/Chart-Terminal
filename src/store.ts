@@ -1,17 +1,20 @@
-// Per-browser persistence. Every access is guarded: storage can be missing or blocked.
+import { memo, queueState } from './sync.ts';
+
+// App state: localStorage (`ct.<key>`) as the working copy; in server mode every write is also queued to the server
+// (sync.ts). Every access is guarded: storage can be missing, blocked or full.
 export const store = {
   get<T>(key: string, fallback: T): T {
-    try {
-      const v = localStorage.getItem('ct.' + key);
-      return v ? (JSON.parse(v) as T) : fallback;
-    } catch {
-      return fallback;
-    }
+    let v: string | null | undefined = memo.get(key);   // newer than localStorage when present
+    try { v ??= localStorage.getItem('ct.' + key) } catch {}
+    try { return v ? (JSON.parse(v) as T) : fallback } catch { return fallback }
   },
-  set(key: string, value: unknown): void {
-    try {
-      localStorage.setItem('ct.' + key, JSON.stringify(value));
-    } catch {}
+  /** Returns false when this browser's storage refused the value (it is still kept for this session and sent to the server). */
+  set(key: string, value: unknown): boolean {
+    let ok = true;
+    try { localStorage.setItem('ct.' + key, JSON.stringify(value)); memo.delete(key) }
+    catch { ok = false; const j = JSON.stringify(value); if (j !== undefined) memo.set(key, j) }
+    queueState(key, value);
+    return ok;
   },
 };
 
