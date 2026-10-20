@@ -37,8 +37,12 @@ export interface NtCompileResult { ok: boolean; js?: string; classes: NtClassInf
  * - Integer semantics (int/long/short/byte… truncation on assignment and integer `/`), `out`/`ref` args as Ref objects
  *   (`{ v }`) written back after the call, string interpolation and string.Format via rt.__fmt, C# casts via rt.__cast,
  *   `is`/`as`, ?: and ?? operators, `var` inference, foreach over arrays/List/Dictionary (KeyValuePair with Key/Value).
- * - Unsupported constructs (LINQ query syntax, events/delegates beyond simple Action/Func lambdas, unsafe code,
- *   OnRender custom rendering) produce a diagnostic error with line/col — never silently wrong code.
+ * - LINQ method calls on arrays/List/Series/`var` values compile to rt.__lq(x, 'Name', ...args); `event` fields and delegate
+ *   types are multicast delegates combined by rt.__dadd / rt.__drem; instance method groups are rt.__mg(obj, 'm') (stable identity).
+ * - SharpDX types (Vector2, RectangleF, Ellipse, TextFormat, TextLayout …) resolve to rt globals; OnRender runs once after the
+ *   run as a static snapshot whose RenderTarget calls become drawings (runtime/render.ts).
+ * - Unsupported constructs (LINQ query syntax, unsafe code, goto, operator overloading) produce a diagnostic error with
+ *   line/col — never silently wrong code.
  */
 export type Rt = Record<string, unknown>;
 
@@ -75,4 +79,7 @@ export interface NtRunOptions {
   inputs?: Record<string, unknown>;
   /** Extra data series for AddDataSeries(...): return bars for (symbol, tfSec) or [] when unavailable. */
   barsFor?: (symbol: string, tfSec: number) => Bar[];
+  /** Trading hours: a template name ("CME US Index Futures RTH", "US Equities RTH", "Default 24 x 7" …) or "HH:mm-HH:mm[ Time/Zone]".
+   *  The "Trading hours" run input (inputs.__tradingHours) overrides it. */
+  session?: string;
 }

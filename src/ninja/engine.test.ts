@@ -25,7 +25,7 @@ test('template indicator: plots match SMA ± k·stdev and inputs are exposed', (
   assert.equal(r.out.meta.overlay, true);
   const ref = sma(bars.map(b => b.close), 20);
   assert.ok(Math.abs(r.out.plots[0].values[300] - ref[300]!) < 1e-9, `${r.out.plots[0].values[300]} vs ${ref[300]}`);
-  assert.deepEqual(r.out.inputs.map(i => i.id), ['Period', 'Width']);
+  assert.deepEqual(r.out.inputs.map(i => i.id), ['Period', 'Width', '__tradingHours']);
 });
 
 test('template strategy: crossovers trade with stop/target and report', () => {

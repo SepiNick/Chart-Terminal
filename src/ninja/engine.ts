@@ -3,7 +3,8 @@
 import type { Bar } from '../data.ts';
 import type { NtCompileResult, NtResult, NtRunOptions } from './contract.ts';
 import { compile, instantiate } from './compiler/index.ts';
-import { NT_GLOBALS, createRt, runNinja } from './runtime/index.ts';
+import { NT_GLOBALS, SESSION_INPUT, createRt, runNinja } from './runtime/index.ts';
+import { DEFAULT_SESSION, TEMPLATES } from './runtime/session.ts';
 import type { Outputs, Plot, Drawing2, ScriptInput } from '../pine/interp.ts';
 import type { TesterData } from '../pine/report.ts';
 
@@ -24,6 +25,10 @@ export function runNinjaScript(cr: NtCompileResult, className: string, bars: Bar
     options: i.options, min: i.min, max: i.max,
     type: i.options ? 'string' : /bool/i.test(i.type) ? 'bool' : /string/i.test(i.type) ? 'string' : /^(int|long|short|byte)$/i.test(i.type) ? 'int' : 'float',
   }));
+  // NinjaTrader picks trading hours on the data series, not in code: offered here as one more setting of every script.
+  const th = String(o.inputs?.[SESSION_INPUT] ?? o.session ?? DEFAULT_SESSION);
+  out.inputs.push({ id: SESSION_INPUT, title: 'Trading hours', group: 'Session', type: 'string', def: DEFAULT_SESSION as never, value: th as never,
+    options: Object.keys(TEMPLATES).includes(th) ? Object.keys(TEMPLATES) : [...Object.keys(TEMPLATES), th] });
   const tester = result.kind === 'strategy' && result.trades ? {
     trades: result.trades, equity: result.equity ?? [], initialCapital: result.initialCapital ?? o.initialCapital,
     openPL: result.openPL ?? 0, openCount: result.openCount ?? 0,
