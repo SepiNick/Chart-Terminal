@@ -16,6 +16,8 @@ import { initTesterUI } from './testerui.ts';
 import { defaultOF, type OFCfg } from './orderflow/layer.ts';
 import { hasOrderFlow } from './orderflow/feed.ts';
 import { initDom, domSync } from './orderflow/domui.ts';
+import { derivsAttach, derivsMenu } from './derivs/layer.ts';   // derivs
+import { initLiqPanel } from './derivs/liqpanel.ts';   // derivs
 import { initJournal, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
 import { journalReplayOrder } from './journal/replay.ts';
 import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
@@ -139,6 +141,7 @@ const hooks: Hooks = {
     l.onContext = (d, e) => drawingMenu(e.clientX, e.clientY, d, l, drawHost);
     drawSnaps.seed(p.cfg.symbol);
     if (p === active()) { renderLeftToolbar(drawHost); renderTree() }
+    derivsAttach(p);   // derivs: OI / funding / ratio / CVD panes, liquidation overlays
   },
   quickOrder(p, side) {
     const px = pxOf(p.cfg.symbol); if (!px) return;
@@ -430,6 +433,7 @@ function indicatorsMenu(el: HTMLElement) {
     ...Object.entries(INDICATORS).filter(([, d]) => !d.pane).map(([k, d]) => ({ label: d.name, checked: cur.includes(k), action: toggle(k) })),
     { sep: true }, { label: 'Oscillators', disabled: true },
     ...Object.entries(INDICATORS).filter(([, d]) => d.pane).map(([k, d]) => ({ label: d.name, checked: cur.includes(k), action: toggle(k) })),
+    ...derivsMenu(active().cfg, d => applyCfg(active(), { derivs: d } as never, 'derivatives')),   // derivs
   ]);
 }
 $('#tplBtn').onclick = e => {
@@ -1024,6 +1028,7 @@ initDom({
   },
 });
 domSync();
+initLiqPanel({ symbol: () => active()?.cfg.symbol ?? '' });   // derivs
 
 // ---------- boot ----------
 document.documentElement.dataset.theme = st.settings.theme;
