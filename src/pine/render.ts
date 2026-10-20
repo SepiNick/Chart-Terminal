@@ -1,12 +1,12 @@
 // Renders a Pine script's Outputs onto a lightweight-charts chart: plots → series, shapes → markers,
 // hlines → price lines, fill/bgcolor/label/line/box → one canvas primitive per pane.
 import {
-  LineSeries, HistogramSeries, AreaSeries, LineType, LineStyle,
+  LineSeries, HistogramSeries, AreaSeries, CandlestickSeries, BarSeries, LineType, LineStyle,
   type IChartApi, type ISeriesApi, type IPriceLine, type SeriesType, type ISeriesPrimitive, type IPrimitivePaneRenderer, type IPrimitivePaneView,
   type Logical, type Time, type UTCTimestamp, type SeriesMarker,
 } from 'lightweight-charts';
 import type { Bar } from '../data.ts';
-import type { Outputs } from './interp.ts';
+import type { Outputs, PineTable } from './interp.ts';
 
 type Target = Parameters<IPrimitivePaneRenderer['draw']>[0];
 const PAL = ['#2962ff', '#ff9800', '#e91e63', '#00bcd4', '#9c27b0', '#4caf50'];
@@ -101,6 +101,41 @@ class PanePrimitive implements ISeriesPrimitive<Time> {
   }
 }
 
+const UP = '#26a69a', DOWN = '#ef5350';
+const TEXT_PX: Record<string, number> = { tiny: 8, small: 10, normal: 12, large: 16, huge: 22, auto: 12 };
+const POS: Record<string, string> = {
+  top_left: 'top:4px;left:4px', top_center: 'top:4px;left:50%;transform:translateX(-50%)', top_right: 'top:4px;right:4px',
+  middle_left: 'top:50%;left:4px;transform:translateY(-50%)', middle_center: 'top:50%;left:50%;transform:translate(-50%,-50%)', middle_right: 'top:50%;right:4px;transform:translateY(-50%)',
+  bottom_left: 'bottom:4px;left:4px', bottom_center: 'bottom:4px;left:50%;transform:translateX(-50%)', bottom_right: 'bottom:4px;right:4px',
+};
+/** Pine tables as real HTML tables (text via textContent, so script data is never parsed as markup). */
+function tableEl(t: PineTable): HTMLTableElement {
+  const el = document.createElement('table'), covered = new Set<string>();
+  el.style.cssText = `position:absolute;${POS[t.position] ?? POS.top_right};border-collapse:collapse;font-family:system-ui;pointer-events:auto;`
+    + `background:${t.bgcolor ?? 'transparent'};${t.frame_width && t.frame_color ? `outline:${t.frame_width}px solid ${t.frame_color};` : ''}`;
+  for (let r = 0; r < t.rows; r++) {
+    const tr = el.insertRow();
+    for (let c = 0; c < t.columns; c++) {
+      if (covered.has(`${c},${r}`)) continue;
+      const m = t.merges.find(x => x.c0 === c && x.r0 === r), cell = t.cells[`${c},${r}`], td = tr.insertCell();
+      if (m) {
+        td.colSpan = m.c1 - m.c0 + 1; td.rowSpan = m.r1 - m.r0 + 1;
+        for (let cc = m.c0; cc <= m.c1; cc++) for (let rr = m.r0; rr <= m.r1; rr++) covered.add(`${cc},${rr}`);
+      }
+      td.style.cssText = `padding:2px 6px;white-space:pre;${t.border_width && t.border_color ? `border:${t.border_width}px solid ${t.border_color};` : ''}`;
+      if (!cell) continue;
+      const px = TEXT_PX[cell.text_size] ?? (Number(cell.text_size) || 12);
+      td.textContent = cell.text; td.title = cell.tooltip;
+      Object.assign(td.style, {
+        color: cell.text_color, fontSize: `${px}px`, textAlign: cell.text_halign.replace('align_', ''), verticalAlign: { align_top: 'top', align_bottom: 'bottom' }[cell.text_valign] ?? 'middle',
+        background: cell.bgcolor ?? '', fontFamily: cell.font === 'monospace' || cell.font === 'font_family_monospace' ? 'monospace' : '',
+        width: cell.width ? `${cell.width}vw` : '', height: cell.height ? `${cell.height}vh` : '',   // ponytail: Pine sizes are % of the pane; viewport units are close enough
+      });
+    }
+  }
+  return el;
+}
+
 const MARK: Record<string, SeriesMarker<Time>['shape']> = {
   triangleup: 'arrowUp', arrowup: 'arrowUp', labelup: 'arrowUp', triangledown: 'arrowDown', arrowdown: 'arrowDown', labeldown: 'arrowDown', circle: 'circle',
 };
@@ -142,8 +177,17 @@ export function renderScript(chart: IChartApi, main: ISeriesApi<SeriesType>, out
       }).filter(Boolean) as never);
       series.push(s);
       host ??= s;
-    } else if (p.kind === 'candle' || p.kind === 'bar') {
-      continue; // ponytail: plotcandle/plotbar drawn as their close line only via values; full OHLC series later
+    } else if ((p.kind === 'candle' || p.kind === 'bar') && p.ohlc) {
+      const { o, h, l, c: cl } = p.ohlc, opts = { title: p.title, priceLineVisible: false, lastValueVisible: true, upColor: UP, downColor: DOWN, ...pf };
+      const s = p.kind === 'candle' ? chart.addSeries(CandlestickSeries, { ...opts, wickUpColor: UP, wickDownColor: DOWN, borderUpColor: UP, borderDownColor: DOWN }, idx) : chart.addSeries(BarSeries, opts, idx);
+      s.setData(bars.map((_, i) => {
+        if (![o[i], h[i], l[i], cl[i]].every(fin)) return { time: t(i) };
+        const color = p.colors[i] ?? (cl[i] >= o[i] ? UP : DOWN);
+        return p.kind === 'bar' ? { time: t(i), open: o[i], high: h[i], low: l[i], close: cl[i], color }
+          : { time: t(i), open: o[i], high: h[i], low: l[i], close: cl[i], color, wickColor: p.wickcolors?.[i] ?? color, borderColor: p.bordercolors?.[i] ?? color };
+      }) as never);
+      series.push(s);
+      host ??= s;
     } else {
       // shapes / chars / arrows → markers
       p.values.forEach((v, i) => {
@@ -169,12 +213,26 @@ export function renderScript(chart: IChartApi, main: ISeriesApi<SeriesType>, out
   const prim = out.fills.length || hasBg || hasDraw ? new PanePrimitive(out, bars, plotSeries, hlinePrices, hasBg, hasDraw) : null;
   if (prim) host.attachPrimitive(prim);
   const h = host;
+  // Tables → one HTML overlay in the pane's plot cell (the pane's <tr> holds left axis, plot, right axis cells).
+  let tablesEl: HTMLElement | null = null, disposed = false;
+  const live = (out.tables ?? []).filter(x => !x.deleted);
+  const mountTables = () => {
+    const cell = chart.panes()[idx]?.getHTMLElement()?.children[1] as HTMLElement | undefined;
+    if (!cell || disposed) return !!disposed;
+    tablesEl = document.createElement('div');
+    tablesEl.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:3;overflow:hidden';
+    live.forEach(x => tablesEl!.appendChild(tableEl(x)));
+    cell.appendChild(tablesEl);
+    return true;
+  };
+  if (live.length && typeof document !== 'undefined' && !mountTables()) requestAnimationFrame(() => mountTables());   // new panes get their element on the next layout
   // Strategy fills → entry/exit arrows on the main chart.
   if (out.broker) for (const f of out.broker.fills) {
     const buy = f.side === 'buy';
     markers.push({ time: f.time as UTCTimestamp, position: buy ? 'belowBar' : 'aboveBar', shape: buy ? 'arrowUp' : 'arrowDown', color: buy ? '#2962ff' : '#e91e63', text: `${f.id} ${+f.qty.toFixed(4)}` });
   }
   const dispose = () => {
+    disposed = true; tablesEl?.remove();
     if (prim) h.detachPrimitive(prim);
     if (h === main) lines.forEach(l => main.removePriceLine(l));
     series.forEach(x => { try { chart.removeSeries(x) } catch {} });

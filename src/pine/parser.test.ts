@@ -224,9 +224,8 @@ test('syntax errors carry locations', () => {
   throwsAt('x = 1\n    y = 2', 2, 5, /Unexpected indentation/);
   throwsAt('if a\n        b = 1', 2, 9, /Bad indentation/);
   throwsAt('if a\nb = 1', 1, 5, /indented block/);
-  throwsAt('x = 1\ntype Point\n    float x', 2, 1, /not supported yet/);
-  throwsAt('enum Dir\n    up', 1, 1, /not supported yet/);
-  throwsAt('import user/lib/1 as l', 1, 1, /not supported yet/);
+  throwsAt('import lib as l', 1, 1, /user\/library\/version/);
+  throwsAt('enum Dir\n    up = 1', 2, 10, /titles must be strings/);
   throwsAt('x = 1 +', 1, 8, /Unexpected end of line/);
   throwsAt('s = "abc', 1, 5, /Unterminated string/);
   throwsAt('x = a ? b', 1, 10, /':' in ternary/);
