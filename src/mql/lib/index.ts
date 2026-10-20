@@ -12,6 +12,7 @@ import { installIndicators } from './indicators.ts';
 import { installCustom } from './custom.ts';
 import { installChart } from './chart.ts';
 import { installInfo } from './info.ts';
+import { installFiles } from './files.ts';
 
 export const installStd: Install = (rt, env) => {
   Object.assign(rt, constants(env.dialect));
@@ -26,6 +27,7 @@ export const installStd: Install = (rt, env) => {
   installIndicators(rt, env, srcs);
   installCustom(rt, env);
   installChart(rt, env);
+  installFiles(rt, env);
 };
 
 export const STD_OUT_PARAMS: OutParams = {

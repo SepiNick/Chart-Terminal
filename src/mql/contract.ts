@@ -99,7 +99,13 @@ export interface Env {
   indicator: { shortName?: string; digits?: number; levels: { value: number; color?: number; style?: number }[]; min?: number; max?: number };
   stop(): void;
   /** Simulated account for the trade module (rt.__broker is created from this). */
-  account: { balance: number; leverage: number; hedging: boolean; currency: string; contractSize: number; commissionPerLot: number; minLot: number; lotStep: number; maxLot: number; stopLevelPoints: number };
+  account: {
+    balance: number; leverage: number; hedging: boolean; currency: string; contractSize: number; commissionPerLot: number; minLot: number; lotStep: number; maxLot: number; stopLevelPoints: number;
+    /** Daily swap in points per lot (charged at 00:00 server time on open positions); swap3Day = weekday with triple swap (default 3, Wednesday). */
+    swapLong?: number; swapShort?: number; swap3Day?: number;
+  };
+  /** Sandboxed in-memory file system of the run (FileOpen & co.), shared with iCustom programs; never the real disk. */
+  files?: Map<string, string>;
 }
 
 /**
