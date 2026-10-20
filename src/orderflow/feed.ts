@@ -2,6 +2,7 @@
 // EXCH:SYMBOL symbols go through the local data server (CCXT). FX symbols have no order flow.
 import { isRemote, serverJson, splitSym } from '../data.ts';
 import type { BookSnap, Print } from './model.ts';
+import { api, serverMode } from '../sync.ts';
 
 const API = 'https://data-api.binance.vision/api/v3', WS = 'wss://data-stream.binance.vision';
 const bin = (s: string) => s.replace(/^BINANCE:/, '');
@@ -9,15 +10,34 @@ export const hasOrderFlow = (sym: string) => !/^FX:/.test(sym) && !/[/*+\-()]/.t
 type Agg = { p: string; q: string; T: number; m: boolean; a: number };
 const fromAgg = (x: Agg): Print => ({ t: x.T / 1000, px: +x.p, qty: +x.q, buy: !x.m });   // m = buyer is maker → seller was aggressive
 
-/** Recent history, newest last. Binance pages backwards by trade id up to `pages` × 1000 prints; other exchanges give one page. */
+/**
+ * Recent history, newest last. Binance pages backwards by trade id up to `pages` × 1000 prints; other exchanges give one page.
+ * In server mode the first load starts from the server's trade recording (when it records this symbol) and only the gap
+ * after the recording's last print comes from the exchange.
+ */
 export async function fetchPrints(sym: string, pages = 20, onProgress?: (n: number) => void, beforeId?: number): Promise<{ prints: Print[]; firstId?: number }> {
+  if (serverMode && beforeId == null) {
+    const rec = await api<(Print & { id?: number })[]>(`/api/recorder/trades?${new URLSearchParams({ sym })}`).catch(() => []);
+    if (rec.length) {
+      onProgress?.(rec.length);
+      const last = rec.at(-1)!.t, gap = await exchangePrints(sym, pages, n => onProgress?.(rec.length + n), undefined, last);
+      // A gap the exchange can't cover (recorder was down too long) would leave a hole: use the exchange alone then.
+      if (!gap.reached) return gap;
+      return { prints: [...rec.map(({ t, px, qty, buy }) => ({ t, px, qty, buy })), ...gap.prints.filter(p => p.t > last)], firstId: rec[0].id ?? gap.firstId };
+    }
+  }
+  return exchangePrints(sym, pages, onProgress, beforeId);
+}
+/** `after` (seconds): stop paging once a print at or before it is reached; `reached` says whether it was. */
+async function exchangePrints(sym: string, pages: number, onProgress?: (n: number) => void, beforeId?: number, after?: number): Promise<{ prints: Print[]; firstId?: number; reached: boolean }> {
   if (isRemote(sym)) {
     const { exchange, symbol } = splitSym(sym);
-    return { prints: await serverJson<Print[]>(`/api/trades?${new URLSearchParams({ exchange, symbol })}`) };
+    const prints = await serverJson<Print[]>(`/api/trades?${new URLSearchParams({ exchange, symbol })}`);
+    return { prints, reached: after == null || (prints[0]?.t ?? Infinity) <= after };
   }
   const out: Agg[][] = [];
-  let fromId = beforeId;
-  for (let i = 0; i < pages; i++) {
+  let fromId = beforeId, reached = false;
+  for (let i = 0; i < pages && !reached; i++) {
     const q = new URLSearchParams({ symbol: bin(sym), limit: '1000' });
     if (fromId != null) q.set('fromId', String(Math.max(0, fromId - 1000)));
     const r = await fetch(`${API}/aggTrades?${q}`);
@@ -26,10 +46,11 @@ export async function fetchPrints(sym: string, pages = 20, onProgress?: (n: numb
     if (fromId != null) rows = rows.filter(x => x.a < fromId!);
     if (!rows.length) break;
     out.unshift(rows); fromId = rows[0].a;
+    if (after != null && rows[0].T / 1000 <= after) reached = true;
     onProgress?.(out.reduce((a, x) => a + x.length, 0));
     if (fromId <= 0) break;
   }
-  return { prints: out.flat().map(fromAgg), firstId: fromId };
+  return { prints: out.flat().map(fromAgg), firstId: fromId, reached: reached || after == null };
 }
 
 // ---------- shared subscriptions (one socket per symbol and kind, many listeners) ----------
