@@ -31,6 +31,8 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 }
 
 // ---------- which keys sync ----------
+/** Keys the running app applies live when another device or the server changes them (the server writes `acct` for forward-test fills). */
+export const HOT_KEYS = new Set(['acct']);
 /** Per-device UI state: never sent to the server. */
 export const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx']);
 const KEY_RE = /^[A-Za-z0-9_.-]{1,64}$/;   // same as server/state.ts
@@ -128,6 +130,7 @@ function applyRemote(key: string, value: unknown, rev: number) {
     memo.delete(key);
   } catch { memo.set(key, JSON.stringify(value)) }
   // The app reads its state at start-up, so a reload is the honest way to show the change.
+  if (HOT_KEYS.has(key)) return;   // the app applies these live (main.ts), no reload needed
   if (!reloadShown) { reloadShown = true; note('Updated on another device', { label: 'Reload', run: () => location.reload() }) }
 }
 function signedOut() {
