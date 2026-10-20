@@ -31,8 +31,12 @@ export type Stmt =
   | (Pos & { kind: 'VarDecl'; mode: 'var' | 'varip' | null; typeName: string | null; name: string; init: Expr })
   | (Pos & { kind: 'TupleDecl'; names: string[]; init: Expr })         // [a, b] = f()  ('_' allowed as placeholder)
   | (Pos & { kind: 'Assign'; target: string; op: AssignOp; value: Expr })
+  | (Pos & { kind: 'FieldAssign'; object: Expr; field: string; op: AssignOp; value: Expr })   // obj.field := v
   | (Pos & { kind: 'ExprStmt'; expr: Expr })
   | (Pos & { kind: 'FuncDecl'; name: string; params: { name: string; typeName: string | null; def: Expr | null }[]; body: Stmt[]; method: boolean; exported: boolean })
+  | (Pos & { kind: 'TypeDecl'; name: string; fields: { name: string; typeName: string; def: Expr | null }[]; exported: boolean })
+  | (Pos & { kind: 'EnumDecl'; name: string; members: { name: string; title: string }[]; exported: boolean })
+  | (Pos & { kind: 'Import'; path: string; alias: string })                // import user/lib/1 as alias
   | (Pos & { kind: 'Break' })
   | (Pos & { kind: 'Continue' });
 

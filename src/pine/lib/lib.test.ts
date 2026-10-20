@@ -129,7 +129,7 @@ test('array + math', () => {
 
 test('every lib function survives na input', () => {
   for (const name of Object.keys(LIB)) {
-    if (name.startsWith('array.') && !name.startsWith('array.new') && name !== 'array.from') continue;
+    if (/^(array|matrix|map)\./.test(name) && !/\.new/.test(name) && name !== 'array.from') continue;   // these throw on an na id, like Pine
     run(name, () => [NaN, NaN, NaN, NaN, NaN], {}, bars.slice(0, 30));
   }
   for (const k of Object.keys(VARS)) VARS[k](mkCtx(bars));
