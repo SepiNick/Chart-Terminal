@@ -1,5 +1,6 @@
 // Reference tools. New tool files follow the same shape: export a ToolDef[] and register it in tools/index.ts.
 import type { Drawing, Geo, Level, Pt, ToolDef, XY } from './types.ts';
+import { positionSize, stepDecimals } from './math.ts';
 
 /** Price on the infinite line through a drawing's first two points, at time t (linear in bar index). */
 export function linePriceAt(d: Drawing, t: number, g: Geo): number | null {
@@ -117,6 +118,16 @@ export const BASIC_TOOLS: ToolDef[] = [
   position('short', 'Short position', '⬇', -1),
 ];
 
+/** Size, margin and liquidation of a Long/Short position drawing from its settings. */
+export function sizeOf(d: Drawing, dir: 1 | -1 = d.type === 'short' ? -1 : 1) {
+  const n = (k: string, def: number) => (Number.isFinite(Number(d.style[k])) && d.style[k] !== '' && d.style[k] != null ? Number(d.style[k]) : def);
+  return positionSize({
+    entry: d.pts[0].p, target: d.pts[1]?.p ?? d.pts[0].p, stop: d.pts[2]?.p ?? d.pts[0].p, dir,
+    account: n('account', 1000), riskMode: String(d.style.riskMode ?? '%'), risk: n('riskPct', 1),
+    leverage: n('leverage', 1), lotStep: n('lotStep', 0), mmr: n('mmr', 0.5) / 100,
+  });
+}
+
 /**
  * Long/short position: pts = [entry, (end time, target), (end time, stop)].
  * Two clicks: entry, then width/risk. Account size & risk % give the position size, as in TradingView.
@@ -126,8 +137,12 @@ function position(id: string, name: string, icon: string, dir: 1 | -1): ToolDef 
     id, name, icon, group: 'forecast', points: 2,
     props: [
       { key: 'account', label: 'Account size', type: 'number', default: 1000, min: 0 },
-      { key: 'riskPct', label: 'Risk %', type: 'number', default: 1, min: 0, step: 0.1 },
-      { key: 'qtyPrec', label: 'Qty decimals', type: 'number', default: 4, min: 0, max: 8 },
+      { key: 'riskMode', label: 'Risk as', type: 'select', options: ['%', 'amount'], default: '%' },
+      { key: 'riskPct', label: 'Risk (% or amount)', type: 'number', default: 1, min: 0, step: 0.1 },
+      { key: 'leverage', label: 'Leverage', type: 'number', default: 1, min: 1, step: 1 },
+      { key: 'mmr', label: 'Maintenance margin %', type: 'number', default: 0.5, min: 0, max: 50, step: 0.1 },
+      { key: 'lotStep', label: 'Lot step (0 = none)', type: 'number', default: 0, min: 0 },
+      { key: 'qtyPrec', label: 'Qty decimals (no lot step)', type: 'number', default: 4, min: 0, max: 8 },
     ],
     build(pts) {
       if (pts.length >= 3) return pts;
@@ -153,12 +168,19 @@ function position(id: string, name: string, icon: string, dir: 1 | -1): ToolDef 
         const hx = g.x(g.bars[hitI].time), hy = g.y(hit === 'tp' ? tp.p : sl.p);
         r.rect([x0, P[0][1]], [hx, hy], { fill: r.fill(hit === 'tp' ? '#089981' : '#f23645', 0.25), stroke: false, noHit: true });
       }
-      const risk = Math.abs(e.p - sl.p), rr = Math.abs(tp.p - e.p) / (risk || 1);
-      const qty = risk ? ((Number(d.style.account) * Number(d.style.riskPct)) / 100) / risk : 0;
-      const cx = (x0 + x1) / 2, f = g.fmt;
-      r.label(`Target: ${f(tp.p)} (${Math.abs(pct(e.p, tp.p)).toFixed(2)}%) ${f(Math.abs(tp.p - e.p) * qty)}`, [cx, P[1][1] + (dir > 0 ? -11 : 11)], '#089981');
-      r.label(`Stop: ${f(sl.p)} (${Math.abs(pct(e.p, sl.p)).toFixed(2)}%) ${f(risk * qty)}`, [cx, P[2][1] + (dir > 0 ? 11 : -11)], '#f23645');
-      r.label(`${hit === 'tp' ? '✔ ' : hit === 'sl' ? '✘ ' : ''}${dir > 0 ? 'Long' : 'Short'} ${f(e.p)} · Qty ${qty.toFixed(Number(d.style.qtyPrec))} · R:R ${rr.toFixed(2)}`, [cx, P[0][1]], '#5d606b');
+      const z = sizeOf(d, dir), f = g.fmt, cx = (x0 + x1) / 2, num = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+      const qd = Number(d.style.lotStep) > 0 ? stepDecimals(Number(d.style.lotStep)) : Number(d.style.qtyPrec ?? 4);
+      r.label(`Target: ${f(tp.p)} (${Math.abs(pct(e.p, tp.p)).toFixed(2)}%) ${num(z.reward)}`, [cx, P[1][1] + (dir > 0 ? -11 : 11)], '#089981');
+      r.label(`Stop: ${f(sl.p)} (${Math.abs(pct(e.p, sl.p)).toFixed(2)}%) ${num(z.loss)}`, [cx, P[2][1] + (dir > 0 ? 11 : -11)], '#f23645');
+      if (z.liq != null && Number(d.style.leverage) > 1) {
+        const ly = g.y(z.liq);
+        r.hline(ly, Math.min(x0, x1), Math.max(x0, x1), { color: '#ff9800', width: 1, dash: 'dashed', noHit: true });
+        r.text(`Liq ≈ ${f(z.liq)}`, [Math.max(x0, x1) + 4, ly], { size: 11, color: '#ff9800', baseline: 'middle', noHit: true });
+      }
+      const lev = Number(d.style.leverage) || 1, warn = z.liqFirst ? ' ⚠ liquidation before stop' : z.overMargin ? ' ⚠ margin > account' : '';
+      r.label(`${hit === 'tp' ? '✔ ' : hit === 'sl' ? '✘ ' : ''}${dir > 0 ? 'Long' : 'Short'} ${f(e.p)} · Qty ${z.qty.toFixed(qd)} · R:R ${z.rr.toFixed(2)}
+` +
+        `Notional ${num(z.notional)} · Margin ${num(z.margin)}${lev > 1 ? ` (${lev}x)` : ''}${z.liq != null && lev > 1 ? ` · Liq ${f(z.liq)}` : ''}${warn}`, [cx, P[0][1]], warn ? '#b26a00' : '#5d606b');
     },
     handles: (_d, P) => (P.length < 3 ? P : [P[0], [P[0][0], P[1][1]], [P[0][0], P[2][1]], [P[1][0], P[0][1]]]),
     moveHandle(d, i, pt) {

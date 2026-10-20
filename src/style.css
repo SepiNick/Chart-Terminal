@@ -104,6 +104,8 @@ dialog h3{margin:0 0 12px;font-size:16px}
 .quick button{font-size:10px;line-height:1.2;padding:3px 8px;color:#fff;border:0;opacity:.85}.quick button:hover{opacity:1}.qs{background:var(--down)}.qb{background:var(--up)}
 .cell .ofstatus{position:absolute;left:8px;bottom:30px;z-index:4;font-size:11px;color:var(--muted);background:color-mix(in srgb,var(--bg) 80%,transparent);padding:1px 6px;border-radius:4px;pointer-events:none}.cell .ofstatus:empty{display:none}
 .cell .rt{position:absolute;right:70px;bottom:34px;z-index:4;display:none;border-radius:50%;width:26px;height:26px;padding:0}
+.cell .pbtns{position:absolute;z-index:5;display:flex;gap:1px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:1px}.cell .pbtns[hidden]{display:none}
+.pbtns button{border:0;background:none;padding:1px 6px;color:var(--muted)}.pbtns button:hover{color:var(--text)}.pbtns button:disabled{opacity:.35}
 .cell .link{position:absolute;right:66px;top:6px;z-index:5;width:12px;height:12px;border-radius:50%;padding:0;border:1px solid var(--muted);background:transparent}
 .split{position:absolute;z-index:8;background:transparent}.split:hover{background:var(--accent)}
 .split.col{top:0;bottom:0;width:6px;cursor:col-resize}.split.row{left:0;right:0;height:6px;cursor:row-resize}

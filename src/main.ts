@@ -8,6 +8,7 @@ import { renderLeftToolbar, wireLeftToolbar, renderFloating, drawingMenu, openPr
 import { loadSettings, DEFAULT_SETTINGS, SETTINGS_TABS, renderSettingsForm, readSettingsInput, type Settings } from './settings.ts';
 import { History, Snapshots } from './history.ts';
 import { styleFor } from './drawings.ts';
+import { sizeOf } from './tools/basic.ts';
 import { isExpr, parse } from './symmath.ts';
 import { showMenu, type MenuItem } from './menu.ts';
 import { newAccount, placeOrder, cancelOrder, closePosition, onPrice, equity, type Account, type OrderType, type Side } from './trading.ts';
@@ -37,7 +38,7 @@ const ARR: Record<string, Arrangement> = {
 const LINK_COLORS = ['', '#f23645', '#2962ff', '#089981', '#ff9800', '#9c27b0'];
 interface Layout {
   mode: string; panes: (PaneCfg & { link?: string })[]; active: number;
-  sync: { symbol: boolean; tf: boolean; crosshair: boolean; time: boolean };
+  sync: { symbol: boolean; tf: boolean; crosshair: boolean; time: boolean; replay?: boolean };
   colFr?: number[]; rowFr?: number[];
 }
 const DEFAULT_LAYOUT: Layout = { mode: '1', panes: [{ symbol: 'BTCUSDT', tf: '1h', type: 'candles', ind: ['ema50', 'rsi'] }], active: 0, sync: { symbol: false, tf: false, crosshair: true, time: false } };
@@ -123,6 +124,15 @@ const hooks: Hooks = {
     for (const p of panes) if (p !== src) try { p.chart.timeScale().setVisibleRange(r) } catch {}
     syncingTime = false;
   },
+  onReplay(src) {
+    // Replay all charts: with time sync or "Replay all charts" on, every chart follows this one's replay clock.
+    if (replaySyncing || !(st.layout.sync.replay || st.layout.sync.time)) return;
+    replaySyncing = true;
+    const t = src.replayTime();
+    for (const p of panes) if (p !== src) { if (t != null) p.replayTo(t); else if (p.replay || p.replayPending != null) p.exitReplay() }
+    replaySyncing = false;
+    syncUI();
+  },
   onActivate(p) { const i = panes.indexOf(p); if (i >= 0 && i !== st.layout.active) { st.layout.active = i; saveLayout(); syncUI(); domSync() } },
   onCfgChange() { saveLayout(); syncUI(); connectTickers() },
   setupLayer(p) {
@@ -157,7 +167,7 @@ const hooks: Hooks = {
   onScripts: p => { if (p === active()) { renderPineResults(p); p.legend(p.disp.at(-1)) } },
   scriptSettings: (p, id) => openInputs(p, id),
 };
-let syncingTime = false, crossPx: number | null = null;
+let syncingTime = false, replaySyncing = false, crossPx: number | null = null;
 
 // ---------- grid ----------
 function buildLayout() {
@@ -365,6 +375,22 @@ const drawHost: DrawUIHost = {
     if (price == null) return toast('This drawing has no price level right now');
     addAlert({ sym: p.cfg.symbol, price, drawingId: d.id, note: def!.name });
   },
+  paneLabels: () => active().paneLabels(),
+  positionOrder(d) {
+    const p = active(), sym = p.cfg.symbol, last = pxOf(sym);
+    if (!last) return toast('No price yet');
+    if (isExpr(sym)) return toast('Spread symbols cannot be traded');
+    if (p.replay) return toast('Exit Replay to place paper orders');
+    const z = sizeOf(d), long = d.type === 'long', entry = +d.pts[0].p.toFixed(p.prec), side: Side = long ? 'buy' : 'sell';
+    const step = Number(d.style.lotStep) > 0 ? Number(d.style.lotStep) : 10 ** -Number(d.style.qtyPrec ?? 4), qty = +(Math.floor(z.qty / step + 1e-9) * step).toFixed(8);
+    if (!(qty > 0)) return toast('Position size is 0: check account size, risk and stop');
+    // Entry within 0.05% of the market goes at market; otherwise a resting limit (better price) or stop (worse price).
+    const type: OrderType = Math.abs(entry - last) / last < 5e-4 ? 'market' : (long === entry < last) ? 'limit' : 'stop';
+    const tp = +d.pts[1].p.toFixed(p.prec), sl = +d.pts[2].p.toFixed(p.prec);
+    const lev = Number(d.style.leverage) > 1 ? ` · ${d.style.leverage}x margin ${z.margin.toFixed(2)}` : '';
+    if (!st.settings.instantOrders && !confirm(`${side.toUpperCase()} ${type} ${qty} ${sym}${type === 'market' ? '' : ' @ ' + entry} · TP ${tp} · SL ${sl}${lev} (paper)?`)) return;
+    submit({ sym, side, type, qty, price: type === 'market' ? undefined : entry, tp, sl }, last, p);
+  },
 };
 setZoomOut(() => { const ts = active().chart.timeScale(), r = ts.getVisibleLogicalRange(); if (r) { const w = r.to - r.from; ts.setVisibleLogicalRange({ from: r.from - w / 2, to: r.to + w / 2 }) } });
 wireLeftToolbar(drawHost);
@@ -394,6 +420,7 @@ function syncUI() {
   $('#replayBar').classList.toggle('open', !!p.replay || !!mr);
   $('#replayBtn').classList.toggle('on', !!p.replay || !!mr);
   $('#rpPlay').textContent = (mr ? mr.playing : p.replay?.timer) ? '⏸' : '▶';
+  const rpAll = $<HTMLInputElement>('#rpAll'); rpAll.checked = !!(st.layout.sync.replay || st.layout.sync.time); rpAll.disabled = st.layout.sync.time;
   $('#tSym').textContent = p.cfg.symbol;
   $('#pctBtn').classList.toggle('on', st.settings.scaleMode === 'percent');
   $('#logBtn').classList.toggle('on', st.settings.scaleMode === 'log');
@@ -467,6 +494,7 @@ $('#syncBtn').onclick = e => {
   showMenu(r.left, r.bottom + 2, [
     { label: 'Symbol', checked: s.symbol, action: t('symbol') }, { label: 'Interval', checked: s.tf, action: t('tf') },
     { label: 'Crosshair', checked: s.crosshair, action: t('crosshair') }, { label: 'Time / date range', checked: s.time, action: t('time') },
+    { label: 'Replay (all charts)', checked: !!s.replay, action: () => { s.replay = !s.replay; saveLayout(); syncUI() } },
     { sep: true }, { label: 'Link groups: use the dot in each chart’s corner', disabled: true },
   ]);
 };
@@ -527,6 +555,11 @@ const togglePlay = () => { const p = active(); if (replayButton(p, 'play', panes
 $('#rpPlay').onclick = togglePlay;
 $('#rpSpeed').onchange = () => { const p = active(); if (replayButton(p, 'speed', panes, +$<HTMLSelectElement>('#rpSpeed').value)) return; if (p.replay?.timer) p.playReplay(+$<HTMLSelectElement>('#rpSpeed').value) };
 $('#rpExit').onclick = () => { if (!replayButton(active(), 'exit', panes)) active().exitReplay(); syncUI() };
+$('#rpAll').onchange = e => {
+  const on = (e.target as HTMLInputElement).checked;
+  st.layout.sync.replay = on;
+  saveLayout(); if (on && active().replay) hooks.onReplay!(active());
+};
 
 // ---------- bottom toolbar ----------
 const RANGES: [string, string, number | 'ytd' | 'all'][] = [['1D', '1m', 86400], ['5D', '5m', 5 * 86400], ['1M', '30m', 30 * 86400], ['3M', '1h', 90 * 86400], ['6M', '2h', 182 * 86400], ['YTD', '1d', 'ytd'], ['1Y', '1d', 365 * 86400], ['5Y', '1w', 5 * 365 * 86400], ['All', '1M', 'all']];

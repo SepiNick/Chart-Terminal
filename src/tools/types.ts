@@ -22,6 +22,7 @@ export interface Drawing {
   locked?: boolean; hidden?: boolean;
   vis?: { min: number; max: number };             // visible only for timeframes (seconds) in [min, max]
   group?: string; name?: string;
+  pane?: number;                                  // chart pane index (0/undefined = main pane)
 }
 
 /** Coordinate helpers for the main pane, in CSS pixels relative to the pane's top-left. */

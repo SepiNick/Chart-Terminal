@@ -24,10 +24,12 @@ import type { TesterData } from './pine/report.ts';
 import { renderScript, type ScriptView } from './pine/render.ts';
 import type { Outputs } from './pine/interp.ts';
 import type { PineValue } from './pine/types.ts';
+import { showMenu } from './menu.ts';
 
 export type { ChartType } from './charttypes.ts';
 export interface ScriptRef { id: string; inputs: Record<string, PineValue>; hidden?: boolean }
-export interface PaneCfg { symbol: string; tf: string; type: ChartType; ind: string[]; compare?: string[]; scripts?: ScriptRef[]; of?: OFCfg }
+export type ScaleSide = 'right' | 'left' | 'none';
+export interface PaneCfg { symbol: string; tf: string; type: ChartType; ind: string[]; compare?: string[]; scripts?: ScriptRef[]; of?: OFCfg; scales?: Record<string, ScaleSide> }
 export interface ScriptRun { id: string; name: string; out?: Outputs; error?: ScriptError; ms: number; view?: ScriptView; tester?: TesterData }
 export interface Alert { id: number; sym: string; price: number; dir: 'up' | 'down'; on: boolean; drawingId?: number; note?: string }
 export interface Hooks {
@@ -49,6 +51,7 @@ export interface Hooks {
   compileNinja: () => NtCompileResult;
   onScripts: (pane: ChartPane) => void;
   scriptSettings: (pane: ChartPane, id: string) => void;
+  onReplay?: (pane: ChartPane) => void;   // replay started, stepped or ended on this chart (by the user, not by following)
 }
 const PAL = ['#2962ff', '#ff9800', '#e91e63', '#00bcd4', '#9c27b0', '#4caf50', '#795548', '#607d8b'];
 const SCALE = { normal: PriceScaleMode.Normal, log: PriceScaleMode.Logarithmic, percent: PriceScaleMode.Percentage, indexed: PriceScaleMode.IndexedTo100 };
@@ -112,14 +115,26 @@ export class ChartPane {
   private rtBtn: HTMLElement;
   private ofEl: HTMLElement;
   of: OrderFlow | null = null;
+  replayPending: number | null = null;   // replay time to follow once older history has loaded
+  private owners: string[] = [];         // what each pane shows: 'main', 'ind:<key>', 'script:<id>' (others unknown)
+  private ownersSym = '';
+  private paneMax: number | null = null;
+  private collapsed = new Set<number>();
+  private pbEl: HTMLElement;
   readonly cell: HTMLElement;
   private hooks: Hooks;
 
   constructor(cell: HTMLElement, cfg: PaneCfg, hooks: Hooks) {
     this.cell = cell; this.hooks = hooks;
     this.cfg = { compare: [], scripts: [], ...cfg, ind: [...cfg.ind] };
-    cell.innerHTML = '<div class="chart"></div><div class="legend"></div><div class="quick"></div><button class="rt" title="Scroll to the most recent bar">»</button><div class="ofstatus"></div>';
-    this.chartEl = $('.chart', cell); this.legendEl = $('.legend', cell); this.quickEl = $('.quick', cell); this.rtBtn = $('.rt', cell); this.ofEl = $('.ofstatus', cell);
+    cell.innerHTML = '<div class="chart"></div><div class="legend"></div><div class="quick"></div><button class="rt" title="Scroll to the most recent bar">»</button><div class="ofstatus"></div><div class="pbtns" hidden></div>';
+    this.chartEl = $('.chart', cell); this.legendEl = $('.legend', cell); this.quickEl = $('.quick', cell); this.rtBtn = $('.rt', cell); this.ofEl = $('.ofstatus', cell); this.pbEl = $('.pbtns', cell);
+    this.chartEl.addEventListener('mousemove', e => this.paneButtons(e));
+    cell.addEventListener('mouseleave', () => (this.pbEl.hidden = true));
+    this.pbEl.onclick = e => { const a = (e.target as HTMLElement).closest<HTMLElement>('[data-pa]')?.dataset.pa; if (a) this.paneAction(+this.pbEl.dataset.k!, a) };
+    // Double-click an indicator pane: maximize / restore; Ctrl+double-click: collapse.
+    this.chartEl.addEventListener('dblclick', e => { const k = this.paneAt(e.clientY); if (k > 0 && !e.defaultPrevented) this.paneAction(k, e.ctrlKey ? 'collapse' : 'max') });
+    this.legendEl.addEventListener('contextmenu', e => { const k = (e.target as HTMLElement).closest<HTMLElement>('[data-ind]')?.dataset.ind; if (k) { e.preventDefault(); this.indMenu(k, e.clientX, e.clientY) } });
     cell.addEventListener('mousedown', () => hooks.onActivate(this), true);
     this.rtBtn.onclick = () => this.chart.timeScale().scrollToRealTime();
     this.quickEl.onclick = e => { const s = (e.target as HTMLElement).closest<HTMLElement>('[data-side]')?.dataset.side; if (s) hooks.quickOrder(this, s as Side) };
@@ -127,6 +142,7 @@ export class ChartPane {
       const el = e.target as HTMLElement, k = el.closest<HTMLElement>('[data-ind]')?.dataset.ind; if (!k) return;
       if (el.dataset.act === 'hide') { const x = this.ind.find(i => i.key === k); if (x) { x.hidden = !x.hidden; Object.values(x.plots).forEach(s => s.applyOptions({ visible: !x.hidden })) } this.legend(this.disp.at(-1)) }
       if (el.dataset.act === 'remove') this.set({ ind: this.cfg.ind.filter(x => x !== k) });
+      if (el.dataset.act === 'more') { const r = el.getBoundingClientRect(); this.indMenu(k, r.left, r.bottom + 2) }
     };
     this.legendEl.addEventListener('click', e => {
       const el = e.target as HTMLElement, sid = el.closest<HTMLElement>('[data-script]')?.dataset.script; if (!sid) return;
@@ -211,6 +227,8 @@ export class ChartPane {
   build() {
     // Bar indices only mean the same thing if the bar series is the same kind.
     const keepRange = this.builtType === this.cfg.type ? this.chart?.timeScale().getVisibleLogicalRange() : null;
+    const prevOwners = this.ownersSym === this.cfg.symbol ? this.owners : [];
+    this.owners = ['main']; this.ownersSym = this.cfg.symbol; this.paneMax = null; this.collapsed.clear();
     this.builtType = this.cfg.type;
     const prevLayer = this.layer;
     this.cmp.forEach(c => c.unsub()); this.cmp = [];
@@ -257,26 +275,35 @@ export class ChartPane {
     if (!priceBased) for (const k of this.cfg.ind) {
       const d = INDICATORS[k]; if (!d) continue;
       const idx = d.pane ? ++pane : 0, plots: Record<string, ISeriesApi<SeriesType>> = {};
+      if (idx) this.owners[idx] = 'ind:' + k;
+      // Pin to scale: the main/pane scale by default, or right, left, or an invisible scale of its own ("no scale").
+      const pin = this.cfg.scales?.[k], priceScaleId = pin === 'none' ? 'ind-' + k : pin ?? (idx ? 'right' : scaleId);
       for (const key of Object.keys(d.calc(this.vb().slice(-5)))) {
         const hist = key === 'Hist';
         plots[key] = this.chart.addSeries(hist ? HistogramSeries : LineSeries, hist
-          ? { priceLineVisible: false, lastValueVisible: false }
-          : { color: PAL[color++ % PAL.length], lineWidth: idx ? 1 : 2, priceLineVisible: false, lastValueVisible: s.indLabels, crosshairMarkerVisible: false, ...(idx ? {} : { priceFormat: pf, priceScaleId: scaleId }) }, idx);
+          ? { priceLineVisible: false, lastValueVisible: false, priceScaleId }
+          : { color: PAL[color++ % PAL.length], lineWidth: idx ? 1 : 2, priceLineVisible: false, lastValueVisible: s.indLabels, crosshairMarkerVisible: false, priceScaleId, ...(idx ? {} : { priceFormat: pf }) }, idx);
         if (this.hooks.hidden().indicators) plots[key].applyOptions({ visible: false });
       }
+      // lightweight-charts shows an axis side in every pane or in none (pane 0 decides; differing panes crash its layout).
+      if (pin === 'left' || pin === 'right') this.chart.applyOptions({ [pin === 'left' ? 'leftPriceScale' : 'rightPriceScale']: { visible: true } });
+      if (pin === 'none') this.chart.priceScale(priceScaleId, idx).applyOptions({ scaleMargins: { top: 0.1, bottom: 0.1 } });
       d.levels?.forEach(l => Object.values(plots)[0]?.createPriceLine({ price: l, color: c('--muted'), lineStyle: LineStyle.Dashed, lineWidth: 1, axisLabelVisible: false }));
       this.ind.push({ key: k, name: d.name, calc: d.calc, plots });
     }
     this.scriptPaneBase = pane;
     this.renderScripts();
-    this.chart.panes().forEach((p, i) => p.setStretchFactor(i ? 1 : 3.5));
+    this.applyStretch();
+    this.remapDrawings(prevOwners);
     (this.cfg.compare ?? []).forEach((sym, i) => this.addCompare(sym, PAL[(i + 3) % PAL.length], scaleId));
 
     this.layer = new DrawingLayer({ chart: this.chart, series: this.main, bars: () => this.disp, tfSec: () => tfSeconds(this.cfg.tf), fmt: this.fmt }, this.chartEl);
     this.layer.drawings = this.hooks.drawings(this.cfg.symbol);
     if (prevLayer) Object.assign(this.layer, { cursor: prevLayer.cursor, color: prevLayer.color, hideAll: prevLayer.hideAll });
     this.main.attachPrimitive(this.layer);
+    this.layer.applyCursor();
     this.hooks.setupLayer(this);
+    if (this.remapped) { this.remapped = false; this.layer.onChange() }   // persist drawings that followed their pane
     if (ofActive(this.cfg.of, this.cfg.type) &&!isPriceBased(this.cfg.type) && !isExpr(this.cfg.symbol)) {
       this.of ??= new OrderFlow({
         symbol: () => this.cfg.symbol, tfSec: () => tfSeconds(this.cfg.tf), tf: () => this.cfg.tf, type: () => this.cfg.type, bars: () => this.vb(), prec: () => this.prec, cfg: () => this.cfg.of ?? defaultOF(),
@@ -304,6 +331,90 @@ export class ChartPane {
     if (keepRange) this.chart.timeScale().setVisibleLogicalRange(keepRange);
     else if (isPriceBased(this.cfg.type)) this.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, this.disp.length - 80), to: this.disp.length + 5 });
     if (s.countdown) this.countdownTimer = window.setInterval(() => this.countdown(), 1000);
+    this.layer.update();   // also draws into indicator panes (order flow adds its panes above)
+  }
+
+  // ---------- panes: buttons, maximize/collapse, drawings that live in a pane ----------
+  paneAt(clientY: number) { return this.chart.panes().findIndex(p => { const b = p.getHTMLElement()?.getBoundingClientRect(); return !!b && clientY >= b.top && clientY < b.bottom }) }
+  paneLabels(): string[] {
+    return this.chart.panes().map((_, i) => {
+      const o = this.owners[i] ?? '';
+      return !i ? 'Main pane' : o.startsWith('ind:') ? INDICATORS[o.slice(4)]?.name ?? o : o.startsWith('script:') ? this.scriptRuns.find(r => r.id === o.slice(7))?.name ?? 'Script' : `Pane ${i + 1}`;
+    });
+  }
+  private applyStretch() {
+    const ps = this.chart.panes(), max = this.paneMax != null && this.paneMax < ps.length ? this.paneMax : null;
+    ps.forEach((p, i) => p.setStretchFactor(max != null ? (i === max ? 1 : 1e-3) : this.collapsed.has(i) ? 0.12 : i ? 1 : 3.5));
+  }
+  /** Indicator panes get a small button group at their top right on hover. */
+  private paneButtons(e: MouseEvent) {
+    const k = this.paneAt(e.clientY), panes = this.chart.panes();
+    if (k < 1) { this.pbEl.hidden = true; return }
+    const b = panes[k].getHTMLElement()!.getBoundingClientRect(), c = this.cell.getBoundingClientRect();
+    this.pbEl.style.top = `${b.top - c.top + 4}px`;
+    this.pbEl.style.right = `${c.right - b.right + this.chart.priceScale('right', k).width() + 8}px`;
+    if (this.pbEl.hidden || this.pbEl.dataset.k !== String(k)) {
+      const btn = (a: string, icon: string, title: string, off = false) => `<button data-pa="${a}" title="${title}"${off ? ' disabled' : ''}>${icon}</button>`;
+      this.pbEl.innerHTML = btn('up', '↑', 'Move pane up', k < 2) + btn('down', '↓', 'Move pane down', k >= panes.length - 1) +
+        btn('max', this.paneMax === k ? '⤡' : '⤢', this.paneMax === k ? 'Restore pane (double-click)' : 'Maximize pane (double-click)') +
+        btn('collapse', this.collapsed.has(k) ? '▸' : '▾', this.collapsed.has(k) ? 'Expand pane' : 'Collapse pane (Ctrl+double-click)') + btn('del', '×', 'Remove pane');
+      this.pbEl.dataset.k = String(k); this.pbEl.hidden = false;
+    }
+  }
+  paneAction(k: number, a: string) {
+    const n = this.chart.panes().length, own = this.owners[k] ?? '';
+    this.pbEl.hidden = true;
+    if (k < 1 || k >= n) return;
+    if (a === 'max') { this.paneMax = this.paneMax === k ? null : k; this.collapsed.delete(k); return this.applyStretch() }
+    if (a === 'collapse') { if (!this.collapsed.delete(k)) this.collapsed.add(k); if (this.paneMax === k) this.paneMax = null; return this.applyStretch() }
+    if (a === 'del') {
+      if (own.startsWith('ind:')) return this.set({ ind: this.cfg.ind.filter(x => x !== own.slice(4)) });
+      if (own.startsWith('script:')) return this.set({ scripts: this.cfg.scripts!.filter(x => x.id !== own.slice(7)) });
+      // ponytail: panes we don't own (order flow, derivatives) go away until the next rebuild; their own menus turn them off for good
+      this.chart.removePane(k); this.owners.splice(k, 1);
+      return this.moveDrawings(i => (i === k ? 0 : i > k ? i - 1 : i));
+    }
+    const j = a === 'up' ? k - 1 : k + 1, oj = this.owners[j] ?? '';
+    if (j < 1 || j >= n) return;
+    const swap = <T>(arr: T[], x: T, y: T) => { const r = [...arr], i1 = r.indexOf(x), i2 = r.indexOf(y); [r[i1], r[i2]] = [r[i2], r[i1]]; return r };
+    // Built-in indicators and scripts keep their order in the chart config (drawings follow them in build()).
+    if (own.startsWith('ind:') && oj.startsWith('ind:')) return this.set({ ind: swap(this.cfg.ind, own.slice(4), oj.slice(4)) });
+    const sc = this.cfg.scripts ?? [], si = (o: string) => sc.find(x => x.id === o.slice(7));
+    if (own.startsWith('script:') && oj.startsWith('script:') && si(own) && si(oj)) return this.set({ scripts: swap(sc, si(own)!, si(oj)!) });
+    // ponytail: mixed swaps (indicator vs script vs order flow) are live only; the config order wins on the next rebuild
+    this.chart.swapPanes(k, j); [this.owners[k], this.owners[j]] = [oj, own];
+    this.moveDrawings(i => (i === k ? j : i === j ? k : i));
+  }
+  private moveDrawings(map: (pane: number) => number) {
+    let changed = false;
+    for (const d of this.layer.drawings) if (d.pane) { const to = map(d.pane); if (to !== d.pane) { changed = true; if (to) d.pane = to; else delete d.pane } }
+    if (changed) this.layer.onChange();
+    this.layer.update();
+  }
+  /** After a rebuild, drawings stay with the indicator/script pane they were in, even if its index changed. */
+  private remapDrawings(prev: string[]) {
+    if (prev.length < 2) return;
+    for (const d of this.hooks.drawings(this.cfg.symbol)) {
+      const o = d.pane ? prev[d.pane] : undefined; if (!o) continue;
+      const to = this.owners.indexOf(o);
+      if (to !== d.pane) { if (to > 0) d.pane = to; else delete d.pane; this.remapped = true }
+    }
+  }
+  private remapped = false;
+  /** Legend menu of a built-in indicator: pin to scale, remove. */
+  private indMenu(k: string, x: number, y: number) {
+    const cur = this.cfg.scales?.[k];
+    const pin = (v?: ScaleSide) => () => { const scales = { ...this.cfg.scales }; if (v) scales[k] = v; else delete scales[k]; this.set({ scales }) };
+    showMenu(x, y, [
+      { label: 'Pin to scale', sub: [
+        { label: 'Default (same as now)', checked: !cur, action: pin() },
+        { label: 'Right scale', checked: cur === 'right', action: pin('right') },
+        { label: 'Left scale', checked: cur === 'left', action: pin('left') },
+        { label: 'No scale (own range)', checked: cur === 'none', action: pin('none') },
+      ] },
+      { sep: true },
+      { label: 'Remove', icon: '×', action: () => this.set({ ind: this.cfg.ind.filter(x => x !== k) }) },
+    ]);
   }
 
   private addCompare(sym: string, color: string, scaleId: string) {
@@ -343,6 +454,7 @@ export class ChartPane {
     this.scriptRuns = []; this.scriptMarkers = [];
     if (isPriceBased(this.cfg.type)) return;
     let pane = this.scriptPaneBase, color = 3;
+    this.owners.length = pane + 1;
     for (const ref of this.cfg.scripts ?? []) {
       const sc = this.hooks.script(ref.id), job = this.testerJob(ref.id);
       if (!sc || !job) continue;
@@ -363,6 +475,7 @@ export class ChartPane {
       const res = run;
       if (res.out && !ref.hidden) {
         run.view = renderScript(this.chart, this.main, res.out, this.vb(), res.out.meta.overlay ? 0 : pane + 1, color);
+        for (let j = 1; j <= run.view.panesUsed; j++) this.owners[pane + j] = 'script:' + ref.id;
         pane += run.view.panesUsed; color += res.out.plots.length;
         this.scriptMarkers.push(...run.view.markers);
       }
@@ -408,7 +521,7 @@ export class ChartPane {
     if (!this.cfg.scripts?.length) return;
     const wait = 2000 - (Date.now() - this.lastScriptRun);
     clearTimeout(this.scriptTimer);
-    this.scriptTimer = window.setTimeout(() => { if (!this.chart) return; this.renderScripts(); this.tradeOverlay(); this.main.setData(this.withBarColors(toSeriesData(this.cfg.type, this.vb(), this.typeOpts())) as never) }, Math.max(0, wait));
+    this.scriptTimer = window.setTimeout(() => { if (!this.chart) return; this.renderScripts(); this.applyStretch(); this.layer.update(); this.tradeOverlay(); this.main.setData(this.withBarColors(toSeriesData(this.cfg.type, this.vb(), this.typeOpts())) as never) }, Math.max(0, wait));
   }
   refresh() {
     this.rerunScripts();
@@ -504,7 +617,7 @@ export class ChartPane {
       for (const e of this.ind) {
         const vals = s.indValues && i >= 0 ? Object.entries(e.calc(this.vb().slice(0, i + 1))).map(([k, v]) => `<span title="${esc(k)}">${v.at(-1) == null ? '∅' : (+v.at(-1)!).toFixed(Math.min(this.prec, 4))}</span>`).join(' ') : '';
         const name = s.indArgs ? e.name : e.name.replace(/[\d\s.,]+$/, '');
-        html += `<div class="ind${e.hidden ? ' off' : ''}" data-ind="${esc(e.key)}"><span class="n">${esc(name)}</span> ${vals} <span class="ia"><button data-act="hide" title="Hide">👁</button><button data-act="remove" title="Remove">×</button></span></div>`;
+        html += `<div class="ind${e.hidden ? ' off' : ''}" data-ind="${esc(e.key)}"><span class="n">${esc(name)}</span> ${vals} <span class="ia"><button data-act="hide" title="Hide">👁</button><button data-act="more" title="More: pin to scale…">⋯</button><button data-act="remove" title="Remove">×</button></span></div>`;
       }
       for (const r of this.scriptRuns) {
         const ref = this.cfg.scripts?.find(x => x.id === r.id);
@@ -589,6 +702,29 @@ export class ChartPane {
     this.pauseReplay();
     this.replay = { idx: i + 1 }; this.setData(); this.hooks.onCfgChange();
     this.chart.timeScale().scrollToRealTime();
+    this.hooks.onReplay?.(this);
+  }
+  /** Replay clock: close time of the last bar shown, null when not replaying. */
+  replayTime(): number | null { const r = this.replay, b = r && !r.picking ? this.bars[r.idx - 1] : undefined; return b ? b.time + tfSeconds(this.cfg.tf) : null }
+  /** Follow another chart's Replay: show only the bars that have closed by time t (older history is loaded first). */
+  async replayTo(t: number) {
+    if (!this.bars.length || isPriceBased(this.cfg.type)) return;
+    if (!this.replay || this.replay.picking) {
+      const busy = this.replayPending != null;
+      this.replayPending = t;
+      if (busy) return;
+      this.replay = null;
+      await this.goTo(t - 200 * tfSeconds(this.cfg.tf));   // some context before the replay start
+      if (this.replayPending == null) return;   // the leader left Replay meanwhile
+      t = this.replayPending; this.replayPending = null;
+    }
+    const sec = tfSeconds(this.cfg.tf), j = this.bars.findIndex(b => b.time + sec > t), i = Math.max(1, j < 0 ? this.bars.length : j);
+    const prev = this.replay?.idx;
+    if (prev === i) return;
+    this.pauseReplay();
+    this.replay = { idx: i };
+    if (prev != null && i === prev + 1) { this.refresh(); this.legend(this.disp.at(-1)) } else this.setData();
+    if (prev == null) this.chart.timeScale().scrollToRealTime();
   }
   replayRandom() { if (this.bars.length > 100) this.startReplayAt(this.bars[50 + Math.floor(Math.random() * (this.bars.length - 100))].time) }
   replayFirst() { if (this.bars.length > 2) this.startReplayAt(this.bars[1].time) }
@@ -597,9 +733,13 @@ export class ChartPane {
     if (this.replay.idx >= this.bars.length) { this.pauseReplay(); toast('Replay reached real-time data'); this.hooks.onCfgChange(); return }
     this.replay.idx++; // replay prices never reach live alerts or the paper account
     this.refresh();
+    this.hooks.onReplay?.(this);
   }
-  stepBack() { if (this.replay && !this.replay.picking && this.replay.idx > 2) { this.replay.idx--; this.setData() } }
+  stepBack() { if (this.replay && !this.replay.picking && this.replay.idx > 2) { this.replay.idx--; this.setData(); this.hooks.onReplay?.(this) } }
   playReplay(ms: number) { this.pauseReplay(); if (this.replay) this.replay.timer = window.setInterval(() => this.stepReplay(), ms) }
   pauseReplay() { if (this.replay?.timer) { clearInterval(this.replay.timer); this.replay.timer = undefined } }
-  exitReplay(redraw = true) { this.pauseReplay(); this.replay = null; if (redraw && this.main) { this.setData(); this.chart.timeScale().scrollToRealTime() } }
+  exitReplay(redraw = true) {
+    const was = !!this.replay; this.pauseReplay(); this.replay = null; this.replayPending = null;
+    if (redraw && this.main) { this.setData(); this.chart.timeScale().scrollToRealTime(); if (was) this.hooks.onReplay?.(this) }
+  }
 }
