@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "node --experimental-strip-types --test src/*.test.ts src/tools/*.test.ts src/pine/*.test.ts src/pine/lib/*.test.ts src/mql/*.test.ts src/mql/*/*.test.ts src/ninja/*.test.ts src/ninja/*/*.test.ts src/tester/*.test.ts src/orderflow/*.test.ts src/journal/*.test.ts",
+    "test": "node --experimental-strip-types --test src/*.test.ts src/tools/*.test.ts src/pine/*.test.ts src/pine/lib/*.test.ts src/mql/*.test.ts src/mql/*/*.test.ts src/ninja/*.test.ts src/ninja/*/*.test.ts src/tester/*.test.ts src/orderflow/*.test.ts src/journal/*.test.ts src/risk/*.test.ts",
     "server": "node server/index.ts"
   },
   "dependencies": {

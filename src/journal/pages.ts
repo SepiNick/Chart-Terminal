@@ -262,6 +262,8 @@ function settings() {
       <td>${a.transfers.map(t => `<span class="${cls(t.amount)}" title="${esc(t.note ?? '')}">${money(t.amount)} <small>${fmtDate(t.t, false)}</small> <button class="x" data-trdel="${esc(a.id)}:${esc(t.id)}">✕</button></span>`).join('<br>') || '—'}</td>
       <td>${money(balance(j, a.id), false)}</td><td><button data-tr="${esc(a.id)}">± Deposit / withdraw</button><button data-acren="${esc(a.id)}">Rename</button><button data-acbal="${esc(a.id)}">Initial…</button>${a.kind === 'paper' ? '' : `<button data-acdel="${esc(a.id)}" class="dn">Delete</button>`}</td></tr>`).join('')}</table>
       <div class="row"><button data-act="acNew">＋ New account</button><button data-act="acNewBt">＋ New backtest account</button></div>`, 'The paper account is filled automatically; others take manual entries and statement imports.', 'wide')}
+    ${card('Bar Replay', `<label class="jw-field"><span>Log Replay trades to</span><select data-set="replayAccount">${(j.accounts ?? []).filter(a => a.kind === 'backtest').map(a => `<option value="${esc(a.id)}" ${a.id === j.replayAccount ? 'selected' : ''}>${esc(a.name)}</option>`).join('') || '<option value="">A new backtest account (created on the first Replay order)</option>'}</select></label>
+      <label class="jw-field"><span>Bars before the entry when replaying a trade</span><input type="number" min="1" max="2000" data-set="replayBars" value="${j.replayBars ?? 50}"></label>`, 'Orders placed on a chart in Bar Replay fill on a separate simulated account at replay prices, never the live paper account. They are journaled with the replay time.')}
     ${card('Display', `<label class="jw-field"><span>Calendar</span><select data-set="calendar"><option value="gregorian" ${j.calendar !== 'jalali' ? 'selected' : ''}>Gregorian</option><option value="jalali" ${j.calendar === 'jalali' ? 'selected' : ''}>Jalali (Solar Hijri)</option></select></label>`)}
     ${list('entryReasons', 'Entry reasons')}${list('exitReasons', 'Exit reasons')}${list('motives', 'Entry motives')}${list('setups', 'Setups / playbooks')}${list('tagList', 'Tags')}
     ${card('Custom fields', `<div class="chips">${(j.fields ?? []).map((f, i) => `<span class="chip">${esc(f.label)} <small class="muted">${f.type}</small><button class="x" data-rm="fields:${i}">✕</button></span>`).join('') || '<span class="muted">None — add them from an entry’s “Custom fields” tab.</span>'}</div>`)}
@@ -339,6 +341,8 @@ async function onChange(e: Event, page: string) {
   if (el.dataset.pp && propDraft) { const k = el.dataset.pp as keyof Prop; (propDraft as unknown as Record<string, unknown>)[k] = k === 'start' ? Date.parse(el.value) / 1000 : ['target', 'maxDD', 'dailyDD', 'minDays'].includes(k) ? +el.value : el.value; return }
   if (el.dataset.imp != null) { const s = new Set(calFilter.impact.split(',')); el.checked ? s.add(el.dataset.imp) : s.delete(el.dataset.imp); calFilter.impact = [...s].join(','); return loadCalendar() }
   if (el.dataset.ccy != null) { calFilter.ccy = el.value; return loadCalendar() }
+  if (el.dataset.set === 'replayAccount') { j.replayAccount = el.value || undefined; commitJournal(); return }
+  if (el.dataset.set === 'replayBars') { j.replayBars = Math.max(1, Math.min(2000, Math.round(+el.value) || 50)); commitJournal(); return }
   if (el.dataset.set === 'calendar') { j.calendar = el.value as Journal['calendar']; commitJournal(); return rerender(page) }
   if (el.id === 'jwRestore') {
     const f = el.files?.[0]; el.value = ''; if (!f) return;

@@ -49,6 +49,8 @@ export interface Journal {
   checklists?: Checklist[]; docs?: Note[]; fields?: CustomField[]; props?: Prop[];
   activeDays?: number[];                    // weekdays (0 = Sunday) that count for the discipline streak
   calendar?: 'gregorian' | 'jalali';
+  replayAccount?: string;                   // backtest account that orders placed during Bar Replay are logged to
+  replayBars?: number;                      // bars shown before the entry when a trade is replayed
 }
 
 export const EMOTIONS = ['Calm', 'Confident', 'Focused', 'Uncertain', 'Fearful', 'Greedy', 'FOMO', 'Revenge', 'Bored', 'Tired', 'Euphoric', 'Frustrated'];
@@ -78,9 +80,9 @@ const sign = (t: JTrade) => (t.dir === 'long' ? 1 : -1);
 export const uid = () => `j${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 /** Fold one fill into the journal. Returns trades that were opened and closed by it (for prompting). */
-export function applyFill(j: Journal, sym: string, f: JFill, ctx: { tf?: string; source?: string; stop?: number; target?: number } = {}) {
-  const opened: JTrade[] = [], closed: JTrade[] = [];
-  let open = j.trades.find(t => t.sym === sym && t.status === 'open' && (t.accountId ?? 'paper') === 'paper');
+export function applyFill(j: Journal, sym: string, f: JFill, ctx: { tf?: string; source?: string; stop?: number; target?: number; accountId?: string } = {}) {
+  const opened: JTrade[] = [], closed: JTrade[] = [], acc = ctx.accountId ?? 'paper';
+  let open = j.trades.find(t => t.sym === sym && t.status === 'open' && (t.accountId ?? 'paper') === acc);
   let qty = f.qty, fee = f.fee;
   const dir = f.side === 'buy' ? 'long' : 'short';
   if (open && open.dir !== dir) {
@@ -95,7 +97,7 @@ export function applyFill(j: Journal, sym: string, f: JFill, ctx: { tf?: string;
   }
   if (qty > 1e-12) {
     if (!open) {
-      open = { id: uid(), accountId: 'paper', kind: 'trade', createdAt: Date.now() / 1000, sym, dir, status: 'open', openTime: f.t, qty: 0, maxQty: 0, avgEntry: f.px, exitQty: 0, gross: 0, fees: 0, net: 0, fills: [], mfe: 0, mae: 0, tf: ctx.tf, source: ctx.source, stop: ctx.stop, target: ctx.target };
+      open = { id: uid(), accountId: acc, kind: 'trade', createdAt: Date.now() / 1000, sym, dir, status: 'open', openTime: f.t, qty: 0, maxQty: 0, avgEntry: f.px, exitQty: 0, gross: 0, fees: 0, net: 0, fills: [], mfe: 0, mae: 0, tf: ctx.tf, source: ctx.source, stop: ctx.stop, target: ctx.target };
       j.trades.push(open); opened.push(open);
     }
     open.avgEntry = (open.avgEntry * open.qty + f.px * qty) / (open.qty + qty);
@@ -110,7 +112,7 @@ export function applyFill(j: Journal, sym: string, f: JFill, ctx: { tf?: string;
 export function syncFills(j: Journal, a: Account, now: number, ctx: (sym: string) => Parameters<typeof applyFill>[3] = () => ({})) {
   const opened: JTrade[] = [], closed: JTrade[] = [];
   if (a.fills.length < j.seen) {   // account was reset: positions are gone
-    for (const t of j.trades) if (t.status === 'open') { t.status = 'closed'; t.closeTime = now; t.notes = [t.notes, 'Closed by paper account reset'].filter(Boolean).join('\n') }
+    for (const t of j.trades) if (t.status === 'open' && (t.accountId ?? 'paper') === 'paper') { t.status = 'closed'; t.closeTime = now; t.notes = [t.notes, 'Closed by paper account reset'].filter(Boolean).join('\n') }
     j.seen = 0;
   }
   const fresh: Fill[] = a.fills.slice(0, a.fills.length - j.seen).reverse();
@@ -123,17 +125,28 @@ export function syncFills(j: Journal, a: Account, now: number, ctx: (sym: string
   return { opened, closed };
 }
 
-/** Track max favourable / adverse excursion of open trades on a price tick. */
-export function mark(j: Journal, sym: string, px: number) {
+/** Track max favourable / adverse excursion of open trades (of one account) on a price tick. */
+export function mark(j: Journal, sym: string, px: number, accountId = 'paper') {
   let changed = false;
   for (const t of j.trades) {
-    if (t.status !== 'open' || t.sym !== sym) continue;
+    if (t.status !== 'open' || t.sym !== sym || (t.accountId ?? 'paper') !== accountId) continue;
     const u = (px - t.avgEntry) * t.qty * sign(t) + t.gross;
     if (u > t.mfe) { t.mfe = u; changed = true }
     if (u < t.mae) { t.mae = u; changed = true }
   }
   return changed;
 }
+
+/** Index of the bar that contains time `t` (last bar starting at or before it), or -1. */
+export function barIndex(bars: { time: number }[], t: number) {
+  let lo = 0, hi = bars.length - 1, r = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (bars[m].time <= t) { r = m; lo = m + 1 } else hi = m - 1 }
+  return r;
+}
+/** Prices a bar is assumed to have traded through, for filling resting orders bar by bar:
+ *  open, the nearer extreme, the other extreme, close. */
+export const barPath = (b: { open: number; high: number; low: number; close: number }) =>
+  b.high - b.open < b.open - b.low ? [b.open, b.high, b.low, b.close] : [b.open, b.low, b.high, b.close];
 
 /** Profit in units of initial risk (needs a planned stop). */
 export function rMultiple(t: JTrade): number | null {

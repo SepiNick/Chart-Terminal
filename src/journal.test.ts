@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newAccount, placeOrder, closePosition, onPrice } from './trading.ts';
-import { mark, newJournal, rMultiple, stats, syncFills, toCsv, incomplete } from './journal.ts';
+import { applyFill, barIndex, barPath, mark, newJournal, rMultiple, stats, syncFills, toCsv, incomplete } from './journal.ts';
 
 test('journal: open, scale in, partial exit, close → one round trip with matching P&L', () => {
   const a = newAccount(10000), j = newJournal();
@@ -67,4 +67,30 @@ test('journal: stats, CSV and account reset', () => {
   a.fills = []; a.pos = {};
   syncFills(j, a, 7);
   assert.ok(j.trades.every(t => t.status === 'closed'));
+});
+
+test('journal: Bar Replay fills go to their own account with the replay time, apart from the paper trades', () => {
+  const a = newAccount(10000), j = newJournal();
+  placeOrder(a, { sym: 'BTC', side: 'buy', type: 'market', qty: 1 }, 100, 1);
+  syncFills(j, a, 5000);
+  // a replay long on the same symbol, at 2021 bar times
+  applyFill(j, 'BTC', { t: 1_609_459_200, side: 'buy', qty: 2, px: 30000, fee: 0, realized: 0 }, { accountId: 'bt', source: 'Bar Replay', stop: 29000 });
+  mark(j, 'BTC', 31000, 'bt'); mark(j, 'BTC', 200);   // paper ticks never touch the replay trade
+  const r = applyFill(j, 'BTC', { t: 1_609_462_800, side: 'sell', qty: 2, px: 31000, fee: 0, realized: 2000 }, { accountId: 'bt' });
+  const bt = j.trades.find(t => t.accountId === 'bt')!, paper = j.trades.find(t => t.accountId === 'paper')!;
+  assert.equal(r.closed[0], bt);
+  assert.equal(bt.openTime, 1_609_459_200); assert.equal(bt.closeTime, 1_609_462_800);
+  assert.equal(bt.net, 2000); assert.equal(bt.mfe, 2000); assert.equal(rMultiple(bt), 1);
+  assert.equal(paper.status, 'open'); assert.equal(paper.qty, 1); assert.equal(paper.mfe, 100);
+  // a paper account reset closes paper trades only
+  applyFill(j, 'ETH', { t: 1, side: 'buy', qty: 1, px: 10, fee: 0, realized: 0 }, { accountId: 'bt' });
+  syncFills(j, newAccount(), 6000);
+  assert.equal(paper.status, 'closed'); assert.equal(j.trades.find(t => t.sym === 'ETH')!.status, 'open');
+});
+
+test('journal: replay helpers find the bar of a time and walk a bar', () => {
+  const bars = [{ time: 0 }, { time: 60 }, { time: 120 }];
+  assert.equal(barIndex(bars, -1), -1); assert.equal(barIndex(bars, 0), 0); assert.equal(barIndex(bars, 90), 1); assert.equal(barIndex(bars, 999), 2);
+  assert.deepEqual(barPath({ open: 10, high: 11, low: 5, close: 8 }), [10, 11, 5, 8]);
+  assert.deepEqual(barPath({ open: 10, high: 15, low: 9, close: 12 }), [10, 9, 15, 12]);
 });
