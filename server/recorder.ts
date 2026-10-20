@@ -14,7 +14,8 @@ migration('recorder/1', `
 
 /** A print plus the exchange's trade id when it has a sequential one (Binance aggregate trade id). */
 export type RecPrint = Print & { id?: number };
-export type Source = (sym: string, lastId: number | undefined, on: (ps: RecPrint[]) => void) => () => void;
+/** lastId: Binance's last aggregate trade id; since: time (ms) of the last recorded print, for sources without ids. */
+export type Source = (sym: string, lastId: number | undefined, on: (ps: RecPrint[]) => void, since?: number) => () => void;
 
 export const RETENTION_DAYS = 30, MAX_ROWS = 200_000;
 const BYTES_PER_ROW = 64;   // row + (sym, t) index entry, measured roughly; stats are approximate by design
@@ -64,11 +65,11 @@ export function binanceSource(sym: string, lastId: number | undefined, on: (ps: 
   return () => { alive = false; clearTimeout(timer); ws?.close() };
 }
 
-/** Binance plain symbols via the aggTrade stream; EXCH:SYMBOL via CCXT (no trade ids, so no gap backfill there). */
-const liveSource: Source = (sym, lastId, on) => {
+/** Binance plain symbols via the aggTrade stream; EXCH:SYMBOL via CCXT (gap backfill by time, see watchPrints). */
+const liveSource: Source = (sym, lastId, on, since) => {
   if (!isRemote(sym)) return binanceSource(sym, lastId, on);
   const { exchange, symbol } = splitSym(sym);
-  return watchPrints(exchange, symbol, on);
+  return watchPrints(exchange, symbol, on, since);
 };
 
 /** Swappable for tests. */
@@ -143,8 +144,9 @@ export function apply() {
   for (const sym of want) if (!live.has(sym)) {
     // Backfill only a recent gap (e.g. a server restart); an old recording just starts again from now.
     const lastRow = db.prepare('SELECT t, id FROM prints WHERE sym = ? ORDER BY t DESC LIMIT 1').get(sym) as { t: number; id: number | null } | undefined;
-    const lastId = lastRow?.id != null && deps.now() / 1000 - lastRow.t < 3600 ? lastRow.id : undefined;
-    try { live.set(sym, deps.source(sym, lastId, ps => add(sym, ps))) } catch (e) { console.error(`[recorder] ${sym}: ${(e as Error).message}`) }
+    const recent = !!lastRow && deps.now() / 1000 - lastRow.t < 3600;
+    const lastId = recent && lastRow!.id != null ? lastRow!.id : undefined, since = recent && lastRow!.id == null ? lastRow!.t * 1000 : undefined;
+    try { live.set(sym, deps.source(sym, lastId, ps => add(sym, ps), since)) } catch (e) { console.error(`[recorder] ${sym}: ${(e as Error).message}`) }
   }
 }
 export function stopAll() { flush(); live.forEach(s => s()); live.clear() }

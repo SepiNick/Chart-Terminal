@@ -66,7 +66,7 @@ function applyInputs(s: any, cls: any, inputs?: Record<string, unknown>) {
 /** Run `className` over opts.bars: lifecycle SetDefaults → Configure → DataLoaded → Historical → bars → Transition → Realtime → Terminated. */
 export function runNinja(classes: Record<string, Function>, className: string, _rt: Rt, opts: NtRunOptions): NtResult {
   const e = new Engine(opts, classes, BUILTINS), prev = setEngine(e), c0 = e.ctxs[0], N = opts.bars.length;
-  const res: NtResult = { kind: 'indicator', name: className, overlay: false, plots: [], lines: [], draws: [], backColors: [], barColors: [], logs: e.logs };
+  const res: NtResult = { kind: 'indicator', name: className, overlay: false, plots: [], lines: [], draws: [], backColors: [], barColors: [], logs: e.logs, alerts: e.alerts };
   let root: any = null, phase = 'OnStateChange';
   try {
     const cls: any = classes[className];

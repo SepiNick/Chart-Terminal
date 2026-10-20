@@ -1,11 +1,13 @@
 // Strict validation of AlertInput coming from clients (another device may send anything).
-import type { AlertInput, AlertSource, Channel, LineRef } from '../../src/alerttypes.ts';
+import type { AlertInput, AlertSource, Channel, LineRef, ScriptSource } from '../../src/alerttypes.ts';
 import { validTf } from '../../src/data.ts';
 import { compile, isError } from '../../src/pine/engine.ts';
 import { bad } from '../core/http.ts';
 import { EX_RE, SYM_RE } from '../market.ts';
 import { isExchange } from '../ccxt.ts';
 import { CONDITIONS, FREQUENCIES, isChannel, isMoving } from './evaluate.ts';
+import { validSource } from '../scriptsource.ts';
+import { buildJob } from '../scripts.ts';
 
 const CHANNELS: Channel[] = ['popup', 'push', 'telegram', 'email', 'webhook'];
 const KEYS = new Set(['name', 'sym', 'tf', 'source', 'condition', 'value', 'value2', 'bars', 'frequency', 'expires', 'channels', 'webhook', 'message', 'active', 'autoStop']);
@@ -34,6 +36,14 @@ function script(x: unknown) {
   if (isError(p)) throw bad(`Script error (line ${p.line}): ${p.msg}`);
   return src;
 }
+/** MQL / NinjaScript: sources only, compiled here once so a broken script is refused up front. */
+function code(x: unknown, sym: unknown, tf: unknown): ScriptSource | undefined {
+  if (x === undefined) return undefined;
+  const c = validSource(obj(x, 'code'));
+  if (c.lang === 'pine') throw bad('Pine goes in script');
+  try { buildJob(c, String(sym), String(tf)) } catch (e) { throw bad(`Script error: ${(e as Error).message}`) }
+  return c;
+}
 function inputs(x: unknown) {
   if (x === undefined) return undefined;
   const o = obj(x, 'inputs'), keys = Object.keys(o);
@@ -56,11 +66,13 @@ function line(x: unknown, what: string): LineRef {
   if (er !== undefined) out.extendRight = er;
   return out;
 }
-function source(x: unknown): AlertSource {
-  const s = obj(x, 'source');
+function source(x: unknown, sym: unknown, tf: unknown): AlertSource {
+  const s = obj(x, 'source'), cd = code(s.code, sym, tf);
+  // MQL / NinjaScript: `script` is just the main file (for display); `code` is what runs.
+  const scr = (v: unknown) => cd ? str(v, 'script', 1024 * 1024) : script(v);
   switch (s.kind) {
     case 'price': return { kind: 'price' };
-    case 'indicator': return { kind: 'indicator', script: script(s.script), inputs: inputs(s.inputs), plot: int(s.plot ?? 0, 'plot', 0, 63) };
+    case 'indicator': return { kind: 'indicator', script: scr(s.script), ...(cd ? { code: cd } : {}), inputs: inputs(s.inputs), plot: int(s.plot ?? 0, 'plot', 0, 63) };
     case 'drawing': {
       const out: AlertSource = { kind: 'drawing', line: line(s.line, 'line') };
       if (s.drawingId !== undefined) out.drawingId = str(s.drawingId, 'drawingId', 100);
@@ -69,7 +81,7 @@ function source(x: unknown): AlertSource {
     }
     case 'script': {
       if (s.event !== 'alertcondition' && s.event !== 'alert' && s.event !== 'strategy') throw bad('Bad script event');
-      const out: AlertSource = { kind: 'script', script: script(s.script), inputs: inputs(s.inputs), event: s.event };
+      const out: AlertSource = { kind: 'script', script: scr(s.script), ...(cd ? { code: cd } : {}), inputs: inputs(s.inputs), event: s.event };
       if (s.event === 'alertcondition') out.index = int(s.index ?? 0, 'index', 0, 63);
       return out;
     }
@@ -84,7 +96,7 @@ export function validateInput(x: unknown, now = Date.now()): AlertInput {
   const tf = str(b.tf, 'tf', 6);
   if (!validTf(tf) || +tf.slice(0, -1) > 1000) throw bad('Bad timeframe');
   if (!FREQUENCIES.includes(b.frequency as never)) throw bad('Bad frequency');
-  const src = source(b.source);
+  const src = source(b.source, b.sym, tf);
   const a: AlertInput = { sym: validSym(b.sym), tf, source: src, frequency: b.frequency as AlertInput['frequency'], channels: [], message: '', active: true };
 
   if (b.name !== undefined && b.name !== '') a.name = str(b.name, 'name', 100).trim() || undefined;

@@ -89,3 +89,45 @@ test('media upload, serve, delete', async () => {
 test('PUT over 8 MB is refused', async () => {
   assert.equal((await call('PUT', '/api/state/ok', { value: 'x'.repeat(9 * 1024 * 1024) })).status, 413);
 });
+
+test('one device can be signed out: its requests and its socket stop working', async () => {
+  const r = await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'correct horse' }) });
+  const other = r.headers.get('set-cookie')!.split(';')[0];
+  const ws = new WebSocket(base.replace('http', 'ws') + '/ws', { headers: { cookie: other } });
+  await new Promise(ok => ws.once('open', ok));
+  const closed = new Promise<number>(ok => ws.once('close', code => ok(code)));
+
+  const list = await (await call('GET', '/api/auth/sessions')).json() as { id: string; current: boolean }[];
+  assert.equal(list.filter(s => s.current).length, 1);
+  const target = (await (await fetch(base + '/api/auth/sessions', { headers: { cookie: other } })).json() as { id: string; current: boolean }[]).find(s => s.current)!;
+  assert.match(target.id, /^[0-9a-f]{16}$/);
+  assert.equal((await call('DELETE', '/api/auth/sessions/0000000000000000')).status, 404);
+  assert.equal((await call('DELETE', `/api/auth/sessions/${target.id}`)).status, 204);
+  assert.equal(await closed, 4001);
+  assert.equal((await fetch(base + '/api/state', { headers: { cookie: other } })).status, 401);
+  assert.equal((await call('GET', '/api/state')).status, 200, 'this device stays signed in');
+});
+
+test('share links: public snapshot image, logged-in layout copy', async () => {
+  await import('./share.ts');
+  const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+  assert.equal((await call('POST', '/api/share/snapshot', new Uint8Array([1]), { 'content-type': 'image/svg+xml' })).status, 400);
+  const snap = await (await call('POST', '/api/share/snapshot', png, { 'content-type': 'image/png' })).json() as { id: string; url: string };
+  assert.match(snap.url, /^\/s\/[\w-]{22}$/);
+  const img = await fetch(base + snap.url);   // no cookie: anyone with the link
+  assert.equal(img.status, 200); assert.equal(img.headers.get('content-type'), 'image/png');
+  assert.deepEqual(new Uint8Array(await img.arrayBuffer()), png);
+  assert.equal((await fetch(base + '/s/nope')).status, 404);
+
+  assert.equal((await call('POST', '/api/share/layout', { layout: {} })).status, 400);
+  const lay = await (await call('POST', '/api/share/layout', { name: 'Mine', layout: { panes: [{ symbol: 'BTCUSDT' }] }, drawings: { BTCUSDT: [] } })).json() as { id: string; url: string };
+  assert.equal(lay.url, `/?layout=${lay.id}`);
+  assert.equal((await fetch(`${base}/api/share/layout/${lay.id}`)).status, 401, 'layouts need a login');
+  assert.equal((await (await call('GET', `/api/share/layout/${lay.id}`)).json() as { name: string }).name, 'Mine');
+  assert.equal((await fetch(base + `/s/${lay.id}`)).status, 404, 'a layout id is not an image');
+  const shared = await (await call('GET', '/api/share')).json() as { id: string; kind: string; name: string | null; url: string }[];
+  assert.deepEqual(shared.map(x => [x.kind, x.name, x.url]).sort(), [['layout', 'Mine', lay.url], ['snap', null, snap.url]]);
+  assert.equal((await fetch(base + '/api/share')).status, 401);
+  assert.equal((await call('DELETE', `/api/share/${snap.id}`)).status, 204);
+  assert.equal((await fetch(base + snap.url)).status, 404);
+});

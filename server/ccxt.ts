@@ -137,29 +137,56 @@ export async function trades(id: string, sym: string): Promise<Print[]> {
   return (await x.fetchTrades(m.ccxt, undefined, 1000)).map(r => toPrint(r as CcxtTrade)).filter((p): p is Print => !!p).sort((a, b) => a.t - b.t);
 }
 
-/** Live prints: watchTrades over WebSocket, else poll fetchTrades and pass on only new ones. */
-export function watchPrints(id: string, sym: string, on: (ps: Print[]) => void): () => void {
+type CcxtTradeId = CcxtTrade & { id?: string };
+/**
+ * Keeps prints new and in order across overlapping fetches: CCXT trades have no sequence number, so a print counts
+ * as seen when it is older than the newest timestamp, or has that timestamp and an id (or price/size) already passed on.
+ */
+export function printFilter(seen: number) {
+  let edge = new Set<string>();
+  return (rows: CcxtTradeId[]): Print[] => {
+    const out: Print[] = [];
+    for (const r of [...rows].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0))) {
+      const p = toPrint(r); if (!p) continue;
+      const ms = r.timestamp!, key = r.id ?? `${p.px}|${p.qty}|${p.buy}`;
+      if (ms < seen || (ms === seen && edge.has(key))) continue;
+      if (ms > seen) { seen = ms; edge = new Set() }
+      edge.add(key); out.push(p);
+    }
+    return out;
+  };
+}
+
+/**
+ * Live prints: watchTrades over WebSocket, else poll fetchTrades. With `since` (ms), and after every WebSocket error,
+ * first pages fetchTrades from the last print seen so a restart or disconnect leaves no hole (where the exchange allows it).
+ */
+export function watchPrints(id: string, sym: string, on: (ps: Print[]) => void, since?: number): () => void {
   let alive = true;
   (async () => {
     const { x, m } = await resolve(id, sym);
     const p = proOf(id);
+    // +1 ms: the last recorded print itself must not come back (one at that same ms could be missed instead — rarer).
+    let last = since != null ? since + 1 : Date.now();
+    const filter = printFilter(last);
+    const pass = (rows: unknown[]) => { const ps = filter(rows as CcxtTradeId[]); if (ps.length && alive) { last = Math.round(ps.at(-1)!.t * 1000); on(ps) } return ps.length };
+    const backfill = async () => {
+      if (!x.has.fetchTrades) return;
+      // ponytail: capped at 50 pages; exchanges that ignore `since` only return their latest trades, so a long outage may still leave a hole.
+      for (let i = 0; i < 50 && alive; i++) {
+        try { if (!pass(await x.fetchTrades(m.ccxt, last, 1000))) break } catch { break }
+      }
+    };
+    if (since != null) await backfill();
     if (p?.has.watchTrades) {
-      let seen = 0;
       while (alive) {
-        try {
-          const rows = await p.watchTrades(m.ccxt);
-          const ps = rows.map(r => toPrint(r as CcxtTrade)).filter((q): q is Print => !!q && q.t * 1000 > seen);
-          if (ps.length && alive) { seen = Math.max(seen, ...ps.map(q => q.t * 1000)); on(ps) }
-        } catch { await new Promise(r => setTimeout(r, 3000)) }
+        try { pass(await p.watchTrades(m.ccxt)) }
+        catch { await new Promise(r => setTimeout(r, 3000)); await backfill() }
       }
       return;
     }
-    let seen = Date.now();
     while (alive) {
-      try {
-        const ps = (await x.fetchTrades(m.ccxt, seen, 500)).map(r => toPrint(r as CcxtTrade)).filter((q): q is Print => !!q && q.t * 1000 > seen);
-        if (ps.length && alive) { seen = Math.max(...ps.map(q => q.t * 1000)); on(ps) }
-      } catch {}
+      try { pass(await x.fetchTrades(m.ccxt, last, 500)) } catch {}
       await new Promise(r => setTimeout(r, 2000));
     }
   })().catch(() => {});

@@ -1,6 +1,6 @@
 // Server alerts on the client (docs/phase5-contracts.md §9): create/edit dialog, side panel, log and popups.
 // The top half is pure (tested in alertsui.test.ts); DOM work only happens inside functions.
-import type { Alert, AlertInput, AlertLog, AlertSource, Channel, Condition, Frequency, LineRef } from './alerttypes.ts';
+import type { Alert, AlertInput, AlertLog, AlertSource, Channel, Condition, Frequency, LineRef, ScriptSource } from './alerttypes.ts';
 import type { Drawing, Pt } from './tools/types.ts';
 import { $, esc, store, toast } from './store.ts';
 import { api, onServer } from './sync.ts';
@@ -159,8 +159,9 @@ export const PLACEHOLDERS = ['ticker', 'exchange', 'interval', 'close', 'open', 
 export interface AlertCtx {
   sym: string; tf: string; price: number | null; prec: number;
   drawings: Drawing[];
-  plots: { label: string; name: string; script: string; inputs?: Record<string, unknown>; plot: number; last?: number }[];
-  scripts: { id: string; name: string; src: string; inputs: Record<string, unknown>; conds: { title: string; message: string }[]; strategy: boolean }[];
+  // code: MQL / NinjaScript sources (the server compiles them); absent for Pine.
+  plots: { label: string; name: string; script: string; code?: ScriptSource; inputs?: Record<string, unknown>; plot: number; last?: number }[];
+  scripts: { id: string; name: string; src: string; code?: ScriptSource; inputs: Record<string, unknown>; conds: { title: string; message: string }[]; strategy: boolean }[];
   drawingName: (d: Drawing) => string;
 }
 export interface AlertsHost { ctx(): AlertCtx; changed(): void; beep(): void; toastMs(): number }
@@ -247,15 +248,15 @@ let opts: SrcOpt[] = [], editing: Alert | null = null, msgTouched = false, ctx: 
 
 function sourceOptions(c: AlertCtx): SrcOpt[] {
   const o: SrcOpt[] = [{ group: '', label: 'Price', source: { kind: 'price' }, key: 'price' }];
-  c.plots.forEach((p, i) => o.push({ group: 'Indicators', label: p.label, name: p.name, value: p.last, key: `plot:${i}`, source: { kind: 'indicator', script: p.script, ...(p.inputs ? { inputs: p.inputs } : {}), plot: p.plot } }));
+  c.plots.forEach((p, i) => o.push({ group: 'Indicators', label: p.label, name: p.name, value: p.last, key: `plot:${i}`, source: { kind: 'indicator', script: p.script, ...(p.code ? { code: p.code } : {}), ...(p.inputs ? { inputs: p.inputs } : {}), plot: p.plot } }));
   for (const d of c.drawings) {
     const g = drawingLine(d); if (!g) continue;
     o.push({ group: 'Drawings', label: c.drawingName(d), name: c.drawingName(d), key: `drawing:${d.id}`, source: { kind: 'drawing', drawingId: String(d.id), ...g } });
   }
   for (const s of c.scripts) {
-    const base = { kind: 'script' as const, script: s.src, inputs: s.inputs };
+    const base = { kind: 'script' as const, script: s.src, ...(s.code ? { code: s.code } : {}), inputs: s.inputs };
     s.conds.forEach((x, i) => o.push({ group: s.name, label: `alertcondition: ${x.title}`, name: `${s.name} · ${x.title}`, message: x.message || undefined, key: `script:${s.id}:ac:${i}`, source: { ...base, event: 'alertcondition', index: i } }));
-    o.push({ group: s.name, label: 'Any alert() call', name: s.name, message: '{{ticker}} {{interval}}: ' + s.name, key: `script:${s.id}:alert`, source: { ...base, event: 'alert' } });
+    o.push({ group: s.name, label: s.code ? 'Any Alert() call' : 'Any alert() call', name: s.name, message: '{{ticker}} {{interval}}: ' + s.name, key: `script:${s.id}:alert`, source: { ...base, event: 'alert' } });
     if (s.strategy) o.push({ group: s.name, label: 'Order fills', name: s.name, message: '{{strategy.order.action}} {{strategy.order.contracts}} {{ticker}} @ {{strategy.order.price}}', key: `script:${s.id}:strategy`, source: { ...base, event: 'strategy' } });
   }
   return o;
@@ -273,7 +274,7 @@ export function openAlertDialog(p: DialogPreset = {}) {
   }
   if (p.scriptId) {
     sel = opts.findIndex(o => o.key.startsWith(`script:${p.scriptId}:`));
-    if (sel < 0) return toast('Alerts on scripts need a Pine script that compiled on this chart');
+    if (sel < 0) return toast('Alerts on scripts need a script that compiled on this chart');
   }
   const a = editing, px = p.value ?? ctx.price, prec = ctx.prec;
   const ch = new Set<Channel>(a?.channels ?? store.get<Channel[]>('alertChannels', ['popup']));

@@ -17,8 +17,8 @@ import { defaultOF, type OFCfg } from './orderflow/layer.ts';
 import { hasOrderFlow } from './orderflow/feed.ts';
 import { initDom, domSync } from './orderflow/domui.ts';
 import { initJournal, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
-import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults } from './pineui.ts';
-import { serverMode, onServer } from './sync.ts';
+import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
+import { serverMode, onServer, api } from './sync.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
 
@@ -289,7 +289,7 @@ function serverLines(): Alert[] {
   }
   return out;
 }
-/** What the active chart offers to the alert dialog: drawings, indicator plots (as Pine) and Pine scripts. */
+/** What the active chart offers to the alert dialog: drawings, indicator plots and scripts (Pine, MQL, NinjaScript). */
 function alertCtx(): AlertCtx {
   const p = active(), sym = p.cfg.symbol, bars = p.vb(), drawings = st.drawings[sym] ?? [];
   const plots: AlertCtx['plots'] = [], scripts: AlertCtx['scripts'] = [];
@@ -300,10 +300,12 @@ function alertCtx(): AlertCtx {
   }
   for (const r of p.scriptRuns) {
     const sc = scriptById(r.id), ref = p.cfg.scripts?.find(x => x.id === r.id);
-    if (!sc || (sc.lang ?? 'pine') !== 'pine' || !r.out || r.error) continue;
-    const inputs = ref?.inputs ?? {};
-    r.out.plots.forEach((pl, i) => { if (pl.kind === 'line') plots.push({ label: `${r.name} · ${pl.title || 'Plot ' + (i + 1)}`, name: `${sym} ${r.name}`, script: sc.src, inputs, plot: i, last: Number.isFinite(pl.values.at(-1)) ? pl.values.at(-1) : undefined }) });
-    scripts.push({ id: r.id, name: r.name, src: sc.src, inputs, conds: r.out.alertconditions.map(c => ({ title: c.title, message: c.message })), strategy: r.out.meta.kind === 'strategy' });
+    if (!sc || !r.out || r.error) continue;
+    const inputs = ref?.inputs ?? {}, src = (sc.lang ?? 'pine') === 'pine' ? undefined : sourceFor(r.id, p.prec) ?? undefined;
+    if ((sc.lang ?? 'pine') !== 'pine' && !src) continue;
+    const code = src ? { code: src } : {};
+    r.out.plots.forEach((pl, i) => { if (pl.kind === 'line') plots.push({ label: `${r.name} · ${pl.title || 'Plot ' + (i + 1)}`, name: `${sym} ${r.name}`, script: sc.src, ...code, inputs, plot: i, last: Number.isFinite(pl.values.at(-1)) ? pl.values.at(-1) : undefined }) });
+    scripts.push({ id: r.id, name: r.name, src: sc.src, ...code, inputs, conds: r.out.alertconditions.map(c => ({ title: c.title, message: c.message })), strategy: r.out.meta.kind === 'strategy' || !!r.tester });
   }
   const drawingName = (d: Drawing) => {
     const def = TOOL_MAP.get(d.type), n = d.name ?? def?.name ?? d.type;
@@ -467,10 +469,21 @@ $('#shotBtn').onclick = e => {
   showMenu(r.left, r.bottom + 2, [
     { label: 'Download image', hint: 'Ctrl+Alt+S', action: () => downloadShot(canvas(), p) },
     { label: 'Copy image', hint: 'Ctrl+Shift+S', action: () => copyShot(canvas()) },
+    ...(serverMode ? [{ label: 'Copy link to image', action: () => shareShot(canvas()) }] : []),
     { label: 'Export chart data (CSV)', action: () => p.exportCsv() },
   ]);
 };
 function downloadShot(c: HTMLCanvasElement, p: ChartPane) { const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = `${p.cfg.symbol}_${p.cfg.tf}_${new Date().toISOString().slice(0, 16)}.png`; a.click() }
+/** Copy a link to text; falls back to a prompt where the clipboard is blocked (plain http on the LAN). */
+const copyLink = (url: string, what: string) => navigator.clipboard.writeText(url).then(() => toast(`${what} link copied`), () => { prompt(`${what} link`, url) });
+/** Upload the image to the server and copy its public /s/… link. */
+function shareShot(c: HTMLCanvasElement) {
+  c.toBlob(async b => {
+    if (!b) return;
+    try { const r = await api<{ url: string }>('/api/share/snapshot', { body: b }); copyLink(location.origin + r.url, 'Image') }
+    catch (e) { toast((e as Error).message) }
+  }, 'image/png');
+}
 function copyShot(c: HTMLCanvasElement) { c.toBlob(b => b && navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(() => toast('Chart image copied'), () => toast('Clipboard not available'))) }
 $('#themeBtn').onclick = () => applySettings({ theme: st.settings.theme === 'dark' ? 'light' : 'dark', bgColor: '', gridColor: '', scaleTextColor: '', separatorColor: '' });
 
@@ -661,21 +674,30 @@ $('#lySave').onclick = () => (st.layoutName === 'Unnamed' ? $('#lySaveAs').click
 $('#lySaveAs').onclick = () => { const n = prompt('Layout name', st.layoutName === 'Unnamed' ? '' : st.layoutName + ' copy')?.trim(); if (n) saveAs(n) };
 $('#lyNew').onclick = () => { st.layout = structuredClone(DEFAULT_LAYOUT); st.layoutName = 'Unnamed'; store.set('layoutName', 'Unnamed'); buildLayout(); renderLayouts() };
 $('#lyAuto').onchange = e => { st.autosave = (e.target as HTMLInputElement).checked; store.set('autosave', st.autosave) };
-$('#lyExport').onclick = () => {
+const layoutFile = () => {
   const syms = new Set(st.layout.panes.map(p => p.symbol));
-  const blob = new Blob([JSON.stringify({ name: st.layoutName, layout: st.layout, drawings: Object.fromEntries([...syms].map(s => [s, st.drawings[s] ?? []])) }, null, 1)], { type: 'application/json' });
+  return { name: st.layoutName, layout: st.layout, drawings: Object.fromEntries([...syms].map(s => [s, st.drawings[s] ?? []])) };
+};
+$('#lyExport').onclick = () => {
+  const blob = new Blob([JSON.stringify(layoutFile(), null, 1)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${st.layoutName}.layout.json`; a.click();
 };
+/** Add a layout file (export, or a share link) as a new saved layout and open it. */
+function importLayout(j: { name?: string; layout?: Layout; drawings?: Record<string, Drawing[]> }, suffix: string) {
+  if (!j.layout?.panes) throw Error('Not a layout file');
+  for (const [s, d] of Object.entries(j.drawings ?? {})) st.drawings[s] = [...(st.drawings[s] ?? []), ...d];
+  store.set('drawings', st.drawings);
+  const n = `${j.name ?? 'Imported'} (${suffix})`; st.layouts[n] = j.layout; store.set('layouts', st.layouts); loadLayout(n); renderLayouts();
+}
 $('#lyImport').onchange = async e => {
   const f = (e.target as HTMLInputElement).files?.[0]; if (!f) return;
-  try {
-    const j = JSON.parse(await f.text());
-    if (!j.layout?.panes) throw Error('Not a layout file');
-    for (const [s, d] of Object.entries(j.drawings ?? {})) st.drawings[s] = [...(st.drawings[s] ?? []), ...(d as Drawing[])];
-    store.set('drawings', st.drawings);
-    const n = `${j.name ?? 'Imported'} (imported)`; st.layouts[n] = j.layout; store.set('layouts', st.layouts); loadLayout(n); renderLayouts();
-  } catch (err) { toast((err as Error).message) }
+  try { importLayout(JSON.parse(await f.text()), 'imported') } catch (err) { toast((err as Error).message) }
 };
+$('#lyShare').onclick = async () => {
+  try { const r = await api<{ url: string }>('/api/share/layout', { body: layoutFile() }); copyLink(location.origin + r.url, 'Layout') }
+  catch (e) { toast((e as Error).message) }
+};
+$('#lyShare').hidden = !serverMode;
 $('#lyT').onclick = e => {
   const el = e.target as HTMLElement, n = el.closest<HTMLElement>('[data-n]')?.dataset.n; if (!n) return;
   if (el.dataset.a === 'del') { if (confirm(`Delete layout “${n}”? This can’t be undone.`)) { delete st.layouts[n]; store.set('layouts', st.layouts); if (st.layoutName === n) { st.layoutName = 'Unnamed'; store.set('layoutName', 'Unnamed'); syncUI() } renderLayouts() } return }
@@ -1005,5 +1027,11 @@ if (serverMode) {
 }
 renderAlerts();
 history.onChange();
+// A shared layout link (/?layout=…) opens a copy of that layout, with its drawings, as a new saved layout.
+const sharedLayout = new URLSearchParams(location.search).get('layout');
+if (serverMode && sharedLayout) {
+  window.history.replaceState(null, '', location.pathname);
+  api<Parameters<typeof importLayout>[0]>(`/api/share/layout/${encodeURIComponent(sharedLayout)}`).then(j => { importLayout(j, 'shared'); toast('Shared layout opened') }, e => toast((e as Error).message));
+}
 
 if (import.meta.env.DEV) Object.assign(window, { __ct: { panes: () => panes, st, history } }); // debugging handle, dev server only

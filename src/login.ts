@@ -87,7 +87,7 @@ export function accountMenu() {
     const r = b.getBoundingClientRect();
     m.style.top = `${r.bottom + 4}px`; m.style.right = `${Math.max(4, innerWidth - r.right)}px`;
     m.innerHTML = `<div class="ctx-i muted" style="pointer-events:none">Signed in · ${esc(LABEL[st])}</div><hr>
-      <div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="password">Change password…</div><hr>
+      <div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div><hr>
       <div class="ctx-i" data-a="logout">Log out</div>`;
     document.body.append(m);
     const off = () => { m.remove(); removeEventListener('pointerdown', out, true) };
@@ -97,6 +97,7 @@ export function accountMenu() {
       const a = (ev.target as HTMLElement).closest<HTMLElement>('[data-a]')?.dataset.a; if (!a) return;
       off();
       if (a === 'sessions') void sessions();
+      if (a === 'shares') void shares();
       if (a === 'password') changePassword();
       if (a === 'logout') void logout();
     };
@@ -125,14 +126,44 @@ function changePassword() {
     };
   });
 }
+/** Snapshot and layout links made with "Copy link to image" / "Share link"; deleting one makes it stop working. */
+async function shares() {
+  type L = { id: string; kind: 'snap' | 'layout'; url: string; name: string | null; created: number; bytes: number };
+  let list: L[];
+  try { list = await api<L[]>('/api/share') } catch (e) { return toast((e as Error).message) }
+  const t = (ms: number) => new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  dialog('Shared links', `${list.length ? `<table><tr><th>What</th><th>Created</th><th></th></tr>
+    ${list.map(s => `<tr><td>${s.kind === 'snap' ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">Chart image</a> <span class="muted">${Math.ceil(s.bytes / 1024)} KB</span>` : `Layout “${esc(s.name ?? '')}”`}</td><td>${esc(t(s.created))}</td>
+      <td style="white-space:nowrap"><button type="button" data-copy="${esc(s.url)}">Copy</button> <button type="button" data-del="${esc(s.id)}">Delete</button></td></tr>`).join('')}</table>` : '<p class="muted">No shared links.</p>'}
+    <p class="muted">Anyone who has an image link can open it. Layout links only work for you, signed in.</p>
+    <div class="row"><span class="grow"></span><button class="on">Close</button></div>`, (f, close) => {
+    f.onsubmit = e => { e.preventDefault(); close() };
+    f.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach(b => b.onclick = () => {
+      const url = location.origin + b.dataset.copy!;
+      navigator.clipboard.writeText(url).then(() => toast('Link copied'), () => { prompt('Link', url) });
+    });
+    f.querySelectorAll<HTMLButtonElement>('[data-del]').forEach(b => b.onclick = async () => {
+      try { await api(`/api/share/${encodeURIComponent(b.dataset.del!)}`, { method: 'DELETE' }); b.closest('tr')!.remove(); toast('Link deleted') }
+      catch (e) { toast((e as Error).message) }
+    });
+  });
+}
 async function sessions() {
-  type S = { created: number; last_seen: number; agent: string | null; ip: string | null };
+  type S = { id: string; created: number; last_seen: number; agent: string | null; ip: string | null; current: boolean };
   let list: S[];
   try { list = await api<S[]>('/api/auth/sessions') } catch (e) { return toast((e as Error).message) }
   const t = (ms: number) => new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const device = (a: string | null) => !a ? 'Unknown' : /iPhone|iPad/.test(a) ? 'iPhone / iPad' : /Android/.test(a) ? 'Android' : /Windows/.test(a) ? 'Windows' : /Mac OS/.test(a) ? 'Mac' : /Linux/.test(a) ? 'Linux' : a.slice(0, 40);
-  dialog('Devices & sessions', `<table><tr><th>Device</th><th>Address</th><th>Last active</th><th>Signed in</th></tr>
-    ${list.map(s => `<tr title="${esc(s.agent ?? '')}"><td>${esc(device(s.agent))}</td><td>${esc(s.ip ?? '')}</td><td>${esc(t(s.last_seen))}</td><td>${esc(t(s.created))}</td></tr>`).join('')}</table>
-    <p class="muted">To sign every other device out, change the password.</p>
-    <div class="row"><span class="grow"></span><button class="on">Close</button></div>`, (f, close) => { f.onsubmit = e => { e.preventDefault(); close() } });
+  dialog('Devices & sessions', `<table><tr><th>Device</th><th>Address</th><th>Last active</th><th></th></tr>
+    ${list.map(s => `<tr title="${esc(`${s.agent ?? ''}
+Signed in ${t(s.created)}`)}"><td>${esc(device(s.agent))}${s.current ? ' <span class="muted">(this device)</span>' : ''}</td><td>${esc(s.ip ?? '')}</td><td>${esc(t(s.last_seen))}</td>
+      <td>${s.current ? '' : `<button type="button" data-end="${esc(s.id)}" style="white-space:nowrap">Sign out</button>`}</td></tr>`).join('')}</table>
+    <p class="muted">To sign every other device out at once, change the password.</p>
+    <div class="row"><span class="grow"></span><button class="on">Close</button></div>`, (f, close) => {
+    f.onsubmit = e => { e.preventDefault(); close() };
+    f.querySelectorAll<HTMLButtonElement>('[data-end]').forEach(b => b.onclick = async () => {
+      try { await api(`/api/auth/sessions/${encodeURIComponent(b.dataset.end!)}`, { method: 'DELETE' }); b.closest('tr')!.remove(); toast('Device signed out') }
+      catch (e) { toast((e as Error).message) }
+    });
+  });
 }

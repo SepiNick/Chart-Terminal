@@ -29,3 +29,12 @@ test('FX catalogue and Yahoo mapping', () => {
   assert.equal(yahooBase('4h')?.base, '1h');
   assert.equal(yahooBase('1M')?.interval, '1mo');
 });
+
+test('CCXT print filter: overlapping pages pass each trade once, in time order', async () => {
+  const { printFilter } = await import('./ccxt.ts');
+  const t = (ms: number, id: string, side = 'buy') => ({ timestamp: ms, price: 10, amount: 1, side, id });
+  const f = printFilter(1000);
+  assert.deepEqual(f([t(1001, 'b'), t(999, 'old'), t(1000, 'a')]).map(p => p.t), [1, 1.001]);
+  assert.deepEqual(f([t(1001, 'b'), t(1001, 'c'), t(1002, 'd')]).map(p => Math.round(p.t * 1000)), [1001, 1002], 'b was already passed on, c shares its ms');
+  assert.deepEqual(f([t(1002, 'd')]), []);
+});

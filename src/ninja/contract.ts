@@ -53,6 +53,7 @@ export interface NtResult {
   backColors: (string | null)[];          // BackBrush per bar
   barColors: (string | null)[];           // BarBrush per bar
   logs: { bar: number; msg: string }[];   // Print / Log
+  alerts?: { bar: number; msg: string }[];   // Alert() calls
   // strategies
   trades?: Trade[];
   equity?: number[];

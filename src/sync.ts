@@ -19,11 +19,11 @@ export function setServerMode(on: boolean) { serverMode = on }
 /** Random id of this tab: sent in `sync.hello` and as `x-ct-client`, so the server doesn't echo our own writes back. */
 export const clientId = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
 
-/** JSON call to the server API; throws Error(message) on failure (with `.status` when the server answered). */
+/** Call to the server API (JSON body, or a Blob sent as is); throws Error(message) on failure (with `.status` when the server answered). */
 export async function api<T>(path: string, init: { method?: string; body?: unknown; keepalive?: boolean } = {}): Promise<T> {
-  const headers: Record<string, string> = { 'x-ct-client': clientId };
-  if (init.body !== undefined) headers['content-type'] = 'application/json';
-  const r = await fetch(path, { method: init.method ?? (init.body === undefined ? 'GET' : 'POST'), headers, body: init.body === undefined ? undefined : JSON.stringify(init.body), credentials: 'same-origin', keepalive: init.keepalive });
+  const headers: Record<string, string> = { 'x-ct-client': clientId }, blob = init.body instanceof Blob;
+  if (init.body !== undefined) headers['content-type'] = blob ? (init.body as Blob).type : 'application/json';
+  const r = await fetch(path, { method: init.method ?? (init.body === undefined ? 'GET' : 'POST'), headers, body: init.body === undefined ? undefined : blob ? init.body as Blob : JSON.stringify(init.body), credentials: 'same-origin', keepalive: init.keepalive });
   if (r.status === 204) return undefined as T;
   const j = await r.json().catch(() => ({ error: `Server error ${r.status}` }));
   if (!r.ok) throw Object.assign(Error((j as { error?: string }).error ?? String(r.status)), { status: r.status });
@@ -144,7 +144,9 @@ async function resync() {
   for (const k of [...revs.keys()]) if (!(k in st)) applyRemote(k, null, 0);
 }
 
-let started = false, wait = 1000;
+let started = false, wait = 1000, sock: WebSocket | null = null;
+/** Send a `{ op, ... }` message on the event socket; false while it is not open. */
+export function wsSend(msg: Record<string, unknown>): boolean { if (sock?.readyState !== 1) return false; sock.send(JSON.stringify(msg)); return true }
 /** Open the event socket (server mode, after login). Reconnects with backoff. */
 export function startSync() {
   if (started) return; started = true;
@@ -153,7 +155,7 @@ export function startSync() {
   connect(false);
 }
 function connect(again: boolean) {
-  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  const ws = (sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`));
   let opened = false;
   ws.onopen = () => {
     opened = true; online = true; wait = 1000; status();

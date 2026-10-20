@@ -6,11 +6,15 @@ export type LineRef =
   | { type: 'hline'; price: number }
   | { type: 'trend'; t1: number; p1: number; t2: number; p2: number; extendLeft?: boolean; extendRight?: boolean };
 
+/** A script as sources; the server compiles it itself and never runs JS sent by a client. */
+export interface ScriptSource { lang: 'pine' | 'mql4' | 'mql5' | 'ninja'; files: Record<string, string>; main: string; cls?: string; prec: number }
+
+// `script` is the Pine source; for MQL / NinjaScript `code` carries the sources (and `script` the main file, for display).
 export type AlertSource =
   | { kind: 'price' }                                                                    // last price (forming bar's close)
-  | { kind: 'indicator'; script: string; inputs?: Record<string, unknown>; plot: number }  // Pine indicator source; value of plot N
+  | { kind: 'indicator'; script: string; code?: ScriptSource; inputs?: Record<string, unknown>; plot: number }  // value of plot N
   | { kind: 'drawing'; drawingId?: string; line: LineRef; line2?: LineRef }               // line2: second edge for channel conditions
-  | { kind: 'script'; script: string; inputs?: Record<string, unknown>; event: 'alertcondition' | 'alert' | 'strategy'; index?: number };
+  | { kind: 'script'; script: string; code?: ScriptSource; inputs?: Record<string, unknown>; event: 'alertcondition' | 'alert' | 'strategy'; index?: number };
 
 export type Condition =
   | 'crossing' | 'crossing_up' | 'crossing_down' | 'greater' | 'less'

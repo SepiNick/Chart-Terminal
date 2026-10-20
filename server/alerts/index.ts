@@ -7,7 +7,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Alert, AlertLog, Channel } from '../../src/alerttypes.ts';
 import { tfSeconds, type Bar } from '../../src/data.ts';
-import { runScript } from '../../src/pine/engine.ts';
+import { scriptSig } from '../../src/scriptsig.ts';
+import type { ScriptSource } from '../scripts.ts';
+import { engineOut } from '../engine.ts';
 import type { Outputs } from '../../src/pine/interp.ts';
 import { db, migration } from '../core/db.ts';
 import { HttpError, bad, broadcast, route } from '../core/http.ts';
@@ -41,68 +43,94 @@ function changed() { broadcast({ type: 'alerts', alerts: list() }); sync() }
 function stop(a: Alert, reason: string) { a.active = false; a.stoppedReason = reason; save(a); changed() }
 
 // ---------- live series: one watchSeries per (sym, tf) that an active alert needs ----------
-interface Run { id: number; at: number; upd: number; r: ReturnType<typeof runScript> }
-const watchers = new Map<string, { stop: () => void; runs: Map<string, Run> }>();
-let runSeq = 0, updSeq = 0;
+/** Swappable for tests (no network, scripts on this thread). */
+export const deps = { watch: watchSeries, notify, run: engineOut, now: () => Date.now() };
+/** Script runs per (script, inputs, precision) on one series: one in flight, the latest bars queued behind it. */
+interface ScriptState { at: number; busy: boolean; queued?: { bars: Bar[]; closed: boolean } }
+const watchers = new Map<string, { stop: () => void; scripts: Map<string, ScriptState> }>();
 
 function sync() {
   const need = new Set(list().filter(a => a.active).map(a => `${a.sym}|${a.tf}`));
   for (const [k, w] of watchers) if (!need.has(k)) { w.stop(); watchers.delete(k) }
   for (const k of need) if (!watchers.has(k)) {
-    const [sym, tf] = k.split('|'), w = { stop: () => {}, runs: new Map<string, Run>() };
+    const [sym, tf] = k.split('|'), w = { stop: () => {}, scripts: new Map<string, ScriptState>() };
     watchers.set(k, w);
-    w.stop = watchSeries(sym, tf, (bars, closed) => onBars(sym, tf, w.runs, bars, closed));
+    w.stop = deps.watch(sym, tf, (bars, closed) => onBars(sym, tf, w.scripts, bars, closed));
   }
 }
 
-function onBars(sym: string, tf: string, runs: Map<string, Run>, bars: Bar[], closed: boolean) {
-  const now = Date.now(), upd = ++updSeq;
+const safe = (a: Alert, f: () => void) => { try { f() } catch (e) { console.error(`[alerts] ${a.id}: ${(e as Error).message}`) } };
+const isScript = (a: Alert): a is Alert & { source: Extract<Alert['source'], { script: string }> } => a.source.kind === 'indicator' || a.source.kind === 'script';
+
+function onBars(sym: string, tf: string, scripts: Map<string, ScriptState>, bars: Bar[], closed: boolean) {
+  const now = deps.now(), prec = digits(bars), keys = new Set<string>();
   for (const a of list()) {
     if (!a.active || a.sym !== sym || a.tf !== tf) continue;
-    try { evaluate(a, bars, closed, now, upd, runs) }
-    catch (e) { console.error(`[alerts] ${a.id}: ${(e as Error).message}`) }
+    if (isScript(a)) keys.add(keyOf(a, prec)); else safe(a, () => evaluate(a, bars, closed, now));
   }
+  for (const k of keys) request(sym, tf, scripts, k, prec, bars, closed);
 }
 
-const mintick = (bars: Bar[]) => {
+const digits = (bars: Bar[]) => {
   let d = 0;
   for (const b of bars.slice(-50)) { const s = String(b.close); d = Math.max(d, s.includes('e-') ? 8 : s.split('.')[1]?.length ?? 0) }
-  return 10 ** -Math.min(d, 8);
+  return Math.min(d, 8);
 };
-
-/**
- * One shared Pine run per (script, inputs) on this series: reused while the bar forms for RUN_EVERY ms, fresh on every
- * bar close. Each alert consumes a given run once (st.lastRun), so throttling is per alert and per script at the same time.
- */
-function scriptRun(a: Alert, bars: Bar[], closed: boolean, now: number, upd: number, runs: Map<string, Run>): Run | null {
-  const src = a.source as Extract<Alert['source'], { script: string }>;
-  const key = `${src.script}\0${JSON.stringify(src.inputs ?? {})}`;
-  let run = runs.get(key);
-  if (!run || (run.upd !== upd && (closed || now - run.at >= RUN_EVERY))) {
-    const r = runScript(src.script, bars, { symbol: a.sym, tf: a.tf, tfSec: tfSeconds(a.tf), mintick: mintick(bars), inputs: src.inputs as never });
-    runs.set(key, (run = { id: ++runSeq, at: now, upd, r }));
-  }
-  const st = stateOf(a);
-  if (st.lastRun === run.id) return null;
-  st.lastRun = run.id;
-  return run;
+/** What runs: Pine source or MQL / NinjaScript sources (compiled by the server, never client JS). */
+const sourceOf = (a: Alert & { source: { script: string; code?: ScriptSource } }, prec: number): ScriptSource =>
+  a.source.code ?? { lang: 'pine', files: { 'main.pine': a.source.script }, main: 'main.pine', prec };
+const sigs = new WeakMap<Alert, string>();
+/** Alerts with the same script and inputs share each run. Pine's mintick follows the series' precision. */
+function keyOf(a: Alert, prec: number) {
+  const x = a as Alert & { source: { script: string; code?: ScriptSource; inputs?: Record<string, unknown> } };
+  let s = sigs.get(a);
+  if (!s) sigs.set(a, (s = scriptSig(sourceOf(x, 0), x.source.inputs)));
+  return `alert:${s}|${a.sym}|${a.tf}|${x.source.code ? '' : prec}`;
 }
 
-function evaluate(a: Alert, bars: Bar[], closed: boolean, now: number, upd: number, runs: Map<string, Run>) {
+/**
+ * Run a script in the engine worker: fresh on every bar close, else at most every RUN_EVERY ms while the bar forms.
+ * When it answers, every alert using that script is evaluated on the bars it ran on.
+ */
+function request(sym: string, tf: string, scripts: Map<string, ScriptState>, key: string, prec: number, bars: Bar[], closed: boolean) {
+  let s = scripts.get(key);
+  if (!s) scripts.set(key, (s = { at: -Infinity, busy: false }));
+  if (s.busy) { s.queued = { bars: bars.slice(), closed: closed || !!s.queued?.closed }; return }
+  if (!closed && deps.now() - s.at < RUN_EVERY) return;
+  const users = () => list().filter(a => a.active && a.sym === sym && a.tf === tf && isScript(a) && keyOf(a, prec) === key);
+  const a0 = users()[0] as (Alert & { source: { script: string; code?: ScriptSource; inputs?: Record<string, unknown> } }) | undefined;
+  if (!a0) { scripts.delete(key); return }
+  s.busy = true; s.at = deps.now();
+  const snap = bars.slice(), st = s;
+  const p = deps.run({ key, source: sourceOf(a0, prec), sym, tf, inputs: a0.source.inputs ?? {} }, snap)
+    .catch(e => ({ error: (e as Error).message || String(e) }) as { out?: Outputs; error?: string })
+    .then(r => { const now = deps.now(); for (const a of users()) safe(a, () => evaluate(a, snap, closed, now, r)) })
+    .finally(() => {
+      inflight.delete(p); st.busy = false;
+      const q = st.queued; st.queued = undefined;
+      if (q && scripts.get(key) === st) request(sym, tf, scripts, key, prec, q.bars, q.closed);
+    });
+  inflight.add(p);
+}
+const inflight = new Set<Promise<void>>();
+/** Resolves once no script run is in flight (tests). */
+export async function settled() { while (inflight.size) await Promise.all(inflight) }
+
+/** `r`: the script's run on these bars (indicator / script sources only). */
+function evaluate(a: Alert, bars: Bar[], closed: boolean, now: number, r?: { out?: Outputs; error?: string }) {
   if (E.expired(a, now)) return stop(a, 'expired');
   const i = E.pick(a.frequency, bars, closed);
   if (i === null) return;
   const st = stateOf(a), src = a.source, closedMode = a.frequency === 'once_per_bar_close';
   let out: Outputs | undefined;
   if (src.kind === 'indicator' || src.kind === 'script') {
-    const run = scriptRun(a, bars, closed, now, upd, runs);
-    if (!run) return;
-    if (run.r.error) return stop(a, `script error (line ${run.r.error.line}): ${run.r.error.msg}`);
-    out = run.r.out!;
+    if (!r) return;
+    if (r.error) return stop(a, `script error: ${r.error}`);
+    out = r.out!;
   }
   if (src.kind === 'script') {
-    if (src.event === 'strategy' && !out!.broker) return stop(a, 'script is not a strategy');
-    for (const h of E.scriptHits(a, st, out!, i, closedMode)) {
+    if (src.event === 'strategy' && !out!.broker && !E.dealsOf(out!)) return stop(a, 'script is not a strategy');
+    for (const h of E.scriptHits(a, st, out!, i, closedMode, bars[i].time)) {
       if (!a.active) break;
       if (E.frequencyAllows(a.frequency, st, bars[i].time, now)) fire(a, st, bars, i, now, out, h.message, h.vars);
     }
@@ -131,7 +159,7 @@ function fire(a: Alert, st: E.EvalState, bars: Bar[], i: number, now: number, ou
   save(a); changed();
   const channels = [...new Set<Channel>(['popup', ...a.channels])], price = bars[i].close;
   const webhook = a.webhook && channels.includes('webhook') ? { url: a.webhook.url, body: a.webhook.body ? E.render(a.webhook.body, { ...vars, message }) : message } : undefined;
-  notify({ title: `${a.name || a.sym} alert`, body: message, channels, sound: true, webhook, data: { alertId: a.id, sym: a.sym, tf: a.tf, price, url: `/?symbol=${encodeURIComponent(a.sym)}&tf=${encodeURIComponent(a.tf)}` } })
+  deps.notify({ title: `${a.name || a.sym} alert`, body: message, channels, sound: true, webhook, data: { alertId: a.id, sym: a.sym, tf: a.tf, price, url: `/?symbol=${encodeURIComponent(a.sym)}&tf=${encodeURIComponent(a.tf)}` } })
     .catch(e => [{ channel: 'popup' as Channel, ok: false, error: String((e as Error).message ?? e) }])
     .then(deliveries => {
       const r = db.prepare('INSERT INTO alert_log (alert_id, at, message, price, deliveries) VALUES (?, ?, ?, ?, ?)').run(a.id, now, message, price, JSON.stringify(deliveries));
@@ -150,12 +178,13 @@ const inputOf = ({ id: _i, created: _c, fireCount: _f, lastFired: _l, stoppedRea
 const get = (id: string) => { const a = alerts.get(id); if (!a) throw new HttpError(404, 'No such alert'); return a };
 
 route('GET', '/api/alerts', () => list());
-route('POST', '/api/alerts', c => {
+export function createAlert(body: unknown): Alert {
   if (alerts.size >= MAX_ALERTS) throw bad(`At most ${MAX_ALERTS} alerts`);
-  const a: Alert = { ...validateInput(c.body), id: randomUUID(), created: Date.now(), fireCount: 0 };
+  const a: Alert = { ...validateInput(body), id: randomUUID(), created: Date.now(), fireCount: 0 };
   alerts.set(a.id, a); save(a); changed();
   return a;
-});
+}
+route('POST', '/api/alerts', c => createAlert(c.body));
 route('GET', '/api/alerts/log', c => {
   const limit = Math.min(Math.max(Number(c.url.searchParams.get('limit')) || 200, 1), 1000), alert = c.url.searchParams.get('alert');
   const rows = (alert
