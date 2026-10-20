@@ -35,6 +35,7 @@
   <button id="layoutBtn" title="Chart layout">⊞</button>
   <button id="syncBtn" title="Sync across charts">🔗</button>
   <button id="layoutsBtn" title="Save / load layouts"><span id="layoutName">Unnamed</span> ▾</button>
+  <button id="srvBtn" title="Server &amp; notifications" aria-label="Server and notifications">🔔</button>
   <button id="settingsBtn" title="Chart settings">⚙</button>
   <button id="fullBtn" title="Fullscreen">⛶</button>
   <button id="shotBtn" title="Snapshot">📷</button>
@@ -111,10 +112,10 @@
       <table id="watchT"></table>
     </div>
     <div class="side" id="s-alerts">
-      <h3>Alerts</h3>
-      <div class="row"><input id="alertPx" type="number" step="any" placeholder="Price"><button id="alertAdd">Add</button></div>
+      <h3>Alerts <span class="grow"></span><button id="alertNew" class="x" title="Create alert (Alt+A)" hidden>＋ Create</button></h3>
+      <div class="row" id="alertPxRow"><input id="alertPx" type="number" step="any" placeholder="Price" aria-label="Alert price"><button id="alertAdd">Add</button></div>
       <table id="alertT"></table>
-      <h3>Log</h3><div id="alertLog" class="muted"></div>
+      <h3>Log <span class="grow"></span><button id="alertLogClear" class="x" title="Clear the alert log" hidden>Clear</button></h3><div id="alertLog" class="muted"></div>
     </div>
     <div class="side" id="s-trade">
       <h3>Order · <span id="tSym"></span> <span class="muted">(paper)</span></h3>
@@ -253,6 +254,85 @@
 </dialog>
 <dialog id="keysDlg">
   <form method="dialog"><h3>Keyboard shortcuts</h3><table id="keysT"></table><div class="row"><span class="grow"></span><button value="ok">Close</button></div></form>
+</dialog>
+<dialog id="alertDlg" aria-labelledby="alDlgTitle">
+  <form method="dialog" id="alertForm" novalidate>
+    <h3 id="alDlgTitle">Create alert</h3>
+    <div class="alform">
+      <label for="alSym">Symbol</label><div class="row"><input id="alSym" spellcheck="false" autocomplete="off"><label for="alTf" class="muted">Interval</label><input id="alTf" class="al-tf" spellcheck="false" autocomplete="off"></div>
+      <label for="alSrc">Source</label><select id="alSrc"></select>
+      <label for="alCond" id="alCondLbl">Condition</label><div id="alCondRow"><select id="alCond"></select></div>
+      <label for="alVal" id="alValLbl">Value</label><div id="alValRow"><input id="alVal" type="number" step="any" inputmode="decimal"></div>
+      <label for="alVal2" id="alVal2Lbl">Upper bound</label><div id="alVal2Row"><input id="alVal2" type="number" step="any" inputmode="decimal"></div>
+      <label for="alBars" id="alBarsLbl">Within bars</label><div id="alBarsRow"><input id="alBars" type="number" min="1" max="500" step="1"></div>
+      <label for="alFreq">Trigger</label><select id="alFreq"></select>
+      <label for="alExp">Expiration</label><div class="row"><input id="alExp" type="datetime-local"><label><input type="checkbox" id="alNever"> Never</label></div>
+      <label for="alName">Alert name</label><input id="alName" maxlength="100" autocomplete="off">
+      <label for="alMsg">Message</label><div><textarea id="alMsg" rows="3" maxlength="4000"></textarea><div class="chips" id="alChips" role="group" aria-label="Insert placeholder"></div></div>
+      <span class="lbl">Notify</span><div class="row wrap" role="group" aria-label="Notification channels">
+        <label title="In-app pop-up and sound on every open device"><input type="checkbox" checked disabled> Pop-up</label>
+        <label><input type="checkbox" id="alCh-push"> Push</label><label><input type="checkbox" id="alCh-telegram"> Telegram</label>
+        <label><input type="checkbox" id="alCh-email"> Email</label><label><input type="checkbox" id="alCh-webhook"> Webhook</label></div>
+      <div id="alHookRows" class="al-span" hidden>
+        <label for="alHookUrl">Webhook URL <span class="muted">(empty = the default URL in 🔔 settings)</span></label><input id="alHookUrl" type="url" placeholder="https://…" autocomplete="off">
+        <label for="alHookBody">Webhook body <span class="muted">(empty = the message; valid JSON is sent as application/json)</span></label><textarea id="alHookBody" rows="3"></textarea>
+      </div>
+    </div>
+    <div class="dn al-err" id="alErr" role="alert"></div>
+    <div class="row"><span class="muted al-foot">Set up channels in 🔔 Server &amp; notifications</span><span class="grow"></span><button type="button" id="alCancel">Cancel</button><button value="ok" class="on" id="alSubmit">Create</button></div>
+  </form>
+</dialog>
+<dialog id="srvDlg" class="wide" aria-labelledby="srvTitle">
+  <h3 id="srvTitle">Server &amp; notifications</h3>
+  <p id="srvOff" class="muted" hidden>These settings live on the Chart Terminal server. Right now there is no server connection, so alerts run only in this browser while the page is open. Start the server (<kbd>npm run server</kbd>) and reload to get server alerts, Telegram, email, webhooks, push and trade recording.</p>
+  <div id="srvBody">
+    <form class="srv" id="sTelegram">
+      <h4>Telegram</h4>
+      <p class="hint muted">Make a bot with @BotFather and paste its token. Then send any message to your bot and press “Pick chat”.</p>
+      <label for="tgToken">Bot token</label><div class="row"><input id="tgToken" type="password" autocomplete="off" spellcheck="false"><button type="button" id="tgDel" hidden>Remove</button></div>
+      <label for="tgChat">Chat id</label><div class="row"><input id="tgChat" autocomplete="off"><button type="button" id="tgPick">Pick chat</button></div>
+      <div id="tgChats" class="al-span"></div>
+      <div class="row al-span"><span class="st" id="tgSt" aria-live="polite"></span><span class="grow"></span><button type="button" data-test="telegram">Send test</button><button class="on">Save</button></div>
+    </form>
+    <form class="srv" id="sEmail">
+      <h4>Email (SMTP)</h4>
+      <label for="emHost">SMTP host</label><input id="emHost" autocomplete="off" placeholder="smtp.gmail.com">
+      <label for="emPort">Port</label><div class="row"><input id="emPort" type="number" min="1" max="65535" placeholder="465"><label><input type="checkbox" id="emSecure"> TLS (SSL)</label></div>
+      <label for="emUser">User</label><input id="emUser" autocomplete="off">
+      <label for="emPass">Password</label><div class="row"><input id="emPass" type="password" autocomplete="new-password"><button type="button" id="emDel" hidden>Remove</button></div>
+      <label for="emFrom">From</label><input id="emFrom" type="email" autocomplete="off">
+      <label for="emTo">To</label><input id="emTo" type="email" autocomplete="off">
+      <div class="row al-span"><span class="st" id="emSt" aria-live="polite"></span><span class="grow"></span><button type="button" data-test="email">Send test</button><button class="on">Save</button></div>
+    </form>
+    <form class="srv" id="sWebhook">
+      <h4>Webhook</h4>
+      <label for="whUrl">Default URL</label><input id="whUrl" type="url" placeholder="https://…" autocomplete="off">
+      <div class="row al-span"><span class="st" id="whSt" aria-live="polite"></span><span class="grow"></span><button type="button" data-test="webhook">Send test</button><button class="on">Save</button></div>
+    </form>
+    <form class="srv" id="sPush">
+      <h4>Notifications on this device</h4>
+      <p class="hint muted">Push reaches this device even when the app is closed. It needs HTTPS (a home-network address below, or localhost on this PC). On iPhone, first add the app to the Home Screen (Share › Add to Home Screen) and open it from there.</p>
+      <span class="lbl">Push</span><div class="row"><span id="pushSt" class="st" aria-live="polite"></span><span class="grow"></span><button type="button" id="pushBtn" hidden></button></div>
+      <span class="lbl">Desktop pop-ups</span><div class="row"><span id="notifSt" class="st"></span><span class="grow"></span><button type="button" id="notifBtn" hidden>Allow</button></div>
+    </form>
+    <form class="srv" id="sRecorder">
+      <h4>Trade recording</h4>
+      <p class="hint muted">The server records every trade of these symbols for order-flow history and keeps it <span id="recDays">30</span> days.</p>
+      <label for="recSyms">Symbols</label><input id="recSyms" spellcheck="false" autocomplete="off" placeholder="BTCUSDT, ETHUSDT">
+      <div class="al-span"><table id="recT"></table></div>
+      <div class="row al-span"><span class="st" id="recSt" aria-live="polite"></span><span class="grow"></span><button class="on">Save</button></div>
+    </form>
+    <form class="srv" id="sLan">
+      <h4>Home network access</h4>
+      <span class="lbl">HTTPS on Wi-Fi</span><div class="row wrap"><label><input type="checkbox" id="lanOn"> Enabled</label><span id="lanNote" class="muted"></span></div>
+      <span class="lbl">Addresses</span><div id="lanUrls" class="lan-urls"></div>
+      <span class="lbl">CA fingerprint</span><code id="lanFp" class="fp"></code>
+      <span class="lbl">Certificate</span><div class="row wrap"><a href="/ca.crt" download>CA certificate (Android, Windows)</a><a href="/ca.mobileconfig" download>iPhone / iPad profile</a></div>
+      <p class="hint muted al-span">Install the certificate on each phone once, then open one of the addresses above. Step-by-step guide (Persian): <code>docs/lan-setup.md</code> in the project folder.</p>
+      <div class="row al-span"><span class="st" id="lanSt" aria-live="polite"></span></div>
+    </form>
+  </div>
+  <form method="dialog" class="row"><span class="grow"></span><button value="ok">Close</button></form>
 </dialog>
 <div id="toast"></div>
 <script type="module" src="/src/boot.ts"></script>
