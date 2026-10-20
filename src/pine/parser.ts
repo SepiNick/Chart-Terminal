@@ -53,10 +53,10 @@ export function parse(src: string): Program {
     const t = peek();
     if (t.type === 'ident') {
       const v = t.value, n1 = peek(1);
-      if (v === 'import') fail("'import' is not supported yet", t);
-      if ((v === 'type' || v === 'enum') && n1.type === 'ident') fail(`'${v}' declarations are not supported yet`, t);
+      if (v === 'import' && n1.type === 'ident') return importStmt(t);
+      if ((v === 'type' || v === 'enum') && n1.type === 'ident' && isT('nl', 2)) { i++; return v === 'type' ? typeDecl(t, false) : enumDecl(t, false) }
       if (v === 'export') {
-        if (n1.value === 'type' || n1.value === 'enum') fail(`'export ${n1.value}' is not supported yet`, n1);
+        if ((n1.value === 'type' || n1.value === 'enum') && isT('ident', 2)) { i += 2; return n1.value === 'type' ? typeDecl(t, true) : enumDecl(t, true) }
         i++;
         const m = isMethod();
         if (m) i++;
@@ -69,6 +69,14 @@ export function parse(src: string): Program {
         i += 2;
         return { ...at(t), kind: 'Assign', target: v, op: n1.value as AssignOp, value: expr() };
       }
+      if (is('.', 1) || is('[', 1)) {   // obj.field := v
+        const save = i;
+        let lhs: Expr | null = null;
+        try { lhs = postfix() } catch { /* not an expression start (e.g. `float[] x = …`) */ }
+        const op = peek();
+        if (lhs?.kind === 'Member' && op.type === 'op' && ASSIGN.has(op.value)) { i++; return { ...at(t), kind: 'FieldAssign', object: lhs.object, field: lhs.prop, op: op.value as AssignOp, value: expr() } }
+        i = save;
+      }
       const d = varDecl(t, null);
       if (d) return d;
     }
@@ -80,6 +88,43 @@ export function parse(src: string): Program {
     if (is('break')) { i++; return { ...at(t), kind: 'Break' } }
     if (is('continue')) { i++; return { ...at(t), kind: 'Continue' } }
     return { ...at(t), kind: 'ExprStmt', expr: expr() };
+  }
+  function importStmt(start: Tok): Stmt {   // import user/lib/1 as alias
+    i++;
+    let path = '';
+    while (!(isT('ident') && peek().value === 'as') && !isT('nl') && !isT('eof')) path += next().value;
+    if (!/^\w+\/\w+\/\d+$/.test(path)) fail("Expected 'user/library/version' after 'import'", start);
+    let alias = path.split('/')[1];
+    if (isT('ident') && peek().value === 'as') { i++; alias = ident("an alias after 'as'").value }
+    return { ...at(start), kind: 'Import', path, alias };
+  }
+  // indented block of single-line members: type fields or enum members
+  function members<R>(what: string, item: () => R): R[] {
+    if (!isT('nl') || !isT('indent', 1)) fail(`Expected indented ${what} but found ${desc(peek())}`);
+    const out: R[] = [];
+    for (i += 2; ;) {
+      while (isT('nl')) i++;
+      if (isT('dedent')) { i++; return out }
+      out.push(item());
+      endStmt();
+    }
+  }
+  function typeDecl(start: Tok, exported: boolean): Stmt {
+    const name = ident('a type name').value;
+    const fields = members('type fields', () => {
+      if (is('varip')) i++;
+      const typeName = type() ?? fail('Expected a field type');
+      return { typeName, name: ident('a field name').value, def: is('=') ? (i++, expr()) : null };
+    });
+    return { ...at(start), kind: 'TypeDecl', name, fields, exported };
+  }
+  function enumDecl(start: Tok, exported: boolean): Stmt {
+    const name = ident('an enum name').value;
+    const list = members('enum members', () => {
+      const m = ident('an enum member').value;
+      return { name: m, title: is('=') ? (i++, isT('str') ? next().value : fail('Enum titles must be strings')) : m };
+    });
+    return { ...at(start), kind: 'EnumDecl', name, members: list, exported };
   }
   const isMethod = () => peek().value === 'method' && isT('ident') && isT('ident', 1) && is('(', 2);
   function arrowAfter(j: number): boolean {   // T[j] is '(' — is its matching ')' followed by '=>'?

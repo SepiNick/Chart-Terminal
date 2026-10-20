@@ -3,8 +3,10 @@
 //  - per-call-site state for builtins (ta.* buffers, plot objects) keyed by call path,
 //  - outputs (plots, shapes, fills, colors, drawings, alerts, strategy) for the chart to render.
 // Realtime updates simply re-run the script (cheap for chart-sized data) — no rollback machinery needed.
-import type { Bar } from '../data.ts';
-import type { Expr, Program, Stmt } from './ast.ts';
+import { aggregate, tfSeconds, type Bar } from '../data.ts';
+import type { AssignOp, Expr, Program, Stmt } from './ast.ts';
+import { parse } from './parser.ts';
+import { isMap, isMatrix } from './lib/collections.ts';
 import { NA, isNa, num, bool, type Ctx, type PineValue, type PineTuple, type PineObject, type Builtin } from './types.ts';
 import { LIB, CONSTS, VARS } from './lib/index.ts';
 import { Broker, defaultProps, type Dir, type StrategyProps } from './strategy.ts';
@@ -23,10 +25,17 @@ export interface Plot {
   values: number[]; colors: (string | null)[];
   style: string; linewidth: number; offset: number; histbase: number; display: boolean; trackprice: boolean;
   shape?: string; location?: string; char?: string; size?: string; texts?: (string | null)[]; textcolor?: string;
-  ohlc?: { o: number[]; h: number[]; l: number[]; c: number[] }; colordown?: string; wickcolor?: string; bordercolor?: string;
+  ohlc?: { o: number[]; h: number[]; l: number[]; c: number[] }; colordown?: string; wickcolors?: (string | null)[]; bordercolors?: (string | null)[];
 }
 export interface HLine { id: string; title: string; price: number; color: string; linestyle: string; linewidth: number; display: boolean }
 export interface Fill { a: string; b: string; colors: (string | null)[]; title: string }
+export interface TableCell { text: string; width: number; height: number; text_color: string; text_halign: string; text_valign: string; text_size: string; bgcolor: string | null; tooltip: string; font: string }
+export interface PineTable {
+  type: 'table'; id: number; deleted?: boolean; position: string; columns: number; rows: number;
+  bgcolor: string | null; frame_color: string | null; frame_width: number; border_color: string | null; border_width: number;
+  cells: Record<string, TableCell>;   // key "column,row"
+  merges: { c0: number; r0: number; c1: number; r1: number }[];
+}
 export interface Drawing2 { type: 'label' | 'line' | 'box'; id: number; deleted?: boolean; [k: string]: unknown }
 export interface Outputs {
   meta: { kind: 'indicator' | 'strategy' | 'library'; title: string; shorttitle: string; overlay: boolean; precision?: number; format?: string; strategy?: StrategyProps };
@@ -39,12 +48,36 @@ export interface Outputs {
   logs: { bar: number; level: 'info' | 'warning' | 'error'; msg: string }[];
   warnings: string[];
   broker?: Broker;
+  tables?: PineTable[];
+  /** request.security contexts whose bars `security` did not have; the host fetches them and runs the script again. */
+  securityMissing?: { symbol: string; tf: string }[];
 }
-export interface RunOpts { inputs?: Record<string, PineValue>; symbol: string; tf: string; tfSec: number; mintick: number; maxLoop?: number }
+export interface RunOpts {
+  inputs?: Record<string, PineValue>; symbol: string; tf: string; tfSec: number; mintick: number; maxLoop?: number;
+  /** Bars for request.security on another symbol/timeframe (tf in app form: '1h', '1d'). undefined → na plus one warning. */
+  security?: (symbol: string, tf: string) => Bar[] | undefined;
+  /** Source of an imported library by its path 'user/Name/version'; undefined → runtime error. */
+  library?: (path: string) => string | undefined;
+}
+type TypeDecl = Extract<Stmt, { kind: 'TypeDecl' }>;
+type EnumDecl = Extract<Stmt, { kind: 'EnumDecl' }>;
+/** User-defined type instance; `type` is the qualified type name (alias.Name for library types). */
+export interface Udt extends PineObject { type: string; udt: true; f: Record<string, PineValue> }
+export const isUdt = (v: unknown): v is Udt => !!v && typeof v === 'object' && (v as Udt).udt === true;
+const libCache = new Map<string, Program>();
+/** Pine timeframe string ('D', '240', '1W', '30S'; app forms like '4h' also work) → app tf ('1d', '4h'), or null. */
+export function appTf(s: string): string | null {
+  const m = /^(\d*)([SDWMHsmhdw]?)$/.exec(s.trim());
+  if (!m || (!m[1] && !m[2]) || +(m[1] || 1) <= 0) return null;
+  const n = +(m[1] || 1), u = m[2];
+  if (!u) return n % 60 === 0 ? `${n / 60}h` : `${n}m`;
+  return `${n}${({ S: 's', D: 'd', W: 'w', H: 'h' } as Record<string, string>)[u] ?? u}`;
+}
+const normSym = (s: string) => s.replace(/^BINANCE:/, '');
 
 interface Binding { hist: PineValue[]; cur: PineValue; isVar: boolean; inited: boolean }
 interface Frame { names: Map<string, Binding>; parent: Frame | null }
-interface FuncDef { decl: Extract<Stmt, { kind: 'FuncDecl' }> }
+interface FuncDef { decl: Extract<Stmt, { kind: 'FuncDecl' }>; lib: string }   // lib: import alias ('' = this script)
 class BreakSig { }
 class ContinueSig { }
 const BREAK = new BreakSig(), CONTINUE = new ContinueSig();
@@ -56,14 +89,19 @@ const UTC = (t: number) => new Date(t * 1000);
 const ENUM_PREFIXES = ['shape', 'location', 'size', 'plot', 'hline', 'extend', 'xloc', 'yloc', 'label', 'line', 'text', 'font', 'display', 'position', 'order', 'alert', 'barmerge', 'currency', 'dayofweek', 'adjustment', 'session', 'scale'];
 const DAYS: Record<string, number> = { sunday: 1, monday: 2, tuesday: 3, wednesday: 4, thursday: 5, friday: 6, saturday: 7 };
 
-export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
+/** `record` is internal: set when running in another request.security context, it collects each call site's per-bar value. */
+export function run(prog: Program, bars: Bar[], opts: RunOpts, record?: Map<string, PineValue[]>): Outputs {
   const out: Outputs = {
     meta: { kind: 'indicator', title: 'Script', shorttitle: '', overlay: false },
-    inputs: [], plots: [], hlines: [], fills: [], bgcolors: [], barcolors: [], alertconditions: [], alerts: [], drawings: [], logs: [], warnings: [],
+    inputs: [], plots: [], hlines: [], fills: [], bgcolors: [], barcolors: [], alertconditions: [], alerts: [], drawings: [], logs: [], warnings: [], tables: [],
   };
   const bindings = new Map<string, Binding>();     // key: callPath|declId
   const states = new Map<string, unknown>();        // key: callPath|nodeId
-  const funcs = new Map<string, FuncDef>();
+  const funcs = new Map<string, FuncDef>();          // key: name or alias.name
+  const methods = new Map<string, FuncDef[]>();      // method name → overloads (picked by the first parameter's type)
+  const types = new Map<string, { decl: TypeDecl; lib: string }>();
+  const enums = new Map<string, EnumDecl>();
+  let curLib = '';   // library whose code is running: its own names resolve first
   const varBindings: Binding[] = [];
   const maxLoop = opts.maxLoop ?? 100_000;
   let bar = 0, callPath = '', curNode = 0, drawingId = 0, inputIdx = 0;
@@ -81,8 +119,34 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
   };
   const err = (n: { line: number; col: number }, msg: string): never => { throw new PineRuntimeError(msg, n.line, n.col) };
 
-  // ---------- declarations pass ----------
-  for (const s of prog.body) if (s.kind === 'FuncDecl') funcs.set(s.name, { decl: s });
+  // ---------- declarations pass (functions, types, enums, imported libraries) ----------
+  const declareAll = (body: Stmt[], lib: string) => {
+    for (const s of body) {
+      if (s.kind === 'Import') { if (lib) err(s, 'Libraries importing other libraries are not supported yet'); else importLib(s) }
+      if (s.kind !== 'FuncDecl' && s.kind !== 'TypeDecl' && s.kind !== 'EnumDecl') continue;
+      const q = lib ? `${lib}.${s.name}` : s.name;
+      if (s.kind === 'TypeDecl') types.set(q, { decl: s, lib });
+      else if (s.kind === 'EnumDecl') enums.set(q, s);
+      else {
+        const fd = { decl: s, lib };
+        if (s.method) { const l = methods.get(s.name) ?? []; l.push(fd); methods.set(s.name, l) }
+        funcs.set(q, fd);
+      }
+    }
+  };
+  function importLib(s: Extract<Stmt, { kind: 'Import' }>) {
+    const src = opts.library?.(s.path);
+    if (src == null) return err(s, `Library '${s.path}' not found: add a script that declares library("${s.path.split('/')[1]}") in the Pine Editor`);
+    let p = libCache.get(src);
+    if (!p) {
+      try { p = parse(src) } catch (x) { return err(s, `Library '${s.path}': ${(x as Error).message}`) }
+      if (libCache.size > 20) libCache.delete(libCache.keys().next().value!);
+      libCache.set(src, p);
+    }
+    declareAll(p.body, s.alias);
+  }
+  const scoped = <T>(m: Map<string, T>, name: string): T | undefined => (curLib ? m.get(`${curLib}.${name}`) : undefined) ?? m.get(name);
+  declareAll(prog.body, '');
 
   // ---------- builtin variables ----------
   const b = () => bars[bar];
@@ -187,18 +251,25 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
       }
       case 'Assign': {
         const bnd = lookup(f, s.target) ?? err(s, `Undeclared identifier '${s.target}' (declare it with = before using :=)`);
-        const v = evalExpr(s.value, f), cur = bnd.cur;
-        const nv = s.op === ':=' ? v : s.op === '+=' ? (typeof cur === 'string' ? cur + String(v) : num(cur) + num(v)) : s.op === '-=' ? num(cur) - num(v) : s.op === '*=' ? num(cur) * num(v) : s.op === '/=' ? div(num(cur), num(v)) : num(cur) % num(v);
+        const nv = applyOp(s.op, bnd.cur, evalExpr(s.value, f));
         setBinding(bnd, nv);
         return nv;
       }
+      case 'FieldAssign': {
+        const o = evalExpr(s.object, f);
+        if (!isUdt(o)) return err(s, `Cannot set field '${s.field}' on ${isNa(o) ? 'an na object' : 'this value'}`);
+        if (!(s.field in o.f)) return err(s, `Type '${o.type}' has no field '${s.field}'`);
+        return (o.f[s.field] = applyOp(s.op, o.f[s.field], evalExpr(s.value, f)));
+      }
       case 'ExprStmt': return evalExpr(s.expr, f);
-      case 'FuncDecl': funcs.set(s.name, { decl: s }); return NA;
+      case 'FuncDecl': case 'TypeDecl': case 'EnumDecl': case 'Import': return NA;   // handled by the declarations pass
       case 'Break': throw BREAK;
       case 'Continue': throw CONTINUE;
     }
   }
   const div = (a: number, c: number) => (c === 0 ? NA : a / c);
+  const applyOp = (op: AssignOp, cur: PineValue, v: PineValue): PineValue => op === ':=' ? v : op === '+=' ? (typeof cur === 'string' ? cur + String(v) : num(cur) + num(v))
+    : op === '-=' ? num(cur) - num(v) : op === '*=' ? num(cur) * num(v) : op === '/=' ? div(num(cur), num(v)) : num(cur) % num(v);
   function coerce(v: PineValue, typeName: string | null): PineValue {
     if (typeName === 'int' && typeof v === 'number' && !Number.isNaN(v)) return Math.trunc(v);
     if (typeName === 'bool' && typeof v === 'number') return bool(v);
@@ -222,8 +293,14 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
       }
       case 'Member': {
         const q = qname(e);
-        if (q) { const v = builtinVar(q); if (v !== undefined) return v }
+        if (q) {
+          const v = builtinVar(q); if (v !== undefined) return v;
+          const en = e.object.kind !== 'Ident' || !lookup(f, e.object.name) ? scoped(enums, q.slice(0, q.lastIndexOf('.'))) : undefined;
+          if (en) return en.members.find(m => m.name === e.prop)?.title ?? err(e, `Enum '${en.name}' has no member '${e.prop}'`);
+        }
         const obj = evalExpr(e.object, f);
+        if (isUdt(obj)) return e.prop in obj.f ? obj.f[e.prop] : err(e, `Type '${obj.type}' has no field '${e.prop}'`);
+        if (isNa(obj)) return NA;   // field of an na object
         if (obj && typeof obj === 'object' && !Array.isArray(obj) && e.prop in obj) return (obj as Record<string, PineValue>)[e.prop];
         return err(e, `Unknown member '${q ?? e.prop}'`);
       }
@@ -279,13 +356,14 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
         return last;
       }
       case 'ForIn': {
-        const it = evalExpr(e.iter, f);
-        if (!Array.isArray(it)) return err(e, 'for…in needs an array');
+        const src = evalExpr(e.iter, f);
+        // [key/index, value] pairs: arrays, map entries, matrix rows
+        const it: [PineValue, PineValue][] = isMap(src) ? [...src.m] : Array.isArray(src) ? src.map((v, i) => [i, v]) : isMatrix(src) ? src.d.map((r, i) => [i, r]) : err(e, 'for…in needs an array, a map or a matrix');
         let last: PineValue = NA;
         const fr = child(f);
         for (let i = 0; i < it.length; i++) {
-          if (e.vars.length === 2) { setBinding(declare(fr, e.vars[0], e.id, false), i); setBinding(declare(fr, e.vars[1], e.id + 0.5, false), it[i]) }
-          else setBinding(declare(fr, e.vars[0], e.id, false), it[i]);
+          if (e.vars.length === 2) { setBinding(declare(fr, e.vars[0], e.id, false), it[i][0]); setBinding(declare(fr, e.vars[1], e.id + 0.5, false), it[i][1]) }
+          else setBinding(declare(fr, e.vars[0], e.id, false), it[i][1]);
           try { last = evalBlock(e.body, fr) } catch (x) { if (x === BREAK) break; if (x !== CONTINUE) throw x }
         }
         return last;
@@ -327,11 +405,16 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
   function call(e: Extract<Expr, { kind: 'Call' }>, f: Frame): PineValue {
     let name = qname(e.callee);
     let args: PineValue[];
+    const userFn = name ? scoped(funcs, name) : undefined;
+    if (name && !userFn && /\.(new|copy)$/.test(name)) {   // Type.new(...) / Type.copy(obj)
+      const T = scoped(types, name.slice(0, name.lastIndexOf('.')));
+      if (T) return udtNew(e, T, e.args.map(x => evalExpr(x, f)), namedArgs(e, f), name.endsWith('.copy'));
+    }
     // Method syntax: arr.push(x), lbl.set_text(s), myVar.method(...)
-    if (e.callee.kind === 'Member' && (!name || (!LIB[name] && !INTERNAL.has(name) && !funcs.has(name) && !isNamespace(name)))) {
+    if (e.callee.kind === 'Member' && !userFn && (!name || (!LIB[name] && !INTERNAL.has(name) && !isNamespace(name)))) {
       const self = evalExpr(e.callee.object, f), prop = e.callee.prop;
-      const user = funcs.get(prop);
-      if (user?.decl.method) return callUser(e, user, [self, ...e.args.map(a => evalExpr(a, f))], namedArgs(e, f), f);
+      const user = pickMethod(prop, self);
+      if (user) return callUser(e, user, [self, ...e.args.map(a => evalExpr(a, f))], namedArgs(e, f), f);
       const ns = typeNs(self);
       if (!ns) return err(e, `Cannot call method '${prop}' on this value`);
       name = `${ns}.${prop}`;
@@ -339,8 +422,7 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
     } else {
       if (!name) return err(e, 'Unsupported call target');
       if (name === 'input.source' || (name === 'input' && e.args[0]?.kind === 'Ident' && SOURCES.includes((e.args[0] as { name: string }).name))) return inputSource(e, f);
-      const user = funcs.get(name);
-      if (user) return callUser(e, user, e.args.map(a => evalExpr(a, f)), namedArgs(e, f), f);
+      if (userFn) return callUser(e, userFn, e.args.map(a => evalExpr(a, f)), namedArgs(e, f), f);
       args = e.args.map(a => evalExpr(a, f));
     }
     const named = namedArgs(e, f);
@@ -364,7 +446,7 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
   let depth = 0;
   function callUser(e: Extract<Expr, { kind: 'Call' }>, fn: FuncDef, args: PineValue[], named: Record<string, PineValue>, f: Frame): PineValue {
     if (++depth > 200) err(e, 'Recursion is not allowed in Pine');
-    const d = fn.decl, prevPath = callPath;
+    const d = fn.decl, prevPath = callPath, prevLib = curLib;
     const root: Frame = { names: new Map(), parent: globalFrame };
     callPath = `${prevPath}/${e.id}`;
     try {
@@ -372,8 +454,36 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
         const v = p.name in named ? named[p.name] : i < args.length ? args[i] : p.def ? evalExpr(p.def, f) : NA;
         setBinding(declare(root, p.name, d.id * 100 + i, false), v);
       });
+      curLib = fn.lib;
       return evalBlock(d.body, root);
-    } finally { callPath = prevPath; depth-- }
+    } finally { callPath = prevPath; curLib = prevLib; depth-- }
+  }
+  // ---------- user-defined types ----------
+  const qualType = (t: string, lib: string) => (lib && types.has(`${lib}.${t}`) ? `${lib}.${t}` : t);
+  /** Coarse runtime type of a value, comparable with typeKey() of a declared parameter type. */
+  const valueKey = (v: PineValue): string | null => isUdt(v) ? v.type : Array.isArray(v) ? 'array' : isMatrix(v) ? 'matrix' : isMap(v) ? 'map'
+    : typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'bool' : typeof v === 'string' ? 'string' : v && typeof v === 'object' && 'type' in v ? String(v.type) : null;
+  const typeKey = (t: string, lib: string) => {
+    const base = t.endsWith('[]') ? 'array' : t.replace(/<.*$/, '');
+    return base === 'float' || base === 'int' ? 'number' : base === 'color' ? 'string' : qualType(base, lib);
+  };
+  function pickMethod(name: string, self: PineValue): FuncDef | undefined {
+    const c = methods.get(name);
+    if (!c) return undefined;
+    const k = valueKey(self);
+    return c.find(m => { const t = m.decl.params[0]?.typeName; return t != null && typeKey(t, m.lib) === k }) ?? c.find(m => !m.decl.params[0]?.typeName) ?? (c.length === 1 ? c[0] : undefined);
+  }
+  function udtNew(e: Extract<Expr, { kind: 'Call' }>, T: { decl: TypeDecl; lib: string }, args: PineValue[], named: Record<string, PineValue>, copy: boolean): PineValue {
+    const type = T.lib ? `${T.lib}.${T.decl.name}` : T.decl.name;
+    if (copy) { const o = named.object ?? args[0]; return isUdt(o) ? { ...o, f: { ...o.f } } : isNa(o) ? NA : err(e, `${type}.copy() needs a ${type} object`) }
+    const prevLib = curLib, o: Udt = { type, udt: true, f: {} };
+    curLib = T.lib;
+    try {
+      T.decl.fields.forEach((fd, i) => {
+        o.f[fd.name] = fd.name in named ? named[fd.name] : i < args.length ? args[i] : fd.def ? evalExpr(fd.def, globalFrame) : fd.typeName === 'bool' ? false : NA;
+      });
+    } finally { curLib = prevLib }
+    return o;
   }
 
   // ---------- inputs ----------
@@ -428,6 +538,7 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
   const getter = (field: string): Internal => args => ((args[0] as Record<string, unknown>)?.[field] ?? NA) as PineValue;
   const dir = (v: PineValue): Dir => (v === 'short' || v === 'strategy.short' ? 'short' : 'long');
   const optNum = (v: PineValue) => (v == null || isNa(v) ? undefined : num(v));
+  const colorOrNull = (v: PineValue): string | null => (isNa(v) || typeof v !== 'string' ? null : v);
 
   const internals: Record<string, Internal> = {
     indicator: (args, n) => { Object.assign(out.meta, { kind: 'indicator', title: str(a(args, n, 0, 'title'), 'Script'), shorttitle: str(n.shorttitle), overlay: !!n.overlay, precision: optNum(n.precision ?? NA), format: n.format as string }); setLimits(n); return NA },
@@ -515,11 +626,7 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
     'log.warning': args => { out.logs.push({ bar, level: 'warning', msg: str(args[0]) }); return NA },
     'log.error': args => { out.logs.push({ bar, level: 'error', msg: str(args[0]) }); return NA },
     'runtime.error': (args, _n, e) => err(e, str(args[0], 'Runtime error')),
-    'request.security': (args, n, e) => {
-      const sym = str(a(args, n, 0, 'symbol')), tf = str(a(args, n, 1, 'timeframe'));
-      if ((sym && sym !== opts.symbol && sym !== `BINANCE:${opts.symbol}` && sym !== 'syminfo.tickerid') || (tf && tf !== tfStr() && tf !== '')) warn(`request.security for other symbols/timeframes is not supported yet (line ${e.line}); using the chart's data`);
-      return a(args, n, 2, 'expression');
-    },
+    'request.security': (args, n, e) => security(args, n, e),
     // inputs
     input: (args, n) => inputOf(typeof (n.defval ?? args[0]) === 'boolean' ? 'bool' : typeof (n.defval ?? args[0]) === 'string' ? 'string' : 'float', n.defval ?? args[0], n, args),
     'input.int': (args, n) => inputOf('int', n.defval ?? args[0], n, args),
@@ -533,7 +640,10 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
     'input.session': (args, n) => inputOf('session', n.defval ?? args[0], n, args),
     'input.price': (args, n) => inputOf('price', n.defval ?? args[0], n, args),
     'input.time': (args, n) => inputOf('int', n.defval ?? args[0], n, args),
-    'input.enum': (args, n) => inputOf('string', n.defval ?? args[0], n, args),
+    'input.enum': (args, n) => {
+      const def = n.defval ?? args[0], en = [...enums.values()].find(x => x.members.some(m => m.title === def));
+      return inputOf('string', def, { ...n, options: n.options ?? en?.members.map(m => m.title) ?? null }, args);
+    },
     // strategy
     'strategy.entry': (args, n) => { if (broker) broker.entry(bar, str(a(args, n, 0, 'id')), dir(a(args, n, 1, 'direction')), { qty: optNum(a(args, n, 2, 'qty', NA)), limit: optNum(a(args, n, 3, 'limit', NA)), stop: optNum(a(args, n, 4, 'stop', NA)), comment: str(n.comment) }); return NA },
     'strategy.order': (args, n) => { if (broker) broker.order(bar, str(a(args, n, 0, 'id')), dir(a(args, n, 1, 'direction')), { qty: optNum(a(args, n, 2, 'qty', NA)), limit: optNum(a(args, n, 3, 'limit', NA)), stop: optNum(a(args, n, 4, 'stop', NA)), comment: str(n.comment) }); return NA },
@@ -578,24 +688,120 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts): Outputs {
     'box.set_lefttop': args => { const o = args[0] as Record<string, unknown>; if (o) { o.left = args[1]; o.top = args[2] } return NA },
     'box.set_rightbottom': args => { const o = args[0] as Record<string, unknown>; if (o) { o.right = args[1]; o.bottom = args[2] } return NA },
     'box.get_left': getter('left'), 'box.get_right': getter('right'), 'box.get_top': getter('top'), 'box.get_bottom': getter('bottom'),
-    'table.new': () => { warn('table.* is not supported yet; tables are ignored'); return { type: 'table' } as PineObject },
+    // tables: the final state is drawn as an HTML overlay on the pane
+    'table.new': (args, n) => {
+      const position = str(a(args, n, 0, 'position'), 'top_right');
+      for (const t of out.tables!) if (t.position === position) t.deleted = true;   // one live table per position
+      const t: PineTable = {
+        type: 'table', id: ++drawingId, position, columns: num(a(args, n, 1, 'columns', 1)) || 1, rows: num(a(args, n, 2, 'rows', 1)) || 1,
+        bgcolor: colorOrNull(a(args, n, 3, 'bgcolor', null)), frame_color: colorOrNull(a(args, n, 4, 'frame_color', null)), frame_width: num(a(args, n, 5, 'frame_width', 0)) || 0,
+        border_color: colorOrNull(a(args, n, 6, 'border_color', null)), border_width: num(a(args, n, 7, 'border_width', 0)) || 0, cells: {}, merges: [],
+      };
+      out.tables!.push(t);
+      return t as unknown as PineObject;
+    },
+    'table.cell': (args, n) => {
+      const t = tbl(args), c = num(a(args, n, 1, 'column')), r = num(a(args, n, 2, 'row'));
+      if (!(c >= 0 && c < t.columns && r >= 0 && r < t.rows)) throw new Error(`Cell (${c}, ${r}) is outside the ${t.columns}x${t.rows} table`);
+      t.cells[`${c},${r}`] = {
+        text: str(a(args, n, 3, 'text')), width: num(a(args, n, 4, 'width', 0)) || 0, height: num(a(args, n, 5, 'height', 0)) || 0,
+        text_color: str(a(args, n, 6, 'text_color'), '#000000'), text_halign: str(a(args, n, 7, 'text_halign'), 'center'), text_valign: str(a(args, n, 8, 'text_valign'), 'center'),
+        text_size: str(a(args, n, 9, 'text_size'), 'normal'), bgcolor: colorOrNull(a(args, n, 10, 'bgcolor', null)), tooltip: str(a(args, n, 11, 'tooltip')), font: str(a(args, n, 12, 'text_font_family'), 'default'),
+      };
+      return NA;
+    },
+    'table.delete': args => { tbl(args).deleted = true; return NA },
+    'table.clear': (args, n) => {
+      const t = tbl(args), c0 = num(a(args, n, 1, 'start_column', 0)), r0 = num(a(args, n, 2, 'start_row', 0)), c1 = num(a(args, n, 3, 'end_column', c0)), r1 = num(a(args, n, 4, 'end_row', r0));
+      for (let c = c0; c <= c1; c++) for (let r = r0; r <= r1; r++) delete t.cells[`${c},${r}`];
+      t.merges = t.merges.filter(m => m.c1 < c0 || m.c0 > c1 || m.r1 < r0 || m.r0 > r1);
+      return NA;
+    },
+    'table.merge_cells': (args, n) => {
+      const t = tbl(args), m = { c0: num(a(args, n, 1, 'start_column')), r0: num(a(args, n, 2, 'start_row')), c1: num(a(args, n, 3, 'end_column')), r1: num(a(args, n, 4, 'end_row')) };
+      if (m.c1 < m.c0 || m.r1 < m.r0) throw new Error('The end cell must be after the start cell');
+      t.merges = t.merges.filter(x => x.c1 < m.c0 || x.c0 > m.c1 || x.r1 < m.r0 || x.r0 > m.r1);
+      t.merges.push(m);
+      return NA;
+    },
   };
   const INTERNAL = new Set(Object.keys(internals));
   function ohlcPlot(kind: 'candle' | 'bar', args: PineValue[], n: Record<string, PineValue>): PineValue {
     const p = plotFor(kind, args, n, 4);
     p.ohlc ??= { o: [], h: [], l: [], c: [] };
     p.ohlc.o[bar] = num(a(args, n, 0, 'open')); p.ohlc.h[bar] = num(a(args, n, 1, 'high')); p.ohlc.l[bar] = num(a(args, n, 2, 'low')); p.ohlc.c[bar] = num(a(args, n, 3, 'close'));
-    p.values[bar] = p.ohlc.c[bar]; p.colors[bar] = (n.color as string) ?? null; p.wickcolor = n.wickcolor as string; p.bordercolor = n.bordercolor as string;
+    const col = colorOrNull(a(args, n, 5, 'color', null));
+    p.values[bar] = p.ohlc.c[bar]; p.colors[bar] = col;
+    (p.wickcolors ??= [])[bar] = n.wickcolor !== undefined ? colorOrNull(n.wickcolor) : col;
+    (p.bordercolors ??= [])[bar] = n.bordercolor !== undefined ? colorOrNull(n.bordercolor) : col;
     return { type: 'plot', id: p.id } as PineObject;
+  }
+  // ---------- request.security ----------
+  // The script runs once more over the other context's bars (record mode), collecting each call site's value per bar;
+  // values are then mapped to chart bars by time: without lookahead a bar sees only other-context bars that have closed
+  // by its own close (the newest still-forming one only on the chart's last bar).
+  interface SecCtx { rec: Map<string, PineValue[]>; off: Int32Array; on: Int32Array }
+  const secCtx = new Map<string, SecCtx | null>();
+  const naLike = (v: PineValue): PineValue => (v && typeof v === 'object' && 'tuple' in v ? { tuple: (v as PineTuple).tuple.map(() => NA) } : NA);
+  function security(args: PineValue[], n: Record<string, PineValue>, e: Extract<Expr, { kind: 'Call' }>): PineValue {
+    const expr = a(args, n, 2, 'expression'), sym = normSym(str(a(args, n, 0, 'symbol'))) || normSym(opts.symbol);
+    const tfIn = str(a(args, n, 1, 'timeframe')), tf = tfIn ? appTf(tfIn) : opts.tf;
+    if (!tf) { warn(`request.security: unknown timeframe '${tfIn}' (line ${e.line})`); return naLike(expr) }
+    const sameSym = sym === normSym(opts.symbol);
+    if (sameSym && tfSeconds(tf) === opts.tfSec) {   // this context: the expression itself
+      if (record) { const k = `${callPath}|${e.id}`; let r = record.get(k); if (!r) record.set(k, r = []); r[bar] = expr }
+      return expr;
+    }
+    if (record) { warn('request.security inside another request.security context is not supported; using the outer context'); return expr }
+    const key = `${sym}|${tf}`;
+    let sc = secCtx.get(key);
+    if (sc === undefined) secCtx.set(key, sc = buildSec(sym, tf, sameSym, e));
+    const vals = sc?.rec.get(`${callPath}|${e.id}`);
+    if (!sc || !vals) return naLike(expr);
+    const map = a(args, n, 4, 'lookahead') === 'lookahead_on' ? sc.on : sc.off, j = map[bar];
+    if (j < 0 || (a(args, n, 3, 'gaps') === 'gaps_on' && bar > 0 && map[bar - 1] === j)) return naLike(expr);
+    return vals[j] ?? naLike(expr);
+  }
+  function buildSec(sym: string, tf: string, sameSym: boolean, e: { line: number }): SecCtx | null {
+    const sec = tfSeconds(tf), month = tf.endsWith('M');
+    // same symbol, higher multiple timeframe: built from the chart's own bars (also stays live)
+    const sb = sameSym && !month && sec > opts.tfSec && sec % opts.tfSec === 0 ? aggregate(bars, sec) : opts.security?.(sym, tf);
+    if (!sb) {
+      (out.securityMissing ??= []).push({ symbol: sym, tf });
+      warn(`request.security: no data for ${sym} ${tf} (line ${e.line}); returning na`);
+      return null;
+    }
+    const rec = new Map<string, PineValue[]>();
+    try { run(prog, sb, { ...opts, symbol: sym, tf, tfSec: sec }, rec).warnings.forEach(warn) }
+    catch (x) { warn(`request.security(${sym}, ${tf}): ${(x as Error).message}`); return null }
+    const end = (j: number) => (month ? sb[j + 1]?.time ?? Infinity : sb[j].time + sec);
+    const off = new Int32Array(bars.length), on = new Int32Array(bars.length);
+    for (let i = 0, j = -1, k = -1; i < bars.length; i++) {
+      const t = bars[i].time;
+      while (j + 1 < sb.length && end(j + 1) <= t + opts.tfSec) j++;
+      while (k + 1 < sb.length && sb[k + 1].time <= t) k++;
+      off[i] = i === bars.length - 1 ? Math.max(j, k) : j; on[i] = k;
+    }
+    return { rec, off, on };
   }
   function setLimits(n: Record<string, PineValue>) {
     if (n.max_labels_count != null) labelLimit = num(n.max_labels_count);
     if (n.max_lines_count != null) lineLimit = num(n.max_lines_count);
     if (n.max_boxes_count != null) boxLimit = num(n.max_boxes_count);
   }
-  // Unsupported table.* methods are no-ops so scripts keep running.
-  const tableNoop: Internal = () => NA;
-  for (const m of ['cell', 'delete', 'clear', 'set_position', 'cell_set_text', 'cell_set_bgcolor', 'cell_set_text_color', 'merge_cells', 'set_bgcolor', 'set_border_color']) internals[`table.${m}`] = tableNoop;
+  function tbl(args: PineValue[]): PineTable {
+    const t = args[0] as unknown as PineTable;
+    if (!t || t.type !== 'table') throw new Error('Cannot use an na table');
+    return t;
+  }
+  // table.set_* and table.cell_set_* (cell_set_text_font_family writes the cell's `font`)
+  for (const k of ['position', 'bgcolor', 'frame_color', 'frame_width', 'border_color', 'border_width']) internals[`table.set_${k}`] = args => { (tbl(args) as unknown as Record<string, PineValue>)[k] = args[1]; return NA };
+  for (const k of ['text', 'width', 'height', 'text_color', 'text_halign', 'text_valign', 'text_size', 'bgcolor', 'tooltip', 'text_font_family']) internals[`table.cell_set_${k}`] = args => {
+    const t = tbl(args), key = `${num(args[1])},${num(args[2])}`;
+    const cell = t.cells[key] ??= { text: '', width: 0, height: 0, text_color: '#000000', text_halign: 'center', text_valign: 'center', text_size: 'normal', bgcolor: null, tooltip: '', font: 'default' };
+    (cell as unknown as Record<string, PineValue>)[k === 'text_font_family' ? 'font' : k] = args[3];
+    return NA;
+  };
   for (const k of Object.keys(internals)) INTERNAL.add(k);
 
   // ---------- run ----------
