@@ -18,7 +18,7 @@ import { hasOrderFlow } from './orderflow/feed.ts';
 import { initDom, domSync } from './orderflow/domui.ts';
 import { initJournal, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
 import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults } from './pineui.ts';
-import { serverMode } from './sync.ts';
+import { serverMode, onServer } from './sync.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
 
@@ -64,6 +64,13 @@ const lastPx: Record<string, number> = {}, tick24: Record<string, Ticker> = {}, 
 const active = () => panes[st.layout.active] ?? panes[0];
 const pxOf = (sym: string) => lastPx[sym] ?? panes.find(p => p.cfg.symbol === sym)?.lastPrice();
 const saveAcct = () => { store.set('acct', st.acct); journalSync(st.acct) };
+// The server (forward-test fills) or another device changed the paper account: use it now, so the next local
+// order doesn't overwrite those fills with this tab's older copy.
+onServer('state', m => {
+  if (m.key !== 'acct' || !m.value) return;
+  st.acct = m.value as Account;
+  journalSync(st.acct); panes.forEach(p => p.tradeOverlay()); later(renderTrading);
+});
 const saveLayout = () => {
   st.layout.panes = panes.map((p, i) => ({ ...p.cfg, link: st.layout.panes[i]?.link }));
   store.set('layout', st.layout);
