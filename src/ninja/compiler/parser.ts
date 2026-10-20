@@ -181,7 +181,13 @@ export function parse(toks: Tok[], errors: Diagnostic[]): ParseResult {
     if (is('class') || is('struct') || is('interface')) return classDecl(attrs, mods);
     if (is('enum')) return enumDecl();
     if (is('record')) fail('Records are not supported');
-    if (is('delegate')) fail('Delegate type declarations are not supported; use Func<>/Action<>');
+    if (is('delegate')) {
+      const t0 = next(), ret = type(), name = ident('a delegate name').v;
+      if (is('<')) tparamList();
+      const params = paramList();
+      skipConstraints(); expect(';');
+      return { k: 'delegate', name, ret, params, ns: ns.join('.'), pos: pos(t0) };
+    }
     return undefined;
   }
   function skipBraces() {
@@ -277,7 +283,7 @@ export function parse(toks: Tok[], errors: Diagnostic[]): ParseResult {
     const m0 = peek(), p = pos(m0);
     const td = typeDecl(attrs, mods);
     if (td !== undefined) return td;
-    if (is('event')) fail('Events are not supported');
+    if (is('event')) { i++; mods.add('event') }   // event fields: multicast delegates (+= / -= / invoke)
     if (is('implicit') || is('explicit')) fail('Conversion operators are not supported');
     if (is('~')) { i++; ident(); paramList(); fnBody(); return null }   // finalizer: ignored
     if (isName() && m0.v === c.name && is('(', 1)) {

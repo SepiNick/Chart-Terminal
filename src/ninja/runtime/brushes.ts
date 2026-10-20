@@ -12,7 +12,11 @@ export class NtColor {
 }
 export class SolidColorBrush {
   Color: NtColor; Opacity = 1; IsFrozen = false;
-  constructor(c: NtColor = new NtColor()) { this.Color = c }
+  /** new SolidColorBrush(color) — or the SharpDX form new SolidColorBrush(renderTarget, color), which maps to the same thing. */
+  constructor(c: NtColor = new NtColor(), c2?: NtColor) { this.Color = c instanceof NtColor ? c : c2 instanceof NtColor ? c2 : new NtColor() }
+  /** brush.ToDxBrush(RenderTarget): OnRender snapshots draw with the WPF brush itself. */
+  ToDxBrush(_rt?: unknown) { return this }
+  Dispose() { }
   Clone() { const b = new SolidColorBrush(new NtColor(this.Color.A, this.Color.R, this.Color.G, this.Color.B)); b.Opacity = this.Opacity; return b }
   CloneCurrentValue() { return this.Clone() }
   Freeze() { if (!Object.isFrozen(this)) { this.IsFrozen = true; Object.freeze(this) } }
@@ -26,6 +30,7 @@ for (const e of NAMED.split(',')) {
   const [name, hex] = e.split(' '), h = hex.length === 8 ? hex : 'FF' + hex, n = (i: number) => parseInt(h.slice(i, i + 2), 16);
   const c = Object.freeze(new NtColor(n(0), n(2), n(4), n(6)));
   Colors[name] = c;
+  (NtColor as any)[name] ??= c;   // SharpDX.Color.Red & co.
   const b = new SolidColorBrush(c); b.Freeze(); Brushes[name] = b;
 }
 Object.freeze(Colors); Object.freeze(Brushes);

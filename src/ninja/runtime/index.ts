@@ -1,6 +1,8 @@
 // NinjaScript runtime entry: globals for compiled code (createRt), the bar loop (runNinja) and result assembly.
 import type { NtResult, NtRunOptions, Rt } from '../contract.ts';
-import { Engine, Indicator, NinjaScriptBase, curEngine, setEngine } from './base.ts';
+import { Engine, Indicator, NinjaScriptBase, curEngine, setEngine, isSer, toSeries } from './base.ts';
+import { DX, renderSnapshot } from './render.ts';
+import { SessionIterator, parseSession } from './session.ts';
 import { BUILTINS } from './indicators/index.ts';
 import { Brushes, Colors, DashStyleHelper, NtColor, SimpleFont, SolidColorBrush, Stroke, css } from './brushes.ts';
 import { DrawProxy } from './draw.ts';
@@ -23,11 +25,50 @@ class Exception extends Error {
   ToString() { return this.message }
 }
 class KeyValuePair { Key: unknown; Value: unknown; constructor(k: unknown, v: unknown) { this.Key = k; this.Value = v } }
+class EventArgs { static Empty = new EventArgs() }
+
+/** LINQ on any sequence: arrays, List, Series (newest first: element 0 = barsAgo 0), dictionaries/iterables; otherwise the object's own method. */
+function linq(x: any, name: string, ...a: any[]) {
+  const l: NtList | null = x instanceof NtList ? x : Array.isArray(x) ? new NtList(x)
+    : isSer(x) ? (s => new NtList(Array.from({ length: s.ctx.cur + 1 }, (_, k) => s.get(k))))(toSeries(x))
+    : x != null && typeof x === 'object' && typeof x[Symbol.iterator] === 'function' && typeof x[name] !== 'function' ? new NtList(x) : null;
+  if (!l) { if (typeof x?.[name] !== 'function') throw new NtError(`'${name}' is not available on this value`); return x[name](...a) }
+  if (name === 'Count') return a[0] ? l.filter(a[0]).length : l.length;
+  return (l as any)[name](...a);
+}
+// Multicast delegates (events): a combined function with the ordered handler list in __list.
+const parts = (f: any): any[] => (f == null ? [] : f.__list ?? [f]);
+const combine = (list: any[]) => {
+  if (list.length <= 1) return list[0] ?? null;
+  const f: any = (...x: any[]) => { let r; for (const g of list) r = g(...x); return r };
+  f.__list = list;
+  return f;
+};
+const dadd = (a: any, b: any) => combine([...parts(a), ...parts(b)]);
+const drem = (a: any, b: any) => {
+  const l = parts(a), r = parts(b);
+  for (let i = l.length - r.length; i >= 0; i--) if (r.every((g, k) => l[i + k] === g)) return combine([...l.slice(0, i), ...l.slice(i + r.length)]);
+  return a ?? null;
+};
+const groups = new WeakMap<object, Map<string, Function>>();
+/** Instance method group as a stable delegate (same function for the same object and method). */
+const mg = (o: any, k: string) => {
+  let m = groups.get(o);
+  if (!m) groups.set(o, (m = new Map()));
+  let f = m.get(k);
+  if (!f) m.set(k, (f = (...a: any[]) => o[k](...a)));
+  return f;
+};
+const Enumerable = {
+  Range: (start: number, n: number) => new NtList(Array.from({ length: n }, (_, i) => start + i)),
+  Repeat: (v: unknown, n: number) => new NtList(Array.from({ length: n }, () => v)),
+  Empty: () => new NtList(),
+};
 
 export function createRt(): Rt {
   const g: Record<string, unknown> = {
     NinjaScriptBase, Indicator, Strategy, Series: NtSeries, ISeries: NtSeries, PriceSeries: NtSeries,
-    Draw: DrawProxy, Brushes, Colors, Color: NtColor, SolidColorBrush, Brush: SolidColorBrush, Stroke, SimpleFont, DashStyleHelper,
+    Draw: DrawProxy, Brushes, Colors, Color: NtColor, ...DX, SessionIterator, EventArgs, Enumerable, SolidColorBrush, Brush: SolidColorBrush, Stroke, SimpleFont, DashStyleHelper,
     ...E, DayOfWeek, MidpointRounding,
     Math: NtMath, DateTime: NtDateTime, TimeSpan: NtTimeSpan, List: NtList, Dictionary: NtDictionary, KeyValuePair,
     String: NtString, Convert, Double, Int32: Int, Int64: Long, Boolean: Bool,
@@ -43,9 +84,11 @@ export function createRt(): Rt {
   const ns: any = new Proxy({}, { get: (_, k) => (typeof k === 'symbol' ? undefined : k in g ? g[k] : ns) });
   return {
     ...g, NinjaTrader: ns, System: ns,
-    __get: get, __set: set, __fmt: fmt, __format: format, __cast: cast, __double: Double, __int: Int, __long: Long, __bool: Bool,
+    __get: get, __set: set, __lq: linq, __dadd: dadd, __drem: drem, __mg: mg, __fmt: fmt, __format: format, __cast: cast, __double: Double, __int: Int, __long: Long, __bool: Bool,
   };
 }
+/** Run-input id of the synthetic "Trading hours" setting every NinjaScript gets (see engine.ts). */
+export const SESSION_INPUT = '__tradingHours';
 export const NT_GLOBALS: string[] = Object.keys(createRt()).filter(k => !k.startsWith('__'));
 
 const STYLE: Record<string, NtResult['plots'][number]['style']> = {
@@ -69,13 +112,35 @@ export function runNinja(classes: Record<string, Function>, className: string, _
   const res: NtResult = { kind: 'indicator', name: className, overlay: false, plots: [], lines: [], draws: [], backColors: [], barColors: [], logs: e.logs, alerts: e.alerts };
   let root: any = null, phase = 'OnStateChange';
   try {
+    c0.setSession(parseSession(opts.inputs?.[SESSION_INPUT] ?? opts.session));
     const cls: any = classes[className];
     if (!cls) throw new NtError(`class '${className}' was not found`);
     root = e.create(cls, null, s => applyInputs(s, cls, opts.inputs), true);
     const br = root instanceof Strategy ? root.__br : null, extra: any[] = root.__ctxs.slice(1);
     const primary = (i: number) => { c0.cur = i; br?.step(i); root.__runTo(i); br?.endBar(i) };
+    // Calculate.OnEachTick / OnPriceChange: each bar is replayed as OHLC ticks (O, L, H, C when it closes up, else O, H, L, C);
+    // OnBarUpdate (and every indicator it reads) re-runs on the forming bar, which only shows the ticks so far.
+    const mode = String(root.Calculate), tickMode = mode === 'OnEachTick' || mode === 'OnPriceChange';
+    const ticked = (i: number) => {
+      const b = opts.bars[i], v = c0.bars[i], path = b.close >= b.open ? [b.open, b.low, b.high, b.close] : [b.open, b.high, b.low, b.close];
+      let last = NaN;
+      path.forEach((p, k) => {
+        if (k && mode === 'OnPriceChange' && p === last) return;
+        if (!k) Object.assign(v, { open: b.open, high: p, low: p, close: p });
+        else Object.assign(v, { high: Math.max(v.high, p), low: Math.min(v.low, p), close: p });
+        c0.cur = i;
+        br?.step(i, k ? [last, p] : [p, p], p);
+        e.firstTick = !k;
+        for (const s of e.scripts) if (s.__last >= i) s.__last = i - 1;
+        root.__runTo(i);
+        last = p;
+      });
+      Object.assign(v, b);
+      e.firstTick = true;
+      br?.endBar(i);
+    };
     phase = 'OnBarUpdate';
-    if (!extra.some(c => c.bars.length)) for (let i = 0; i < N; i++) primary(i);
+    if (!extra.some(c => c.bars.length)) for (let i = 0; i < N; i++) (tickMode ? ticked : primary)(i);
     else {
       // multi-series: bar-close events of all series in time order (primary first on ties)
       const ev: [number, number, number][] = [];
@@ -89,6 +154,7 @@ export function runNinja(classes: Record<string, Function>, className: string, _
     }
     phase = 'OnStateChange';
     root.__state('Transition'); root.__state('Realtime');
+    if (root.OnRender !== NinjaScriptBase.prototype.OnRender) { phase = 'OnRender'; renderSnapshot(root, e) }
   } catch (err) {
     res.error = `Error on calling '${phase}' method on bar ${c0.cur}: ${err instanceof Error ? err.message : String(err)}`;
   } finally {

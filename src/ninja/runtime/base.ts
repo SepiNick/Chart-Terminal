@@ -10,9 +10,12 @@ export class Engine {
   opts: NtRunOptions; classes: Record<string, any>; builtins: Record<string, any>; ctxs: BarsCtx[];
   cache = new Map<string, any>(); scripts: any[] = []; logs: { bar: number; msg: string }[] = []; alerts: { bar: number; msg: string }[] = [];
   draws = new Map<string, any>(); root: any = null; pending: BarsCtx | null = null; warned = new Set<string>();
+  /** IsFirstTickOfBar for the OnBarUpdate calls being made (tick-by-tick Calculate modes). */
+  firstTick = true;
   constructor(opts: NtRunOptions, classes: Record<string, any>, builtins: Record<string, any>) {
     this.opts = opts; this.classes = classes; this.builtins = builtins;
-    this.ctxs = [new BarsCtx(opts.bars, opts.symbol, opts.tfSec, opts.tickSize, opts.pointValue)];
+    // own copies: tick-by-tick runs reveal the forming bar in place
+    this.ctxs = [new BarsCtx(opts.bars.map(b => ({ ...b })), opts.symbol, opts.tfSec, opts.tickSize, opts.pointValue)];
   }
   log(msg: string) { this.logs.push({ bar: this.ctxs[0].cur, msg }) }
   warn(msg: string) { if (!this.warned.has(msg)) { this.warned.add(msg); this.log('Warning: ' + msg) } }
@@ -78,7 +81,9 @@ export class NinjaScriptBase {
     this.__running = true;
     try { while (this.__last < t) { c.cur = ++this.__last; this.__bar() } } finally { c.cur = saved; this.__running = false }
   }
-  __bar() { this.BarsInProgress = 0; this.IsFirstTickOfBar = true; this.OnBarUpdate() }
+  __bar() { this.BarsInProgress = 0; this.IsFirstTickOfBar = this.__eng.firstTick; this.OnBarUpdate() }
+  /** Custom rendering: called once after the run with snapshot helpers (see render.ts). */
+  OnRender(_chartControl?: unknown, _chartScale?: unknown) { }
   /** indicator[barsAgo] reads (and writes) its first plot */
   __item(barsAgo: number) { return toSeries(this).get(barsAgo) }
   __setItem(barsAgo: number, v: unknown) { toSeries(this).set(barsAgo, v) }
@@ -167,7 +172,9 @@ export class NinjaScriptBase {
     const tf = type == null ? p.tfSec : PERIOD_SEC[type] ? PERIOD_SEC[type] * value : 0;
     const bars = tf ? e.opts.barsFor?.(sym, tf) ?? [] : [];
     if (!bars.length) e.warn(`AddDataSeries(${sym}, ${type ?? 'same period'} ${value}): no data available, series ${this.__ctxs.length} stays empty`);
-    this.__ctxs.push(new BarsCtx(bars, sym, tf || p.tfSec, p.tick, p.pv));
+    const c = new BarsCtx(bars, sym, tf || p.tfSec, p.tick, p.pv);
+    c.setSession(p.session);
+    this.__ctxs.push(c);
   }
   AddChartIndicator(ind: any) { this.__chartInds.push(ind) }
   Update() { this.__runTo(this.__ctx.cur) }
