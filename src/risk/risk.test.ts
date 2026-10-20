@@ -26,6 +26,8 @@ test('risk: Pearson and log-return correlation, aligned on common bar times', ()
 test('risk: symbol → base and quote', () => {
   assert.deepEqual(splitPair('BTCUSDT'), { base: 'BTC', quote: 'USDT' });
   assert.deepEqual(splitPair('BINANCE:ETHBTC'), { base: 'ETH', quote: 'BTC' });
+  assert.deepEqual(splitPair('KUCOIN:BTC_USDT'), { base: 'BTC', quote: 'USDT' });
+  assert.deepEqual(splitPair('BYBIT:ETH_USDT.P'), { base: 'ETH', quote: 'USDT' });
   assert.deepEqual(splitPair('BTCFDUSD'), { base: 'BTC', quote: 'FDUSD' });
   assert.deepEqual(splitPair('bybit:SOL/USDT:USDT'), { base: 'SOL', quote: 'USDT' });
   assert.deepEqual(splitPair('AAPL'), { base: 'AAPL', quote: '?' });

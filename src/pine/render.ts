@@ -103,15 +103,16 @@ class PanePrimitive implements ISeriesPrimitive<Time> {
 
 const UP = '#26a69a', DOWN = '#ef5350';
 const TEXT_PX: Record<string, number> = { tiny: 8, small: 10, normal: 12, large: 16, huge: 22, auto: 12 };
+// top_right sits below the chart's quick Buy/Sell buttons, which share that corner.
 const POS: Record<string, string> = {
-  top_left: 'top:4px;left:4px', top_center: 'top:4px;left:50%;transform:translateX(-50%)', top_right: 'top:4px;right:4px',
+  top_left: 'top:4px;left:4px', top_center: 'top:4px;left:50%;transform:translateX(-50%)', top_right: 'top:40px;right:4px',
   middle_left: 'top:50%;left:4px;transform:translateY(-50%)', middle_center: 'top:50%;left:50%;transform:translate(-50%,-50%)', middle_right: 'top:50%;right:4px;transform:translateY(-50%)',
   bottom_left: 'bottom:4px;left:4px', bottom_center: 'bottom:4px;left:50%;transform:translateX(-50%)', bottom_right: 'bottom:4px;right:4px',
 };
 /** Pine tables as real HTML tables (text via textContent, so script data is never parsed as markup). */
 function tableEl(t: PineTable): HTMLTableElement {
   const el = document.createElement('table'), covered = new Set<string>();
-  el.style.cssText = `position:absolute;${POS[t.position] ?? POS.top_right};border-collapse:collapse;font-family:system-ui;pointer-events:auto;`
+  el.style.cssText = `position:absolute;${POS[t.position] ?? POS.top_right};width:auto;border-collapse:collapse;font-family:system-ui;pointer-events:auto;`
     + `background:${t.bgcolor ?? 'transparent'};${t.frame_width && t.frame_color ? `outline:${t.frame_width}px solid ${t.frame_color};` : ''}`;
   for (let r = 0; r < t.rows; r++) {
     const tr = el.insertRow();
