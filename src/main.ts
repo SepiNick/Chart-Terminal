@@ -1,5 +1,5 @@
 import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from './chart.ts';
-import { TFS, validTf, streamTickers, fetch24h, fetchSymbols, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type Ticker24, type RemoteMarket } from './data.ts';
+import { TFS, anyTf, streamTickers, fetch24h, fetchSymbols, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type Ticker24, type RemoteMarket } from './data.ts';
 import { INDICATORS } from './indicators.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { TOOL_MAP } from './tools/index.ts';
@@ -18,6 +18,7 @@ import { hasOrderFlow } from './orderflow/feed.ts';
 import { initDom, domSync } from './orderflow/domui.ts';
 import { derivsAttach, derivsMenu } from './derivs/layer.ts';   // derivs
 import { initLiqPanel } from './derivs/liqpanel.ts';   // derivs
+import { ofMenu, replayButton, marketReplayUi } from './orderflow/menu.ts';
 import { initJournal, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
 import { journalReplayOrder } from './journal/replay.ts';
 import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
@@ -385,13 +386,14 @@ function syncUI() {
   });
   $('#symBtn').textContent = p.cfg.symbol;
   const tfs = [...new Set([...st.favTfs, p.cfg.tf])].sort((a, b) => tfSeconds(a) - tfSeconds(b));
-  $('#tfs').innerHTML = tfs.filter(validTf).map(t => `<button data-tf="${esc(t)}" class="${t === p.cfg.tf ? 'on' : ''}">${esc(t)}</button>`).join('');
+  $('#tfs').innerHTML = tfs.filter(anyTf).map(t => `<button data-tf="${esc(t)}" class="${t === p.cfg.tf ? 'on' : ''}">${esc(t)}</button>`).join('');
   $('#typeBtn').textContent = CHART_TYPES.find(t => t.id === p.cfg.type)?.name ?? p.cfg.type;
   $('#layoutBtn').textContent = `⊞ ${st.layout.mode}`;
   $('#layoutName').textContent = st.layoutName;
-  $('#replayBar').classList.toggle('open', !!p.replay);
-  $('#replayBtn').classList.toggle('on', !!p.replay);
-  $('#rpPlay').textContent = p.replay?.timer ? '⏸' : '▶';
+  const mr = marketReplayUi(p);   // orderflow: a Market Replay uses the same bar
+  $('#replayBar').classList.toggle('open', !!p.replay || !!mr);
+  $('#replayBtn').classList.toggle('on', !!p.replay || !!mr);
+  $('#rpPlay').textContent = (mr ? mr.playing : p.replay?.timer) ? '⏸' : '▶';
   $('#tSym').textContent = p.cfg.symbol;
   $('#pctBtn').classList.toggle('on', st.settings.scaleMode === 'percent');
   $('#logBtn').classList.toggle('on', st.settings.scaleMode === 'log');
@@ -407,7 +409,7 @@ $('#tfMore').onclick = e => {
   const m = showMenu(r.left, r.bottom + 2, [
     ...all.map(t => ({ label: tfLabel(t), hint: t, checked: t === cur, action: () => setTf(t) })),
     { sep: true },
-    { label: 'Add custom interval…', action: () => { const t = parseTf(prompt('Interval, e.g. 45m, 3h, 2d, 2w') ?? ''); if (t) { st.customTfs = [...new Set([...st.customTfs, t])]; store.set('customTfs', st.customTfs); setTf(t) } else toast('Invalid interval') } },
+    { label: 'Add custom interval…', action: () => { const t = parseTf(prompt('Interval, e.g. 45m, 3h, 2d, 2w — or from trades: 100T ticks, R10 range, REV5 reversal ticks, D500 delta') ?? ''); if (t) { st.customTfs = [...new Set([...st.customTfs, t])]; store.set('customTfs', st.customTfs); setTf(t) } else toast('Invalid interval') } },
   ]);
   $$('.ctx-i', m).slice(0, all.length).forEach((row, i) => {
     const star = document.createElement('span'), t = all[i];
@@ -493,7 +495,7 @@ function copyShot(c: HTMLCanvasElement) { c.toBlob(b => b && navigator.clipboard
 $('#themeBtn').onclick = () => applySettings({ theme: st.settings.theme === 'dark' ? 'light' : 'dark', bgColor: '', gridColor: '', scaleTextColor: '', separatorColor: '' });
 
 // ---------- replay ----------
-$('#replayBtn').onclick = () => { const p = active(); if (p.replay) p.exitReplay(); else p.startReplay(); syncUI() };
+$('#replayBtn').onclick = () => { const p = active(); if (replayButton(p, 'exit', panes)) return syncUI(); if (p.replay) p.exitReplay(); else p.startReplay(); syncUI() };
 $('#ofBtn').onclick = e => {
   const p = active(), of = { ...defaultOF(), ...p.cfg.of }, r = (e.currentTarget as HTMLElement).getBoundingClientRect();
   const set = (patch: Partial<OFCfg>, label = 'order flow') => applyCfg(p, { of: { ...of, ...patch } }, label);
@@ -510,6 +512,7 @@ $('#ofBtn').onclick = e => {
     { label: 'Imbalance ratio', hint: `${of.ratio}×`, sub: [1.5, 2, 2.5, 3, 4, 5].map(x => ({ label: `${x}×`, checked: of.ratio === x, action: () => set({ ratio: x }) })) },
     { label: 'Big trade size…', hint: of.bigMin ? `≥ ${of.bigMin.toLocaleString()}` : 'auto', action: () => { const v = num('Minimum trade value (quote currency, e.g. USDT). 0 = automatic (top 0.5%)', of.bigMin); if (v != null) set({ bigMin: v }) } },
     { label: 'Load older trades', disabled: !p.of?.fp || p.of.firstId == null, action: () => p.of?.loadMore() },
+    ...ofMenu(p, of, set, num, () => panes),
     { sep: true },
     { label: 'DOM / Level 2 panel', icon: '≣', action: () => { if (st.side !== 'dom') showSide('dom') } },
   ]);
@@ -519,11 +522,11 @@ $('#rpDate').onchange = e => { const v = (e.target as HTMLInputElement).value; i
 $('#rpRandom').onclick = () => active().replayRandom();
 $('#rpFirst').onclick = () => active().replayFirst();
 $('#rpBack').onclick = () => active().stepBack();
-$('#rpStep').onclick = () => active().stepReplay();
-const togglePlay = () => { const p = active(); if (p.replay?.timer) p.pauseReplay(); else p.playReplay(+$<HTMLSelectElement>('#rpSpeed').value); syncUI() };
+$('#rpStep').onclick = () => { if (!replayButton(active(), 'step', panes)) active().stepReplay() };
+const togglePlay = () => { const p = active(); if (replayButton(p, 'play', panes)) return syncUI(); if (p.replay?.timer) p.pauseReplay(); else p.playReplay(+$<HTMLSelectElement>('#rpSpeed').value); syncUI() };
 $('#rpPlay').onclick = togglePlay;
-$('#rpSpeed').onchange = () => { const p = active(); if (p.replay?.timer) p.playReplay(+$<HTMLSelectElement>('#rpSpeed').value) };
-$('#rpExit').onclick = () => { active().exitReplay(); syncUI() };
+$('#rpSpeed').onchange = () => { const p = active(); if (replayButton(p, 'speed', panes, +$<HTMLSelectElement>('#rpSpeed').value)) return; if (p.replay?.timer) p.playReplay(+$<HTMLSelectElement>('#rpSpeed').value) };
+$('#rpExit').onclick = () => { if (!replayButton(active(), 'exit', panes)) active().exitReplay(); syncUI() };
 
 // ---------- bottom toolbar ----------
 const RANGES: [string, string, number | 'ytd' | 'all'][] = [['1D', '1m', 86400], ['5D', '5m', 5 * 86400], ['1M', '30m', 30 * 86400], ['3M', '1h', 90 * 86400], ['6M', '2h', 182 * 86400], ['YTD', '1d', 'ytd'], ['1Y', '1d', 365 * 86400], ['5Y', '1w', 5 * 365 * 86400], ['All', '1M', 'all']];
