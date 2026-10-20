@@ -18,6 +18,9 @@ import { hasOrderFlow } from './orderflow/feed.ts';
 import { initDom, domSync } from './orderflow/domui.ts';
 import { initJournal, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
 import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults } from './pineui.ts';
+import { serverMode } from './sync.ts';
+import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
+import { initSettingsUI } from './settingsui.ts';
 
 // ---------- layouts (grid arrangements) ----------
 interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
@@ -93,11 +96,12 @@ function applyCfg(p: ChartPane, patch: Partial<PaneCfg>, label = 'chart change')
 const hooks: Hooks = {
   settings: () => st.settings,
   drawings: sym => (st.drawings[sym] ??= []),
-  alerts: () => st.alerts,
+  alerts: () => (serverMode ? serverLines() : st.alerts),
   account: () => st.acct,
   hidden: () => st.hidden,
   onPrice: handlePrice,
-  onCrosshair(src, time) {
+  onCrosshair(src, time, prm) {
+    crossPx = prm.point ? src.main.coordinateToPrice(prm.point.y) : null;
     if (st.layout.sync.crosshair) for (const p of panes) if (p !== src) p.syncCrosshair(time);
     later(renderDataWindow);
   },
@@ -141,7 +145,7 @@ const hooks: Hooks = {
   onScripts: p => { if (p === active()) { renderPineResults(p); p.legend(p.disp.at(-1)) } },
   scriptSettings: (p, id) => openInputs(p, id),
 };
-let syncingTime = false;
+let syncingTime = false, crossPx: number | null = null;
 
 // ---------- grid ----------
 function buildLayout() {
@@ -230,7 +234,7 @@ function handlePrice(sym: string, px: number, ts: number) {
   const prev = lastPx[sym];
   lastPx[sym] = px;
   journalMark(sym, px);
-  if (prev != null) for (const a of st.alerts) {
+  if (prev != null && !serverMode) for (const a of st.alerts) {
     if (!a.on || a.sym !== sym) continue;
     const level = a.drawingId != null ? drawingPrice(a) : a.price;
     if (level == null) continue;
@@ -252,7 +256,7 @@ function drawingPrice(a: Alert): number | null {
 }
 let unsubTickers = () => {}, tickKey = '';
 function connectTickers() {
-  const syms = [...new Set([...st.watch, ...panes.flatMap(p => isExpr(p.cfg.symbol) ? [] : [p.cfg.symbol]), ...st.alerts.filter(a => a.on).map(a => a.sym), ...Object.keys(st.acct.pos), ...st.acct.orders.map(o => o.sym)])];
+  const syms = [...new Set([...st.watch, ...panes.flatMap(p => isExpr(p.cfg.symbol) ? [] : [p.cfg.symbol]), ...(serverMode ? [] : st.alerts.filter(a => a.on).map(a => a.sym)), ...Object.keys(st.acct.pos), ...st.acct.orders.map(o => o.sym)])];
   const key = syms.filter(x => !isRemote(x)).join();   // remote symbols get prices from their candle feed
   if (key === tickKey) return;
   tickKey = key; unsubTickers();
@@ -268,7 +272,41 @@ function beep() {
     g.gain.value = st.settings.alertVolume; o.frequency.value = 880; o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime + 0.3);
   } catch {}
 }
+/** Server alerts as chart price lines: price levels and horizontal-line drawings. */
+function serverLines(): Alert[] {
+  const out: Alert[] = [];
+  for (const a of serverAlerts()) {
+    const line = (price: number | undefined) => { if (price != null && Number.isFinite(price)) out.push({ id: out.length, sym: a.sym, price, dir: 'up', on: a.active }) };
+    if (a.source.kind === 'price' && a.condition && !a.condition.startsWith('moving')) { line(a.value); line(a.value2) }
+    if (a.source.kind === 'drawing') for (const l of [a.source.line, a.source.line2]) if (l?.type === 'hline') line(l.price);
+  }
+  return out;
+}
+/** What the active chart offers to the alert dialog: drawings, indicator plots (as Pine) and Pine scripts. */
+function alertCtx(): AlertCtx {
+  const p = active(), sym = p.cfg.symbol, bars = p.vb(), drawings = st.drawings[sym] ?? [];
+  const plots: AlertCtx['plots'] = [], scripts: AlertCtx['scripts'] = [];
+  for (const e of p.ind) {
+    const src = BUILTIN_PINE[e.key]; if (!src) continue;
+    const out = Object.entries(e.calc(bars)), many = out.length > 1;
+    out.forEach(([k, v], i) => plots.push({ label: many ? `${e.name} · ${k}` : e.name, name: `${sym} ${e.name}${many ? ' ' + k : ''}`, script: src, plot: i, last: v.at(-1) ?? undefined }));
+  }
+  for (const r of p.scriptRuns) {
+    const sc = scriptById(r.id), ref = p.cfg.scripts?.find(x => x.id === r.id);
+    if (!sc || (sc.lang ?? 'pine') !== 'pine' || !r.out || r.error) continue;
+    const inputs = ref?.inputs ?? {};
+    r.out.plots.forEach((pl, i) => { if (pl.kind === 'line') plots.push({ label: `${r.name} · ${pl.title || 'Plot ' + (i + 1)}`, name: `${sym} ${r.name}`, script: sc.src, inputs, plot: i, last: Number.isFinite(pl.values.at(-1)) ? pl.values.at(-1) : undefined }) });
+    scripts.push({ id: r.id, name: r.name, src: sc.src, inputs, conds: r.out.alertconditions.map(c => ({ title: c.title, message: c.message })), strategy: r.out.meta.kind === 'strategy' });
+  }
+  const drawingName = (d: Drawing) => {
+    const def = TOOL_MAP.get(d.type), n = d.name ?? def?.name ?? d.type;
+    if (d.type === 'hline' || d.type === 'hray') return `${n} ${d.pts[0].p.toFixed(p.prec)}`;
+    return `${n} ${drawings.filter(x => x.type === d.type).indexOf(d) + 1}`;
+  };
+  return { sym, tf: p.cfg.tf, price: crossPx ?? p.lastPrice() ?? null, prec: p.prec, drawings, plots, scripts, drawingName };
+}
 function addAlert(a: Omit<Alert, 'id' | 'on' | 'dir'> & { dir?: Alert['dir'] }) {
+  if (serverMode) return openAlertDialog({ value: a.price });
   const last = pxOf(a.sym);
   if (!(a.price > 0) || last == null) return toast('Invalid alert price');
   st.alerts.push({ ...a, id: Date.now(), on: true, dir: a.dir ?? (a.price >= last ? 'up' : 'down') });
@@ -308,6 +346,7 @@ const drawHost: DrawUIHost = {
   },
   commit: () => active().layer.onChange(),
   alertOn(d) {
+    if (serverMode) return openAlertDialog({ drawingId: d.id });
     const p = active(), def = TOOL_MAP.get(d.type), price = def?.priceAt?.(d, Date.now() / 1000, p.layer.geo());
     if (price == null) return toast('This drawing has no price level right now');
     addAlert({ sym: p.cfg.symbol, price, drawingId: d.id, note: def!.name });
@@ -399,7 +438,7 @@ $('#tplBtn').onclick = e => {
   ];
   showMenu(r.left, r.bottom + 2, items);
 };
-$('#alertBtn').onclick = () => { const p = active(), px = p.lastPrice(); if (px) { const v = prompt(`Alert price for ${p.cfg.symbol}`, (px * 1.01).toFixed(p.prec)); if (v) addAlert({ sym: p.cfg.symbol, price: +v }) } };
+$('#alertBtn').onclick = () => { if (serverMode) return openAlertDialog(); const p = active(), px = p.lastPrice(); if (px) { const v = prompt(`Alert price for ${p.cfg.symbol}`, (px * 1.01).toFixed(p.prec)); if (v) addAlert({ sym: p.cfg.symbol, price: +v }) } };
 $('#undoBtn').onclick = () => history.undo();
 $('#redoBtn').onclick = () => history.redo();
 $('#layoutBtn').onclick = e => {
@@ -669,18 +708,32 @@ $('#watchT').onclick = e => {
 };
 
 function renderAlerts() {
+  if (serverMode) return renderAlertsPanel();
   $('#alertT').innerHTML = '<tr><th>Symbol</th><th>Condition</th><th>Status</th><th></th></tr>' + st.alerts.map(a =>
     `<tr><td>${esc(a.sym)}</td><td>${a.note ? esc(a.note) + ' ' : ''}${a.dir === 'up' ? 'Crossing ↑' : 'Crossing ↓'} ${a.drawingId != null ? '' : a.price}</td><td class="${a.on ? '' : 'muted'}">${a.on ? 'Active' : 'Triggered'}</td>
      <td>${a.on ? '' : `<button class="x" data-re="${a.id}" title="Restart">↻</button>`}<button class="x" data-alert="${a.id}" title="Delete">×</button></td></tr>`).join('');
   $('#alertLog').innerHTML = alertLog.slice(0, 30).map(esc).join('<br>') || '—';
 }
 $('#alertAdd').onclick = () => addAlert({ sym: active().cfg.symbol, price: +$<HTMLInputElement>('#alertPx').value });
-$('#alertT').onclick = e => {
+if (!serverMode) $('#alertT').onclick = e => {
   const el = e.target as HTMLElement;
   if (el.dataset.re) { const a = st.alerts.find(x => x.id === +el.dataset.re!); if (a) a.on = true }
   if (el.dataset.alert) st.alerts = st.alerts.filter(a => a.id !== +el.dataset.alert!);
   store.set('alerts', st.alerts); panes.forEach(p => p.tradeOverlay()); connectTickers(); renderAlerts();
 };
+
+// Script legend: right-click (long-press on phones) a script for its alert and settings.
+$('#grid').addEventListener('contextmenu', e => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('.legend [data-script]'), p = panes.find(x => x.cell.contains(row));
+  if (!row || !p) return;
+  e.preventDefault(); e.stopPropagation(); hooks.onActivate(p);
+  const id = row.dataset.script!;
+  showMenu(e.clientX, e.clientY, [
+    { label: 'Add alert on this script…', icon: '⏰', disabled: !serverMode, action: () => openAlertDialog({ scriptId: id }) },
+    ...(serverMode ? [] : [{ label: 'Script alerts need the server', disabled: true }]),
+    { label: 'Settings…', icon: '⚙', action: () => openInputs(p, id) },
+  ]);
+}, true);
 
 // Object tree + data window
 let treeTab = 'tree';
@@ -937,6 +990,12 @@ domSync();
 document.documentElement.dataset.theme = st.settings.theme;
 const side = st.side; st.side = ''; if (side) showSide(side); else $('#body').classList.add('no-panel');
 buildLayout();
+initSettingsUI();
+if (serverMode) {
+  initServerAlerts({ ctx: alertCtx, changed: () => panes.forEach(p => p.tradeOverlay()), beep, toastMs: () => (st.settings.autoHideToasts ? 20000 : 120000) });
+  // One-time move of the old browser alerts to the server; whatever failed stays for the next start.
+  if (st.alerts.length) migrateToServer(st.alerts as OldAlert[], st.drawings, active()?.cfg.tf ?? '1h').then(left => { st.alerts = left as Alert[]; store.set('alerts', st.alerts) });
+}
 renderAlerts();
 history.onChange();
 
