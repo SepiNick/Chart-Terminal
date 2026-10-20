@@ -1,11 +1,12 @@
 // Strategy Tester tab: overview, 53-metric performance report (All/Long/Short), trades, properties, CSV export,
-// optimisation with heatmap, walk-forward, Monte Carlo, portfolio backtest and forward testing into the paper account.
+// date range, analysis (monthly returns, return distribution, streaks), optimisation with heatmap, walk-forward, Monte Carlo, portfolio backtest and forward testing into the paper account.
 import { createChart, AreaSeries, LineSeries, type IChartApi, type UTCTimestamp } from 'lightweight-charts';
 import type { ChartPane, ScriptRun } from './chart.ts';
 import { METRIC_DEFS, fmtMetric, metrics } from './tester/metrics.ts';
 import { monteCarlo, values } from './tester/optimize.ts';
 import { forSymbol, makeEvaluate, paramSpecs, type Job } from './tester/runner.ts';
 import { combine, type Leg, type Portfolio } from './tester/portfolio.ts';
+import { monthlyReturns, rangeBounds, returnDistribution, sliceReport, streaks, type RangeSel } from './tester/analysis.ts';
 import { fetchBars } from './data.ts';
 import type { WorkerMsg } from './tester/worker.ts';
 import type { Metrics, OptResult, ParamSpec, TesterData, Trade, WalkForwardResult } from './tester/types.ts';
@@ -32,16 +33,50 @@ const date = (t: number) => new Date(t * 1000).toISOString().replace('T', ' ').s
 const DEF = Object.fromEntries(METRIC_DEFS.map(d => [d.key, d]));
 const fm = (key: string, v: number) => fmtMetric(DEF[key], v);
 
+// ---------- report date range (per strategy name) ----------
+const PRESETS = { all: 'All data', '30d': 'Last 30 days', '90d': 'Last 90 days', ytd: 'Year to date', '1y': 'Last 365 days', custom: 'Custom dates' };
+const ranges = store.get<Record<string, RangeSel>>('tsRange', {});
+const rangeSel = (): RangeSel => (cur && ranges[cur.run.name]) || { preset: 'all' };
+/** The report the tabs show: the strategy's results restricted to the chosen range. */
+function view() {
+  const { p, data } = cur!, bars = p.vb();
+  return sliceReport(data, bars, rangeBounds(rangeSel(), bars.at(-1)?.time ?? 0));
+}
+function syncRange() {
+  const box = document.getElementById('tsRange');
+  if (!box) return;
+  box.style.display = cur ? '' : 'none';
+  if (box.contains(document.activeElement)) return;
+  const sel = rangeSel(), custom = sel.preset === 'custom';
+  $<HTMLSelectElement>('#tsRangeP').value = sel.preset;
+  for (const [id, v] of [['#tsRangeF', sel.from], ['#tsRangeT', sel.to]] as const) { const i = $<HTMLInputElement>(id); i.value = v ?? ''; i.style.display = custom ? '' : 'none' }
+}
+
 export function initTesterUI(h: TesterHost) {
   host = h;
   $('#tsTabs').onclick = e => { const b = (e.target as HTMLElement).closest<HTMLElement>('[data-ts]'); if (b) { tab = b.dataset.ts!; store.set('tsTab', tab); show() } };
   $('#tsExport').onclick = exportCsv;
+  // Analysis tabs and the report's date range live here, not in index.html.
+  const props = $('#tsTabs [data-ts="props"]');
+  props.insertAdjacentHTML('beforebegin', '<button data-ts="monthly">Monthly returns</button><button data-ts="dist">Distribution</button><button data-ts="streaks">Streaks</button>');
+  $('#ts-props').insertAdjacentHTML('beforebegin', '<div class="tspane" id="ts-monthly"></div><div class="tspane" id="ts-dist"></div><div class="tspane" id="ts-streaks"></div>');
+  $('#tsNoCode').insertAdjacentHTML('beforebegin', `<span id="tsRange" class="row" style="gap:4px" title="Report date range: trades opened in it (overview, performance, trades, analysis, CSV)">
+    <select id="tsRangeP">${Object.entries(PRESETS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
+    <input type="date" id="tsRangeF"><input type="date" id="tsRangeT"></span>`);
+  $('#tsTitle').parentElement!.style.flexWrap = 'wrap';   // the custom dates need room in a narrow panel
+  $('#tsRange').onchange = () => {
+    if (!cur) return;
+    const sel: RangeSel = { preset: $<HTMLSelectElement>('#tsRangeP').value as RangeSel['preset'], from: $<HTMLInputElement>('#tsRangeF').value || undefined, to: $<HTMLInputElement>('#tsRangeT').value || undefined };
+    ranges[cur.run.name] = sel; store.set('tsRange', ranges);
+    syncRange(); show();
+  };
 }
 
 /** Called after every script run on the active chart. */
 export function renderTester(p: ChartPane, run: ScriptRun | undefined, data: TesterData | undefined) {
   $('#tsTitle').textContent = data ? `${run!.name} · ${p.cfg.symbol} ${p.cfg.tf}` : 'No strategy or expert on the chart';
   cur = data && run ? { p, run, data } : null;
+  syncRange();
   forward();
   show();
 }
@@ -51,7 +86,7 @@ function show() {
   document.querySelectorAll<HTMLElement>('.tspane').forEach(el => el.classList.toggle('on', el.id === `ts-${tab}`));
   if (tab !== 'overview') { eqChart?.remove(); eqChart = null }
   if (!cur) {
-    for (const id of ['#tsPortForm', '#tsPortOut', '#tsMetrics', '#tsPerf', '#tsTrades', '#tsProps', '#tsOptForm', '#tsOptOut', '#tsWfaForm', '#tsWfaOut', '#tsMcForm', '#tsMcOut']) $(id).innerHTML = '';
+    for (const id of ['#tsPortForm', '#tsPortOut', '#tsMetrics', '#tsPerf', '#tsTrades', '#tsProps', '#ts-monthly', '#ts-dist', '#ts-streaks', '#tsOptForm', '#tsOptOut', '#tsWfaForm', '#tsWfaOut', '#tsMcForm', '#tsMcOut']) $(id).innerHTML = '';
     document.querySelectorAll<HTMLElement>('.tspane').forEach(el => delete el.dataset.key);
     eqChart?.remove(); eqChart = null;
   }
@@ -60,12 +95,12 @@ function show() {
   if (pane.contains(document.activeElement) && document.activeElement !== document.body) return;
   if (['opt', 'wfa', 'mc', 'port'].includes(tab)) { if (pane.dataset.key === key) return; pane.dataset.key = key }
   if (!cur && tab !== 'fwd') return;
-  ({ overview, perf, trades, props, opt: optForm, wfa: wfaForm, mc: mcForm, port: portForm, fwd: forwardView } as Record<string, () => void>)[tab]?.();
+  ({ overview, perf, trades, props, monthly, dist, streaks: streakView, opt: optForm, wfa: wfaForm, mc: mcForm, port: portForm, fwd: forwardView } as Record<string, () => void>)[tab]?.();
 }
 
 // ---------- overview / performance / trades / properties ----------
 function overview() {
-  const { p, data } = cur!, bars = p.vb(), m = metrics(data, bars);
+  const { data, bars } = view(), m = metrics(data, bars);
   const tiles: [string, string, string?][] = [
     ['Net P&L', `${money(m.netProfit)} (${m.netProfitPct.toFixed(2)}%)`, cls(m.netProfit)], ['Total closed trades', String(m.totalTrades)],
     ['Percent profitable', `${m.winRate.toFixed(2)}%`], ['Profit factor', fm('profitFactor', m.profitFactor)],
@@ -86,7 +121,7 @@ function overview() {
   eqChart.timeScale().fitContent();
 }
 
-const sides = () => { const { p, data } = cur!, b = p.vb(); return [metrics(data, b), metrics(data, b, { side: 'long' }), metrics(data, b, { side: 'short' })] };
+const sides = () => { const { data, bars: b } = view(); return [metrics(data, b), metrics(data, b, { side: 'long' }), metrics(data, b, { side: 'short' })] };
 function perf() {
   const [a, l, s] = sides();
   let group = '';
@@ -98,7 +133,7 @@ function perf() {
 }
 
 function trades() {
-  const { p, data } = cur!, t = data.trades, f = (x: number) => x.toFixed(p.prec);
+  const { p } = cur!, { data } = view(), t = data.trades, f = (x: number) => x.toFixed(p.prec);
   let cum = 0;
   const cums = t.map(x => (cum += x.profit));
   $('#tsTrades').innerHTML = '<tr><th>#</th><th>Type</th><th>Entry</th><th>Entry time</th><th>Entry price</th><th>Exit</th><th>Exit time</th><th>Exit price</th><th>Qty</th><th>Net P&L</th><th>Run-up</th><th>Drawdown</th><th>Cum. P&L</th></tr>' +
@@ -116,10 +151,49 @@ function props() {
   $('#tsProps').innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(String(v))}</td></tr>`).join('');
 }
 
+// ---------- analysis: monthly returns, return distribution, streaks ----------
+/** Green/red background whose strength follows |v| / max. */
+const tint = (v: number, max: number) => v ? `background:color-mix(in srgb, var(${v > 0 ? '--up' : '--down'}) ${Math.round(15 + 60 * Math.min(1, Math.abs(v) / (max || 1)))}%, transparent)` : '';
+function monthly() {
+  const { data, bars } = view(), rows = monthlyReturns(data, bars);
+  const max = Math.max(0, ...rows.flatMap(r => r.months.map(c => Math.abs(c?.pct ?? 0))));
+  const cell = (c: { pct: number; pl: number } | null, m = max) => c ? `<td style="${tint(c.pct, m)}" title="${money(c.pl)}">${c.pct.toFixed(2)}%<br><small>${money(c.pl)}</small></td>` : '<td></td>';
+  const maxY = Math.max(0, ...rows.map(r => Math.abs(r.total.pct)));
+  const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  $('#ts-monthly').innerHTML = rows.length ? `<table class="monthly"><tr><th>Year</th>${names.map(n => `<th>${n}</th>`).join('')}<th>Total</th></tr>${rows.map(r => `<tr><th>${r.year}</th>${r.months.map(c => cell(c)).join('')}${cell(r.total, maxY)}</tr>`).join('')}</table>
+    <div class="muted">Equity change per calendar month (UTC), % of the previous month's closing equity; P&L below.</div>` : '<span class="muted">No bars in the selected range.</span>';
+}
+function dist() {
+  const { data } = view(), d = returnDistribution(data.trades), el = $('#ts-dist');
+  if (!d.buckets.length) { el.innerHTML = '<span class="muted">No closed trades in the selected range.</span>'; return }
+  const W = 600, H = 150, lo = d.buckets[0].from, span = d.buckets.at(-1)!.to - lo, top = Math.max(...d.buckets.map(b => b.count));
+  const x = (v: number) => ((v - lo) / span) * W, bw = (d.width / span) * W;
+  const line = (v: number, color: string, label: string) => `<line x1="${x(v)}" x2="${x(v)}" y1="0" y2="${H}" stroke="${color}" stroke-dasharray="4 3"><title>${label} ${v.toFixed(2)}%</title></line>`;
+  const step = Math.ceil(d.buckets.length / 10);
+  el.innerHTML = `<div class="row wrap kpis"><div><span>Trades</span><b>${data.trades.length}</b></div><div><span>Profitable</span><b class="up">${d.wins}</b></div><div><span>Losing</span><b class="dn">${d.losses}</b></div>
+      <div><span>Average return</span><b class="${cls(d.mean)}">${d.mean.toFixed(2)}%</b></div><div><span>Median return</span><b class="${cls(d.median)}">${d.median.toFixed(2)}%</b></div><div><span>Bucket width</span><b>${+d.width.toFixed(6)}%</b></div></div>
+    <svg class="spark" viewBox="0 0 ${W} ${H + 14}" preserveAspectRatio="none" role="img" aria-label="Distribution of trade returns" style="height:180px">
+      ${d.buckets.map(b => `<rect x="${x(b.from) + 1}" width="${Math.max(1, bw - 2)}" y="${H - (b.count / top) * H}" height="${(b.count / top) * H}" fill="var(${b.from >= 0 ? '--up' : '--down'})" fill-opacity=".75"><title>${+b.from.toFixed(6)}% … ${+b.to.toFixed(6)}%: ${b.count} trade(s)</title></rect>`).join('')}
+      ${line(d.mean, 'var(--accent)', 'Mean')}${line(d.median, 'var(--warn)', 'Median')}
+      ${d.buckets.filter((_, i) => i % step === 0).map(b => `<text x="${x(b.from) + 2}" y="${H + 12}" font-size="10" fill="var(--muted)">${+b.from.toFixed(4)}%</text>`).join('')}
+    </svg>
+    <div class="muted">Trade % returns in equal buckets (green: profit, red: loss) · <span style="color:var(--accent)">- - mean</span> · <span class="warn">- - median</span></div>`;
+}
+function streakView() {
+  const { data } = view(), s = streaks(data.trades), el = $('#ts-streaks');
+  if (!data.trades.length) { el.innerHTML = '<span class="muted">No closed trades in the selected range.</span>'; return }
+  const top = Math.max(1, ...s.dist.flatMap(r => [r.wins, r.losses]));
+  const bar = (n: number, v: string) => `<span style="display:inline-block;height:9px;width:${(n / top) * 120}px;background:var(${v});margin-right:6px"></span>${n}`;
+  el.innerHTML = `<div class="row wrap kpis"><div><span>Longest winning streak</span><b class="up">${s.maxWin}</b></div><div><span>Longest losing streak</span><b class="dn">${s.maxLoss}</b></div>
+      <div><span>Current streak</span><b class="${s.current.kind === 'win' ? 'up' : s.current.kind === 'loss' ? 'dn' : ''}">${s.current.kind ? `${s.current.len} ${s.current.kind === 'win' ? 'win' : 'loss'}${s.current.len > 1 ? (s.current.kind === 'win' ? 's' : 'es') : ''}` : '—'}</b></div></div>
+    <table style="width:auto"><tr><th>Streak length</th><th>Winning streaks</th><th>Losing streaks</th></tr>${s.dist.map(r => `<tr><td>${r.len}</td><td>${bar(r.wins, '--up')}</td><td>${bar(r.losses, '--down')}</td></tr>`).join('')}</table>
+    <div class="muted">Consecutive winning / losing closed trades in exit order; an even trade ends a streak.</div>`;
+}
+
 function exportCsv() {
   if (!cur) return toast('No strategy on the chart');
   const q = (v: unknown) => { const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s };
-  const [a, l, s] = sides(), t = cur.data.trades;
+  const [a, l, s] = sides(), t = view().data.trades;
   const lines = [['Metric', 'All', 'Long', 'Short'], ...METRIC_DEFS.map(d => [d.label, a[d.key], l[d.key], s[d.key]]), [],
     ['#', 'Type', 'Entry signal', 'Entry time', 'Entry price', 'Exit signal', 'Exit time', 'Exit price', 'Qty', 'Net P&L', 'P&L %', 'Commission', 'Run-up', 'Drawdown'],
     ...t.map((x, i) => [i + 1, x.dir, x.entryId, date(x.entryTime), x.entryPrice, x.exitId, date(x.exitTime), x.exitPrice, x.qty, x.profit, x.profitPct, x.commission, x.runup, x.drawdown])];
