@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BookHistory, Footprint, aggregatePrints, autoRow, barStats, bigPrints, imbalances, type Print } from './model.ts';
+import { BookHistory, Footprint, absorption, aggregatePrints, autoRow, barStats, bigPrints, clusterSearch, imbalances, type Print } from './model.ts';
 
 const p = (t: number, px: number, qty: number, buy: boolean): Print => ({ t, px, qty, buy });
 
@@ -41,6 +41,31 @@ test('autoRow picks a nice step; aggregatePrints merges one taker order; big pri
   const many = [...Array.from({ length: 999 }, (_, i) => p(i, 100, 1, i % 2 === 0)), p(1000, 100, 50, true)];
   assert.deepEqual(bigPrints(many).map(x => x.qty), [50]);
   assert.equal(bigPrints(many, 200).length, 1);
+});
+
+test('cluster search: thresholds per metric, automatic top 1%', () => {
+  const fp = new Footprint(60, 1);
+  fp.add([p(0, 10, 5, true), p(0, 11, 1, false), p(0, 11, 1, false), p(60, 12, 9, false), p(60, 13, 2, true)]);
+  const bars = [...fp.bars.values()];
+  assert.deepEqual(clusterSearch(bars, 'volume', 5).map(h => [h.time, h.bin]), [[0, 10], [60, 12]]);
+  assert.deepEqual(clusterSearch(bars, 'delta', 5).map(h => h.value), [5, -9]);
+  assert.deepEqual(clusterSearch(bars, 'trades', 2).map(h => h.bin), [11]);
+  assert.deepEqual(clusterSearch(bars, 'bid', 1, 2).map(h => h.bin), [11]);
+  assert.deepEqual(clusterSearch(bars, 'volume').map(h => h.bin), [12]);
+});
+
+test('absorption: heavy selling at the low that the next bars do not break', () => {
+  const fp = new Footprint(60, 1);
+  fp.add([
+    p(0, 105, 1, true), p(1, 104, 1, false), p(2, 100, 30, false), p(3, 101, 1, true),   // sellers hit 100 hard, price holds
+    p(60, 101, 1, true), p(61, 103, 1, true), p(120, 102, 1, false), p(121, 104, 1, true),
+    p(180, 104, 25, true), p(181, 103, 1, false),                                       // last bar: not confirmed yet
+  ]);
+  const abs = absorption([...fp.bars.values()], 1, 3, 2);
+  assert.deepEqual(abs, [{ time: 0, bin: 100, side: 'buy', vol: 30 }]);
+  // a later bar trading through the level cancels it
+  fp.add([p(240, 99, 1, false)]);
+  assert.deepEqual(absorption([...fp.bars.values()], 1, 3, 5).filter(a => a.time === 0), []);
 });
 
 test('book history keeps one snapshot per interval and a robust scale', () => {

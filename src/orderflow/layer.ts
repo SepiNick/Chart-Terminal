@@ -1,8 +1,12 @@
 // Order flow on a chart: footprint cells, big-print bubbles and a liquidity heatmap drawn as series primitives,
 // plus CVD / delta panes. One instance per chart pane; it survives chart rebuilds and is reset on symbol/tf change.
 import { CandlestickSeries, HistogramSeries, type IChartApi, type IPrimitivePaneRenderer, type IPrimitivePaneView, type ISeriesApi, type ISeriesPrimitive, type SeriesType, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { BookHistory, Footprint, autoRow, barStats, bigPrints, binOf, imbalances, type BookSnap, type FBar, type Print } from './model.ts';
+import { BookHistory, Footprint, absorption, autoRow, barStats, bigPrints, binOf, clusterSearch, imbalances, type Absorption, type BookSnap, type ClusterHit, type ClusterMetric, type FBar, type Print } from './model.ts';
 import { fetchPrints, hasOrderFlow, streamBook, streamPrints } from './feed.ts';
+import { ofFeed, replayOn, replayStatus } from './source.ts';
+import { parseOfTf } from './tfbars.ts';
+import { TPO_LETTERS, sessions, tpo, volumeProfile } from './profile.ts';
+import { toast } from '../store.ts';
 import type { Bar } from '../data.ts';
 
 export interface OFCfg {
@@ -14,9 +18,26 @@ export interface OFCfg {
   bigMin: number;         // big-print notional threshold; 0 = automatic
   cvd: boolean;
   delta: boolean;         // per-bar delta histogram pane
+  tpo?: boolean;          // TPO (market profile) per session
+  vprofile?: boolean;     // volume profile per session
+  cluster?: 'off' | ClusterMetric;   // Cluster Search
+  clusterMin?: number;    // 0 = automatic (top 1% of the window)
+  clusterMax?: number;    // 0 = no upper bound
+  clusterWindow?: number; // bars searched, counted back from the last
+  clusterAlert?: boolean; // toast (and an `orderflow:cluster` window event) when the forming bar gets a new hit
+  absorption?: boolean;
 }
-export const defaultOF = (): OFCfg => ({ footprint: 'off', row: 0, ratio: 3, heatmap: false, bubbles: false, bigMin: 0, cvd: false, delta: false });
-export const ofActive = (c?: OFCfg) => !!c && (c.footprint !== 'off' || c.heatmap || c.bubbles || c.cvd || c.delta);
+export const defaultOF = (): OFCfg => ({ footprint: 'off', row: 0, ratio: 3, heatmap: false, bubbles: false, bigMin: 0, cvd: false, delta: false, tpo: false, vprofile: false, cluster: 'off', clusterMin: 0, clusterMax: 0, clusterWindow: 50, clusterAlert: false, absorption: false });
+/** `type`: the chart types 'footprint' and 'tpo' switch the matching layer on by themselves. */
+export const ofActive = (c?: OFCfg, type?: string) => type === 'footprint' || type === 'tpo' || (!!c && (c.footprint !== 'off' || c.heatmap || c.bubbles || c.cvd || c.delta || !!c.tpo || !!c.vprofile || (c.cluster ?? 'off') !== 'off' || !!c.absorption));
+/** Effective settings: defaults for fields older layouts lack, plus what the chart type implies. */
+export function ofEffective(c: OFCfg | undefined, type?: string): OFCfg {
+  const e = { ...defaultOF(), ...c };
+  if (type === 'footprint' && e.footprint === 'off') e.footprint = 'bidask';
+  if (type === 'tpo') e.tpo = true;
+  return e;
+}
+const needsPrints = (c: OFCfg) => c.footprint !== 'off' || c.heatmap || c.bubbles || c.cvd || c.delta || !!c.vprofile || c.cluster !== 'off' || !!c.absorption;
 
 type Target = Parameters<IPrimitivePaneRenderer['draw']>[0];
 type Ctx = CanvasRenderingContext2D;
@@ -31,7 +52,7 @@ function heatColor(t: number): [number, number, number] {
   return [255, 255, 255];
 }
 
-export interface OFHost { symbol: () => string; tfSec: () => number; bars: () => Bar[]; prec: () => number; cfg: () => OFCfg; colors: () => { up: string; down: string; text: string; bg: string }; status: (s: string) => void }
+export interface OFHost { symbol: () => string; tfSec: () => number; tf?: () => string; type?: () => string; bars: () => Bar[]; prec: () => number; cfg: () => OFCfg; colors: () => { up: string; down: string; text: string; bg: string }; status: (s: string) => void }
 
 export class OrderFlow implements ISeriesPrimitive<Time> {
   fp: Footprint | null = null;
@@ -55,7 +76,7 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
 
   constructor(host: OFHost) {
     this.host = host;
-    const under: IPrimitivePaneRenderer = { draw: t => this.drawHeat(t) };
+    const under: IPrimitivePaneRenderer = { draw: t => { this.drawHeat(t); this.drawProfiles(t) } };
     const over: IPrimitivePaneRenderer = { draw: t => this.drawTop(t) };
     this.views = [{ renderer: () => under, zOrder: () => 'bottom' }, { renderer: () => over, zOrder: () => 'top' }];
   }
@@ -68,14 +89,14 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
   /** Called from ChartPane.build(): attach to the new chart and add CVD/delta panes after the existing ones. */
   attach(chart: IChartApi, main: ISeriesApi<SeriesType>) {
     this.chart = chart; this.series = main;
-    const c = this.host.cfg(), colors = this.host.colors();
+    const c = this.cfg(), colors = this.host.colors();
     main.attachPrimitive(this);
     let pane = chart.panes().length;
     this.cvdSeries = c.cvd ? chart.addSeries(CandlestickSeries, { upColor: colors.up, downColor: colors.down, borderVisible: false, wickUpColor: colors.up, wickDownColor: colors.down, title: 'CVD', priceFormat: { type: 'volume' }, priceLineVisible: false }, pane++) : null;
     this.deltaSeries = c.delta ? chart.addSeries(HistogramSeries, { title: 'Delta', priceFormat: { type: 'volume' }, priceLineVisible: false }, pane++) : null;
     chart.panes().forEach((p, i) => p.setStretchFactor(i ? 1 : 3.5));
+    if (c.footprint !== 'off' || this.host.type?.() === 'tpo') main.applyOptions({ upColor: 'transparent', downColor: 'transparent', borderVisible: false, wickVisible: false } as never);
     if (c.footprint !== 'off') {
-      main.applyOptions({ upColor: 'transparent', downColor: 'transparent', borderVisible: false, wickVisible: false } as never);
       // After the chart restores its previous zoom: footprint cells need wide bars.
       setTimeout(() => {
         if (this.chart !== chart) return;
@@ -90,11 +111,15 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
   reset() { this.stopPrints(); this.stopBook(); this.stopPrints = this.stopBook = () => {}; this.fp = null; this.book = new BookHistory(HEAT_EVERY, HEAT_KEEP); this.heat = null; this.firstId = undefined; this.started = '' }
 
   private started = '';
+  private cfg() { return ofEffective(this.host.cfg(), this.host.type?.()) }
+  /** Activity interval (tick/range/reversal/delta): bars are keyed by `Print.bar`, not by the clock. */
+  private activity() { return !!parseOfTf(this.host.tf?.() ?? '') }
   private start() {
-    const c = this.host.cfg(), sym = this.host.symbol();
-    if (!ofActive(c)) { this.stopPrints(); this.stopBook(); this.stopPrints = this.stopBook = () => {}; this.started = ''; return }
+    const c = this.cfg(), sym = this.host.symbol(), tf = this.host.tf?.() ?? '';
+    if (!needsPrints(c)) { this.stopPrints(); this.stopBook(); this.stopPrints = this.stopBook = () => {}; this.started = ''; this.fp = null; this.statusLine(); this.changed(); return }
     if (!hasOrderFlow(sym)) { this.host.status('Order flow is available for crypto symbols only'); return }
-    const want = `${sym}|${this.host.tfSec()}|${c.heatmap}`;
+    const feed = ofFeed(sym, tf), heat = c.heatmap && !feed;   // the book heatmap is live-only and clock-based
+    const want = `${sym}|${tf}|${this.host.tfSec()}|${heat}|${replayOn(sym, tf)}`;
     if (this.started === want) { this.syncRow(); return }
     this.stopPrints(); this.stopBook();
     this.started = want;
@@ -102,17 +127,26 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
     this.fp = new Footprint(this.host.tfSec(), row);
     this.pending = [];
     let live = false;
-    this.stopPrints = streamPrints(sym, ps => { if (live) { this.fp!.add(ps); this.changed() } else this.pending.push(...ps) });
-    if (c.heatmap) this.stopBook = streamBook(sym, b => this.onBook(b), 500);
-    this.loading = true; this.host.status('Order flow: loading recent trades…');
-    fetchPrints(sym, 20, n => this.host.status(`Order flow: loading recent trades… ${n.toLocaleString()}`)).then(({ prints, firstId }) => {
+    const onPrints = (ps: Print[]) => { if (live) { this.fp!.add(ps); this.changed() } else this.pending.push(...ps) };
+    const loaded = ({ prints, firstId }: { prints: Print[]; firstId?: number }) => {
       if (!this.fp || this.started !== want) return;
       this.firstId = firstId;
       const last = prints.at(-1)?.t ?? 0;
       this.fp.add([...prints, ...this.pending.filter(p => p.t > last)]);
       this.pending = []; live = true; this.loading = false;
       this.statusLine(); this.changed();
-    }).catch(e => { live = true; this.loading = false; this.host.status(`Order flow history unavailable: ${(e as Error).message}`) });
+    };
+    const failed = (e: Error) => { live = true; this.loading = false; this.host.status(`Order flow history unavailable: ${e.message}`) };
+    this.loading = true; this.host.status('Order flow: loading recent trades…');
+    if (feed) {
+      feed.onPrints.add(onPrints);
+      this.stopPrints = () => { feed.onPrints.delete(onPrints); feed.release() };
+      feed.ready.then(() => loaded({ prints: feed.prints }), failed);
+      return;
+    }
+    this.stopPrints = streamPrints(sym, onPrints);
+    if (heat) this.stopBook = streamBook(sym, b => this.onBook(b), 500);
+    fetchPrints(sym, 20, n => this.host.status(`Order flow: loading recent trades… ${n.toLocaleString()}`)).then(loaded, failed);
   }
   /** Fetch older trades (Binance only), extending the footprint back in time. */
   async loadMore(pages = 20) {
@@ -124,16 +158,17 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
     } finally { this.loading = false; this.statusLine(); this.changed() }
   }
   private statusLine() {
-    if (!this.fp) return;
+    const rs = replayOn(this.host.symbol(), this.host.tf?.()) ? replayStatus() + ' · ' : '';
+    if (!this.fp) { this.host.status(rs.slice(0, -3)); return }
     const from = this.fp.from === Infinity ? '' : new Date(this.fp.from * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    this.host.status(`Order flow since ${from} · ${this.fp.prints.length.toLocaleString()} trades · row ${+this.fp.row.toPrecision(6)}`);
+    this.host.status(`${rs}Order flow since ${from} · ${this.fp.prints.length.toLocaleString()} trades · row ${+this.fp.row.toPrecision(6)}`);
   }
   private rowSize() {
-    const c = this.host.cfg();
+    const c = this.cfg();
     if (c.row > 0) return c.row;
     return autoRow(this.host.bars().slice(-200).map(b => b.high - b.low), 22, 10 ** -this.host.prec());
   }
-  private syncRow() { if (!this.host.cfg().row) { this.autoZoomRow(); this.changed(); return }   // automatic rows follow the zoom instead
+  private syncRow() { if (!this.cfg().row) { this.autoZoomRow(); this.changed(); return }   // automatic rows follow the zoom instead
     const r = this.rowSize(); if (this.fp && Math.abs(r - this.fp.row) > 1e-12) { this.fp.rebuild(r); this.heat = null; this.statusLine() } this.changed() }
 
   private changed() {
@@ -142,11 +177,33 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
   }
   private panes() {
     if (!this.fp) return;
+    if (!this.loading && replayOn(this.host.symbol(), this.host.tf?.())) this.statusLine();
     const bs = [...this.fp.bars.values()].sort((a, b) => a.time - b.time), c = this.host.colors();
     try {
       this.cvdSeries?.setData(bs.map(b => ({ time: b.time as UTCTimestamp, open: b.cvdOpen, high: b.cvdHigh, low: b.cvdLow, close: b.cvdClose })));
       this.deltaSeries?.setData(bs.map(b => ({ time: b.time as UTCTimestamp, value: b.buy - b.sell, color: (b.buy >= b.sell ? c.up : c.down) + 'cc' })));
     } catch { /* series of a chart that was just rebuilt */ }
+    this.analyse(bs);
+  }
+
+  // ---------- Cluster Search and absorption (recomputed with the panes, at most every 500 ms) ----------
+  private hits: ClusterHit[] = [];
+  private absorbed: Absorption[] = [];
+  private seen: Set<string> | null = null;
+  private analyse(bs: FBar[]) {
+    const c = this.cfg(), fp = this.fp!;
+    const win = bs.slice(-Math.max(1, c.clusterWindow || 50));
+    this.hits = c.cluster === 'off' ? [] : clusterSearch(win, c.cluster!, c.clusterMin, c.clusterMax || Infinity);
+    this.absorbed = c.absorption ? absorption(bs.slice(-300), fp.row) : [];
+    if (!c.clusterAlert || c.cluster === 'off') { this.seen = null; return }
+    const last = bs.at(-1)?.time, fresh = this.hits.filter(h => h.time === last && !this.seen?.has(`${h.time}:${h.bin}`));
+    const first = !this.seen;
+    this.seen ??= new Set();
+    for (const h of fresh) this.seen.add(`${h.time}:${h.bin}`);
+    if (first || !fresh.length) return;   // the first pass only learns what is already there
+    const h = fresh.reduce((a, x) => (Math.abs(x.value) > Math.abs(a.value) ? x : a)), px = (h.bin * fp.row).toFixed(this.host.prec());
+    toast(`Cluster ${this.host.symbol()}: ${c.cluster} ${h.value > 0 && c.cluster === 'delta' ? '+' : ''}${+h.value.toPrecision(4)} at ${px}`);
+    window.dispatchEvent(new CustomEvent('orderflow:cluster', { detail: { symbol: this.host.symbol(), metric: c.cluster, price: h.bin * fp.row, value: h.value, time: h.time } }));
   }
 
   // ---------- heatmap ----------
@@ -209,7 +266,7 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
     return x + ((t - last.time) / sec - 0.5) * ts.options().barSpacing;
   }
   private drawHeat(target: Target) {
-    const h = this.heat, c = this.host.cfg();
+    const h = this.heat, c = this.cfg();
     if (!c.heatmap || !h || !this.chart || !this.series) return;
     const first = this.book.snaps[0], last = this.book.snaps.at(-1);
     if (!first || !last) return;
@@ -223,10 +280,71 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
     });
   }
 
-  // ---------- footprint + bubbles ----------
+  // ---------- session profiles: TPO (letters from the left edge) and volume profile (bars from the right edge) ----------
+  /** Row size giving about `px` pixels per row at the current vertical zoom. */
+  private zoomRow(px: number) {
+    const p = this.host.bars().at(-1)?.close, s = this.series!;
+    const a = p && s.priceToCoordinate(p), b = p && s.priceToCoordinate(p * 1.001);
+    return a == null || b == null || !p || a === b ? 0 : autoRow([(px / Math.abs(a - b)) * p * 0.001], 1, 10 ** -this.host.prec());
+  }
+  private drawProfiles(target: Target) {
+    const c = this.cfg(), bars = this.host.bars();
+    if ((!c.tpo && !c.vprofile) || !this.chart || !this.series || !bars.length) return;
+    const ts = this.chart.timeScale(), sp = ts.options().barSpacing, s = this.series, colors = this.host.colors(), tfSec = this.host.tfSec();
+    // ponytail: UTC-day sessions (week / 30 days on daily+ charts) and 30-min TPO periods (one bar when bars are longer); no custom session templates.
+    const len = tfSec < 4 * 3600 ? 86400 : tfSec <= 86400 ? 604800 : 30 * 86400, period = Math.max(1800, tfSec);
+    const overlay = this.host.type?.() !== 'tpo', POC = '#f5a623';
+    const yRange = (k: number, row: number) => { const a = s.priceToCoordinate((k + 1) * row), b = s.priceToCoordinate(k * row); return a == null || b == null ? null : { top: Math.min(a, b), h: Math.abs(b - a) } };
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }: { context: Ctx; mediaSize: { width: number; height: number } }) => {
+      for (const ses of sessions(bars, len)) {
+        const xa = ts.timeToCoordinate(ses.bars[0].time as UTCTimestamp), xb = ts.timeToCoordinate(ses.bars.at(-1)!.time as UTCTimestamp);
+        if (xa == null || xb == null || xb + sp < 0 || xa - sp > mediaSize.width) continue;
+        const x0 = xa - sp / 2, x1 = xb + sp / 2;
+        ctx.save();
+        if (c.tpo) {
+          const row = this.zoomRow(12); if (!row) break;
+          const t = tpo(ses.bars, ses.start, period, row), singles = new Set(t.singles);
+          const maxN = Math.max(1, ...[...t.rows.values()].map(r => r.length)), cw = Math.min(9, (x1 - x0) / maxN);
+          ctx.globalAlpha = overlay ? 0.55 : 1;
+          for (const [k, ps] of t.rows) {
+            const r = yRange(k, row); if (!r) continue;
+            const inVA = k >= t.val && k <= t.vah;
+            ctx.fillStyle = k === t.poc ? POC : inVA ? colors.text : colors.text + '80';
+            if (cw >= 5 && r.h >= 8) {
+              ctx.font = `${Math.min(12, r.h - 1)}px monospace`; ctx.textBaseline = 'middle';
+              ps.forEach((p, i) => ctx.fillText(TPO_LETTERS[p % TPO_LETTERS.length], x0 + i * cw, r.top + r.h / 2));
+            } else ctx.fillRect(x0, r.top, ps.length * cw, Math.max(1, r.h - 1));
+            if (singles.has(k)) { ctx.fillStyle = '#e6c200'; ctx.fillRect(x0 - 5, r.top, 3, Math.max(1, r.h)) }
+          }
+          const ib1 = s.priceToCoordinate((t.ibHi + 1) * row), ib2 = s.priceToCoordinate(t.ibLo * row);
+          if (ib1 != null && ib2 != null && Number.isFinite(t.ibHi)) { ctx.fillStyle = '#2962ff'; ctx.fillRect(x0 - 2, Math.min(ib1, ib2), 2, Math.abs(ib2 - ib1)) }
+        }
+        if (c.vprofile) {
+          const row = this.zoomRow(5); if (!row) break;
+          const fp = this.fp, vp = volumeProfile(ses.bars, row, fp ? { bars: fp.bars, row: fp.row, from: fp.from } : undefined);
+          const maxV = Math.max(1e-12, ...vp.rows.values()), w = (x1 - x0) * 0.45;
+          ctx.globalAlpha = 0.6;
+          for (const [k, v] of vp.rows) {
+            const r = yRange(k, row); if (!r) continue;
+            ctx.fillStyle = k === vp.poc ? POC : k >= vp.val && k <= vp.vah ? colors.up + '99' : colors.text + '40';
+            const bw = (v / maxV) * w; ctx.fillRect(x1 - bw, r.top, bw, Math.max(1, r.h - (r.h > 3 ? 1 : 0)));
+          }
+          ctx.globalAlpha = 1; ctx.lineWidth = 1;
+          for (const [k, col, dash] of [[vp.poc, POC, []], [vp.vah + 1, colors.text + '99', [4, 3]], [vp.val, colors.text + '99', [4, 3]]] as [number, string, number[]][]) {
+            const y = s.priceToCoordinate((k === vp.poc ? k + 0.5 : k) * row); if (y == null) continue;
+            ctx.strokeStyle = col; ctx.setLineDash(dash); ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+          }
+          ctx.setLineDash([]);
+        }
+        ctx.restore();
+      }
+    });
+  }
+
+  // ---------- footprint, bubbles, clusters, absorption ----------
   private drawTop(target: Target) {
-    const c = this.host.cfg(), fp = this.fp;
-    if (!fp || !this.chart || !this.series || (c.footprint === 'off' && !c.bubbles)) return;
+    const c = this.cfg(), fp = this.fp;
+    if (!fp || !this.chart || !this.series || (c.footprint === 'off' && !c.bubbles && c.cluster === 'off' && !c.absorption)) return;
     const ts = this.chart.timeScale(), sp = ts.options().barSpacing, colors = this.host.colors();
     this.autoZoomRow();
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }: { context: Ctx; mediaSize: { width: number; height: number } }) => {
@@ -245,12 +363,29 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
         }
       }
       if (c.bubbles) this.drawBubbles(ctx, fp.prints.slice(-20000), mediaSize.width, colors, c);
+      const cell = (time: number, bin: number) => {
+        const x = ts.timeToCoordinate(time as UTCTimestamp), a = this.series!.priceToCoordinate((bin + 1) * fp.row), b = this.series!.priceToCoordinate(bin * fp.row);
+        return x == null || a == null || b == null || x < -sp || x > mediaSize.width + sp ? null : { x, top: Math.min(a, b), h: Math.max(2, Math.abs(b - a)) };
+      };
+      ctx.lineWidth = 2; ctx.strokeStyle = '#f5a623';
+      for (const h of this.hits) {
+        const r = cell(h.time, h.bin); if (!r) continue;
+        if (c.footprint !== 'off') ctx.strokeRect(r.x - sp * 0.45, r.top, sp * 0.9, r.h);
+        else { ctx.beginPath(); ctx.arc(r.x, r.top + r.h / 2, Math.max(4, Math.min(12, sp * 0.45)), 0, Math.PI * 2); ctx.stroke() }
+      }
+      for (const a of this.absorbed) {
+        const r = cell(a.time, a.bin); if (!r) continue;
+        const x = r.x - sp * 0.5 - 7, y = r.top + r.h / 2, up = a.side === 'buy';
+        ctx.fillStyle = up ? colors.up : colors.down;
+        ctx.beginPath(); ctx.moveTo(x, y + (up ? -6 : 6)); ctx.lineTo(x - 5, y + (up ? 4 : -4)); ctx.lineTo(x + 5, y + (up ? 4 : -4)); ctx.closePath(); ctx.fill();
+        if (sp >= 30) { ctx.font = '9px sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(`ABS ${fmtQ(a.vol)}`, x - 7, y); ctx.textAlign = 'left' }
+      }
     });
   }
   /** Automatic row size follows the vertical zoom (~14 px per row); regrouping waits until it is off by 2×. */
   private zoomTimer = 0;
   private autoZoomRow() {
-    if (this.host.cfg().row > 0 || !this.fp || !this.series || this.zoomTimer) return;
+    if (this.cfg().row > 0 || !this.fp || !this.series || this.zoomTimer) return;
     const p = this.host.bars().at(-1)?.close; if (!p) return;
     const a = this.series.priceToCoordinate(p), b = this.series.priceToCoordinate(p * 1.001);
     if (a == null || b == null || a === b) return;
@@ -323,7 +458,7 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
     if (!big.length) return;
     const th = Math.min(...big.map(p => p.px * p.qty));
     for (const p of big) {
-      const x = this.xOf(p.t), y = s.priceToCoordinate(p.px);
+      const x = this.activity() && p.bar != null ? this.chart!.timeScale().timeToCoordinate(p.bar as UTCTimestamp) : this.xOf(p.t), y = s.priceToCoordinate(p.px);
       if (x == null || y == null || x < -40 || x > width + 40) continue;
       const r = Math.max(4, Math.min(28, Math.sqrt((p.px * p.qty) / th) * 5));
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);

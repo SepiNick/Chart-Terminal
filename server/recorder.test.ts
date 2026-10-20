@@ -50,6 +50,23 @@ test('apply() starts/stops sources for the configured symbols, backfilling only 
   assert.equal(R.query('BTCUSDT').at(-1)!.id, 2000);
 });
 
+test('page() walks forward with a cursor that never splits or repeats prints sharing a timestamp', () => {
+  // 25 prints over 5 timestamps (5 each), ids in insertion order
+  R.add('XRPUSDT', Array.from({ length: 25 }, (_, i) => ({ t: NOW + Math.floor(i / 5), px: 1, qty: 1, buy: true, id: i })));
+  const seen: number[] = [];
+  let cursor: string | undefined, pages = 0;
+  for (;;) {
+    const pg = R.page('XRPUSDT', NOW + 1, cursor, 7);
+    seen.push(...pg.prints.map(p => p.id!)); pages++;
+    if (!pg.next) break;
+    cursor = pg.next;
+  }
+  assert.deepEqual(seen, Array.from({ length: 20 }, (_, i) => i + 5), 'from is inclusive, every print exactly once');
+  assert.equal(pages, 3);
+  assert.deepEqual(R.page('xrpusdt', NOW + 10).prints, []);
+  assert.throws(() => R.page('XRPUSDT', NOW, 'x:y'));
+});
+
 test('binanceSource backfills the gap after a reconnect without duplicates', async () => {
   const sockets: { onopen: (() => void) | null; onmessage: ((e: { data: unknown }) => void) | null; onclose: (() => void) | null; close(): void }[] = [];
   class FakeWs { onopen = null; onmessage = null; onclose = null; constructor() { sockets.push(this) } close() {} }

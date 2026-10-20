@@ -10,7 +10,7 @@ const oc = (b: Bar[]) => b.map(x => [x.open, x.close]);
 const increasing = (b: Bar[]) => b.every((x, i) => !i || x.time > b[i - 1].time);
 
 test('chart type list', () => {
-  assert.equal(CHART_TYPES.length, 18);
+  assert.equal(CHART_TYPES.length, 20);
   assert.deepEqual(CHART_TYPES.filter(x => x.priceBased).map(x => x.id), ['renko', 'linebreak', 'kagi', 'pnf', 'range']);
 });
 
