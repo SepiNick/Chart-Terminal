@@ -38,11 +38,13 @@ export function correlationMatrix(series: Record<string, Pt[]>) {
 
 const QUOTES = ['FDUSD', 'USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'USD', 'EUR', 'GBP', 'JPY', 'TRY', 'BRL', 'IRT', 'BTC', 'ETH', 'BNB'];
 export const STABLE = new Set(['USDT', 'USDC', 'FDUSD', 'BUSD', 'TUSD', 'DAI', 'USD']);
-/** Base and quote currency of a symbol: BTCUSDT, BINANCE:BTCUSDT, bybit:BTC/USDT:USDT. */
+/** Base and quote currency of a symbol: BTCUSDT, BINANCE:BTCUSDT, KUCOIN:BTC_USDT(.P), bybit:BTC/USDT:USDT. */
 export function splitPair(sym: string): { base: string; quote: string } {
   const slash = sym.indexOf('/'), colon = sym.indexOf(':');
   const s = colon >= 0 && (slash < 0 || colon < slash) ? sym.slice(colon + 1) : sym;   // drop an exchange prefix
   if (s.includes('/')) { const [base, q] = s.split('/'); return { base, quote: q.split(':')[0] } }
+  // The app's CCXT symbols: BASE_QUOTE, plus .P (perpetual) / .F<date> (future) suffixes.
+  if (s.includes('_')) { const [base, q] = s.replace(/\.[PF]\w*$/, '').split('_'); return { base, quote: q } }
   const q = QUOTES.find(x => s.endsWith(x) && s.length > x.length);
   return q ? { base: s.slice(0, -q.length), quote: q } : { base: s, quote: '?' };
 }
