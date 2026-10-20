@@ -17,6 +17,7 @@ import { defaultOF, type OFCfg } from './orderflow/layer.ts';
 import { hasOrderFlow } from './orderflow/feed.ts';
 import { initDom, domSync } from './orderflow/domui.ts';
 import { initJournal, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
+import { journalReplayOrder } from './journal/replay.ts';
 import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
 import { serverMode, onServer, api } from './sync.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
@@ -827,6 +828,7 @@ $('#scrT').onclick = e => {
 // ---------- order ticket & trading panel ----------
 const ticket = { side: 'buy' as Side, type: 'market' as OrderType };
 function submit(o: Parameters<typeof placeOrder>[1], px: number, p: ChartPane) {
+  if (journalReplayOrder(p, o)) return;   // journal: a chart in Replay trades a simulated backtest account instead
   const err = placeOrder(st.acct, o, px, p.vb().at(-1)?.time ?? Date.now() / 1000);
   if (err) return toast(err, 5000);
   saveAcct(); connectTickers(); panes.forEach(x => x.tradeOverlay()); renderTrading();
@@ -998,6 +1000,14 @@ initJournal({
     for (let i = 0; i < 50 && !(active().cfg.symbol === sym && active().vb().length); i++) await new Promise(r => setTimeout(r, 100));
     active().goTo(t);
   },
+  // journal: trade replay and portfolio risk
+  async pane(sym, tf) {
+    if (active().cfg.symbol !== sym) setSymbol(sym);
+    if (active().cfg.tf !== tf) setTf(tf);
+    for (let i = 0; i < 100 && !(active().cfg.symbol === sym && active().cfg.tf === tf && active().bars.length); i++) await new Promise(r => setTimeout(r, 100));
+    return active();
+  },
+  portfolio: () => ({ acct: st.acct, price: pxOf, watch: st.watch }),
 });
 journalSync(st.acct);
 initDom({
