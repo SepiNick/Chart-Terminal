@@ -1,2 +1,182 @@
 // [agent: alerts] Server-side alert engine. See docs/phase5-contracts.md §5.
-export {};
+//   GET /api/alerts → Alert[]          POST /api/alerts AlertInput → Alert
+//   PUT /api/alerts/:id (partial)      DELETE /api/alerts/:id
+//   GET /api/alerts/log?limit=&alert=  DELETE /api/alerts/log
+//   WS ← { type: 'alerts', alerts } after every change, { type: 'alert.fired', log } per fire.
+// Evaluation logic lives in evaluate.ts (pure); this file keeps alerts in SQLite + memory and wires them to watchSeries.
+import { randomUUID } from 'node:crypto';
+import type { Alert, AlertLog, Channel } from '../../src/alerttypes.ts';
+import { tfSeconds, type Bar } from '../../src/data.ts';
+import { runScript } from '../../src/pine/engine.ts';
+import type { Outputs } from '../../src/pine/interp.ts';
+import { db, migration } from '../core/db.ts';
+import { HttpError, bad, broadcast, route } from '../core/http.ts';
+import { watchSeries } from '../core/bars.ts';
+import { notify } from '../notify/index.ts';
+import * as E from './evaluate.ts';
+import { validateInput } from './validate.ts';
+
+migration('alerts/1', `
+  CREATE TABLE alerts (id TEXT PRIMARY KEY, data TEXT NOT NULL, created INTEGER NOT NULL);
+  CREATE TABLE alert_log (id INTEGER PRIMARY KEY AUTOINCREMENT, alert_id TEXT NOT NULL, at INTEGER NOT NULL, message TEXT NOT NULL, price REAL, deliveries TEXT NOT NULL);
+`);
+const MAX_ALERTS = 500, LOG_KEEP = 5000, RUN_EVERY = 2000;
+
+const alerts = new Map<string, Alert>();
+for (const r of db.prepare('SELECT data FROM alerts ORDER BY created').all() as { data: string }[]) { const a = JSON.parse(r.data) as Alert; alerts.set(a.id, a) }
+const states = new Map<string, E.EvalState>();
+// After a restart, lastFired keeps once_per_bar / once_per_minute from repeating within the same bar / minute.
+const stateOf = (a: Alert) => {
+  let s = states.get(a.id);
+  if (!s) {
+    states.set(a.id, (s = E.newState()));
+    if (a.lastFired) { const sec = tfSeconds(a.tf); s.lastFireAt = a.lastFired; s.firedBar = Math.floor(a.lastFired / 1000 / sec) * sec }
+  }
+  return s;
+};
+
+const list = () => [...alerts.values()];
+const save = (a: Alert) => db.prepare('INSERT INTO alerts (id, data, created) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data').run(a.id, JSON.stringify(a), a.created);
+function changed() { broadcast({ type: 'alerts', alerts: list() }); sync() }
+function stop(a: Alert, reason: string) { a.active = false; a.stoppedReason = reason; save(a); changed() }
+
+// ---------- live series: one watchSeries per (sym, tf) that an active alert needs ----------
+interface Run { id: number; at: number; upd: number; r: ReturnType<typeof runScript> }
+const watchers = new Map<string, { stop: () => void; runs: Map<string, Run> }>();
+let runSeq = 0, updSeq = 0;
+
+function sync() {
+  const need = new Set(list().filter(a => a.active).map(a => `${a.sym}|${a.tf}`));
+  for (const [k, w] of watchers) if (!need.has(k)) { w.stop(); watchers.delete(k) }
+  for (const k of need) if (!watchers.has(k)) {
+    const [sym, tf] = k.split('|'), w = { stop: () => {}, runs: new Map<string, Run>() };
+    watchers.set(k, w);
+    w.stop = watchSeries(sym, tf, (bars, closed) => onBars(sym, tf, w.runs, bars, closed));
+  }
+}
+
+function onBars(sym: string, tf: string, runs: Map<string, Run>, bars: Bar[], closed: boolean) {
+  const now = Date.now(), upd = ++updSeq;
+  for (const a of list()) {
+    if (!a.active || a.sym !== sym || a.tf !== tf) continue;
+    try { evaluate(a, bars, closed, now, upd, runs) }
+    catch (e) { console.error(`[alerts] ${a.id}: ${(e as Error).message}`) }
+  }
+}
+
+const mintick = (bars: Bar[]) => {
+  let d = 0;
+  for (const b of bars.slice(-50)) { const s = String(b.close); d = Math.max(d, s.includes('e-') ? 8 : s.split('.')[1]?.length ?? 0) }
+  return 10 ** -Math.min(d, 8);
+};
+
+/**
+ * One shared Pine run per (script, inputs) on this series: reused while the bar forms for RUN_EVERY ms, fresh on every
+ * bar close. Each alert consumes a given run once (st.lastRun), so throttling is per alert and per script at the same time.
+ */
+function scriptRun(a: Alert, bars: Bar[], closed: boolean, now: number, upd: number, runs: Map<string, Run>): Run | null {
+  const src = a.source as Extract<Alert['source'], { script: string }>;
+  const key = `${src.script}\0${JSON.stringify(src.inputs ?? {})}`;
+  let run = runs.get(key);
+  if (!run || (run.upd !== upd && (closed || now - run.at >= RUN_EVERY))) {
+    const r = runScript(src.script, bars, { symbol: a.sym, tf: a.tf, tfSec: tfSeconds(a.tf), mintick: mintick(bars), inputs: src.inputs as never });
+    runs.set(key, (run = { id: ++runSeq, at: now, upd, r }));
+  }
+  const st = stateOf(a);
+  if (st.lastRun === run.id) return null;
+  st.lastRun = run.id;
+  return run;
+}
+
+function evaluate(a: Alert, bars: Bar[], closed: boolean, now: number, upd: number, runs: Map<string, Run>) {
+  if (E.expired(a, now)) return stop(a, 'expired');
+  const i = E.pick(a.frequency, bars, closed);
+  if (i === null) return;
+  const st = stateOf(a), src = a.source, closedMode = a.frequency === 'once_per_bar_close';
+  let out: Outputs | undefined;
+  if (src.kind === 'indicator' || src.kind === 'script') {
+    const run = scriptRun(a, bars, closed, now, upd, runs);
+    if (!run) return;
+    if (run.r.error) return stop(a, `script error (line ${run.r.error.line}): ${run.r.error.msg}`);
+    out = run.r.out!;
+  }
+  if (src.kind === 'script') {
+    if (src.event === 'strategy' && !out!.broker) return stop(a, 'script is not a strategy');
+    for (const h of E.scriptHits(a, st, out!, i, closedMode)) {
+      if (!a.active) break;
+      if (E.frequencyAllows(a.frequency, st, bars[i].time, now)) fire(a, st, bars, i, now, out, h.message, h.vars);
+    }
+    return;
+  }
+  let values: number[];
+  if (src.kind === 'indicator') {
+    const p = out!.plots[src.plot];
+    if (!p) return stop(a, `script has no plot #${src.plot}`);
+    values = p.values;
+  } else values = bars.map(b => b.close);
+  const tNow = closedMode ? bars[i].time : now / 1000, tPrev = closedMode ? bars[i - 1]?.time : undefined;
+  if (E.evalLevel(a, st, values, i, tNow, tPrev) && E.frequencyAllows(a.frequency, st, bars[i].time, now)) fire(a, st, bars, i, now, out);
+}
+
+const describe = (a: Alert) => a.source.kind === 'script' ? 'script alert'
+  : `${a.source.kind === 'indicator' ? 'plot_' + a.source.plot : 'price'} ${a.condition!.replace(/_/g, ' ')}${a.source.kind === 'drawing' ? ' line' : a.value !== undefined ? ' ' + a.value + (a.value2 !== undefined ? '–' + a.value2 : '') : ''}`;
+
+function fire(a: Alert, st: E.EvalState, bars: Bar[], i: number, now: number, out?: Outputs, scriptMsg?: string, extra: Record<string, string> = {}) {
+  const vars = { ...E.barVars(a, bars, i, now, out), ...extra };
+  const message = E.render(a.message.trim() ? a.message : scriptMsg ?? `{{ticker}} {{interval}}: ${describe(a)} at {{close}}`, vars);
+  a.lastFired = now; a.fireCount++;
+  const auto = E.recordFire(st, bars[i].time, now, a.autoStop);
+  if (a.frequency === 'once') a.active = false;
+  if (auto) { a.active = false; a.stoppedReason = auto }
+  save(a); changed();
+  const channels = [...new Set<Channel>(['popup', ...a.channels])], price = bars[i].close;
+  const webhook = a.webhook && channels.includes('webhook') ? { url: a.webhook.url, body: a.webhook.body ? E.render(a.webhook.body, { ...vars, message }) : message } : undefined;
+  notify({ title: `${a.name || a.sym} alert`, body: message, channels, sound: true, webhook, data: { alertId: a.id, sym: a.sym, tf: a.tf, price, url: `/?symbol=${encodeURIComponent(a.sym)}&tf=${encodeURIComponent(a.tf)}` } })
+    .catch(e => [{ channel: 'popup' as Channel, ok: false, error: String((e as Error).message ?? e) }])
+    .then(deliveries => {
+      const r = db.prepare('INSERT INTO alert_log (alert_id, at, message, price, deliveries) VALUES (?, ?, ?, ?, ?)').run(a.id, now, message, price, JSON.stringify(deliveries));
+      const id = Number(r.lastInsertRowid);
+      if (id % 100 === 0) db.prepare('DELETE FROM alert_log WHERE id <= ?').run(id - LOG_KEEP);
+      const log: AlertLog = { id, alertId: a.id, at: now, message, price, deliveries };
+      broadcast({ type: 'alert.fired', log });
+    });
+}
+
+// Expire alerts even when their market is quiet.
+setInterval(() => { const now = Date.now(); for (const a of list()) if (a.active && E.expired(a, now)) stop(a, 'expired') }, 15_000).unref();
+
+// ---------- routes ----------
+const inputOf = ({ id: _i, created: _c, fireCount: _f, lastFired: _l, stoppedReason: _s, ...rest }: Alert) => rest;
+const get = (id: string) => { const a = alerts.get(id); if (!a) throw new HttpError(404, 'No such alert'); return a };
+
+route('GET', '/api/alerts', () => list());
+route('POST', '/api/alerts', c => {
+  if (alerts.size >= MAX_ALERTS) throw bad(`At most ${MAX_ALERTS} alerts`);
+  const a: Alert = { ...validateInput(c.body), id: randomUUID(), created: Date.now(), fireCount: 0 };
+  alerts.set(a.id, a); save(a); changed();
+  return a;
+});
+route('GET', '/api/alerts/log', c => {
+  const limit = Math.min(Math.max(Number(c.url.searchParams.get('limit')) || 200, 1), 1000), alert = c.url.searchParams.get('alert');
+  const rows = (alert
+    ? db.prepare('SELECT * FROM alert_log WHERE alert_id = ? ORDER BY id DESC LIMIT ?').all(alert, limit)
+    : db.prepare('SELECT * FROM alert_log ORDER BY id DESC LIMIT ?').all(limit)) as { id: number; alert_id: string; at: number; message: string; price: number | null; deliveries: string }[];
+  return rows.map((r): AlertLog => ({ id: r.id, alertId: r.alert_id, at: r.at, message: r.message, ...(r.price === null ? {} : { price: r.price }), deliveries: JSON.parse(r.deliveries) }));
+});
+route('DELETE', '/api/alerts/log', () => { db.exec('DELETE FROM alert_log') });
+route('PUT', '/api/alerts/:id', c => {
+  const old = get(c.params.id);
+  if (!c.body || typeof c.body !== 'object' || Array.isArray(c.body)) throw bad('Body must be an object');
+  const a: Alert = { id: old.id, created: old.created, fireCount: old.fireCount, ...(old.lastFired ? { lastFired: old.lastFired } : {}), ...validateInput({ ...inputOf(old), ...c.body }) };
+  if (!a.active && !old.active) a.stoppedReason = old.stoppedReason;   // still paused/stopped: keep why
+  alerts.set(a.id, a); states.delete(a.id); save(a); changed();
+  return a;
+});
+route('DELETE', '/api/alerts/:id', c => {
+  get(c.params.id);
+  alerts.delete(c.params.id); states.delete(c.params.id);
+  db.prepare('DELETE FROM alerts WHERE id = ?').run(c.params.id);
+  changed();
+});
+
+sync();   // resume watching active alerts after a restart
