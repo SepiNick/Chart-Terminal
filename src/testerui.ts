@@ -12,6 +12,7 @@ import type { Metrics, OptResult, ParamSpec, TesterData, Trade, WalkForwardResul
 import type { PineValue } from './pine/types.ts';
 import { $, calcPrec, esc, store, toast } from './store.ts';
 import { api, onServer, serverMode } from './sync.ts';
+import type { Script } from './pineui.ts';
 
 export interface TesterHost {
   /** Market order into the paper account at the chart's last price. */
@@ -350,9 +351,14 @@ function serverForwardView(el: HTMLElement) {
       <td><button data-flog="${esc(f.id)}">Log</button> <button data-fdel="${esc(f.id)}">Stop</button></td></tr>`).join('')}</table>` : '<div class="muted">No forward tests running on the server.</div>'}
     ${srvLog ? `<table><tr><th>Time</th><th>Side</th><th>Qty sent</th><th>Price</th><th></th></tr>${srvLog.rows.map(l => `<tr><td>${date(l.at / 1000)}</td><td class="${l.side === 'buy' ? 'up' : 'dn'}">${esc(l.side)}</td><td>${esc(l.qty)}</td><td>${esc(l.px)}</td><td class="dn">${esc(l.error ?? '')}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No fills yet.</td></tr>'}</table>` : ''}`;
   el.querySelector<HTMLElement>('#fwdStart')?.addEventListener('click', async () => {
-    const job = jobOf(); if (!job || !cur) return;
+    if (!jobOf() || !cur) return;   // jobOf: same compile check (and error toast) as the optimizer
+    // The server compiles sources itself: send the script plus every installed file of its language (#include / other classes).
+    const all = store.get<Record<string, Script>>('scripts', {}), s = all[cur.run.id];
+    if (!s) { toast('Save the script first'); return }
+    const lang = s.lang ?? 'pine', fam = (l: string) => (l === 'mql4' || l === 'mql5' || l === 'mqh' ? 'mql' : l);
+    const main = lang === 'pine' ? 'main.pine' : s.name, files = lang === 'pine' ? { [main]: s.src } : Object.fromEntries(Object.values(all).filter(x => fam(x.lang ?? 'pine') === fam(lang)).map(x => [x.name, x.src]));
     try {
-      await api('/api/forward', { body: { name: cur.run.name, sym: cur.p.cfg.symbol, tf: cur.p.cfg.tf, job, inputs: baseInputs(), qtyMult: fwdOpts.qty, channels: fwdOpts.channels } });
+      await api('/api/forward', { body: { name: cur.run.name, sym: cur.p.cfg.symbol, tf: cur.p.cfg.tf, lang, files, main, prec: cur.p.prec, inputs: baseInputs(), qtyMult: fwdOpts.qty, channels: fwdOpts.channels } });
       toast('Forward test started on the server (paper account)');
     } catch (e) { toast(`Could not start: ${(e as Error).message}`) }
   });
