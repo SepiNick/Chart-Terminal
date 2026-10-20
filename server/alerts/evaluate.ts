@@ -116,7 +116,7 @@ export function scriptHits(a: Alert, st: EvalState, out: Outputs, i: number, clo
   }).map(f => ({ message: f.comment || undefined, vars: { 'strategy.order.action': f.side, 'strategy.order.contracts': String(f.qty), 'strategy.order.price': String(f.price), 'strategy.order.id': f.id, 'strategy.order.comment': f.comment, 'strategy.position_size': String(pos) } }));
 }
 
-// ponytail: local copy of notify's `render` (§4) — switch to the export from ../notify/index.ts after the merge.
+// Same contract as notify's `render` (§4); kept local so this module stays pure (importing notify would open the database).
 /** Replace {{name}} placeholders; unknown names stay as they are. */
 export const render = (tpl: string, vars: Record<string, string>) => tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (m, k: string) => vars[k] ?? m);
 

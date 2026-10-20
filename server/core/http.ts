@@ -34,10 +34,18 @@ export function route(method: string, path: string, h: Handler, opts: { public?:
 }
 export const RAW = Symbol('raw');
 
-async function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
-  const parts: Buffer[] = []; let n = 0;
-  for await (const chunk of req) { n += (chunk as Buffer).length; if (n > limit) throw new HttpError(413, 'Body too large'); parts.push(chunk as Buffer) }
-  return Buffer.concat(parts);
+function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
+  // Listeners, not `for await`: leaving an async iterator early destroys the socket before the 413 can be sent.
+  return new Promise((resolve, reject) => {
+    const parts: Buffer[] = []; let n = 0, over = false;
+    req.on('data', (chunk: Buffer) => {
+      if (over) return;   // keep draining what the client still sends; the response closes the connection
+      n += chunk.length;
+      if (n > limit) { over = true; parts.length = 0; reject(new HttpError(413, 'Body too large')) } else parts.push(chunk);
+    });
+    req.on('end', () => { if (!over) resolve(Buffer.concat(parts)) });
+    req.on('error', reject);
+  });
 }
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist');
@@ -85,7 +93,9 @@ export async function handle(req: IncomingMessage, res: ServerResponse, secure: 
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY_HEADERS }).end(JSON.stringify(out));
   } catch (e) {
     const status = e instanceof HttpError ? e.status : e instanceof SyntaxError ? 400 : 502;
-    if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json', ...SECURITY_HEADERS }).end(JSON.stringify({ error: (e as Error).message }));
+    // After a 413 the rest of the body is unread: discard it and close the connection so it can't corrupt the next request.
+    const close = status === 413 ? { connection: 'close' } : {};
+    if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json', ...close, ...SECURITY_HEADERS }).end(JSON.stringify({ error: (e as Error).message }));
     else res.end();
   }
 }
