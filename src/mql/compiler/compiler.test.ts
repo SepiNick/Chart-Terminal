@@ -619,7 +619,7 @@ test('errors are reported with file and line', () => {
   fails('struct S { int a; };\nvoid OnStart() {\n  S s;\n  s.b = 1;\n}', /'b' is not a member of 'S'/, 4);
   fails('int f(int a, int b) { return a + b; }\nvoid OnStart() {\n  f(1);\n}', /'f' expects 2 argument\(s\) but got 1/, 3);
   fails('void OnStart() {\n  int x;\n  int x;\n}', /already declared/, 3);
-  fails('class A { int operator+(A &o) { return 0; } };', /Operator overloading is not supported/, 1);
+  fails('class A {};\nint operator+(A &a, A &b) { return 0; }', /only be overloaded inside a class/, 2);
   fails('void OnStart() {\n  string s = "abc;\n}', /Unterminated string/, 2);
   fails('void f() { return 1; }', /cannot return a value/, 1);
   fails('#include "Lib.mqh"\nvoid OnStart() { }', /Expected/, 2, 'main.mq5', { 'Lib.mqh': 'int g() {\n  return 1 +;\n}' });

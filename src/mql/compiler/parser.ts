@@ -174,6 +174,15 @@ export function parse(input: Tok[], builtinTypes: Iterable<string>, errors: Diag
     expect(';');
     return { k: 'typedef', pos: pos(t0), name: n.v, t: ret, fn: null };
   }
+  /** `operator` followed by the operator symbol: + == [] () ! ++ … → method name 'operator+' etc. */
+  function opName(): string {
+    expect('operator');
+    const t = next();
+    if (t.t !== 'op') fail(`Expected an operator symbol but found ${desc(t)}`, t);
+    if (t.v === '[') { expect(']'); return 'operator[]' }
+    if (t.v === '(') { expect(')'); return 'operator()' }
+    return 'operator' + t.v;
+  }
   function classDecl(tp: string[]): Decl[] {
     const kw = next(), kind = kw.v as ClassDecl['kind'];
     const n = ident(`a ${kind} name`), name = n.v;
@@ -211,7 +220,7 @@ export function parse(input: Tok[], builtinTypes: Iterable<string>, errors: Diag
         }
         if (peek().v === name && is('(', 1)) { i++; cls.methods.push(funcRest(m0, VOID, name, name, 'ctor', mt)); continue }
         const t = type();
-        if (is('operator')) fail('Operator overloading is not supported');
+        if (is('operator')) { cls.methods.push(funcRest(m0, t, opName(), name, 'fn', mt, isStatic, isVirtual)); continue }
         if (isName() && is('(', 1)) {
           const fn = next().v;
           cls.methods.push(funcRest(m0, t, fn, name, 'fn', mt, isStatic, isVirtual || kind === 'interface'));
@@ -235,7 +244,7 @@ export function parse(input: Tok[], builtinTypes: Iterable<string>, errors: Diag
     const tp = is('template') ? tparams() : [];
     if (tp.length && (is('struct') || is('class'))) return classDecl(tp);
     if (is('input') && is('group', 1) && peek(2).t === 'str') { i += 2; group = next().v; if (is(';')) i++; return [] }
-    if (is('operator')) fail('Operator overloading is not supported');
+    if (is('operator')) fail('Operators can only be overloaded inside a class or struct');
     // out-of-class constructor / destructor: C::C(...) / C::~C()
     if (isName() && is('::', 1) && ((peek(2).v === t0.v && is('(', 3)) || is('~', 2))) {
       i += 2;
@@ -255,13 +264,13 @@ export function parse(input: Tok[], builtinTypes: Iterable<string>, errors: Diag
     tscope.push(tp);
     let t: TypeRef;
     try { t = type() } finally { tscope.pop() }
-    if (is('operator')) fail('Operator overloading is not supported');
+    if (is('operator')) fail('Operators can only be overloaded inside a class or struct');
     // Type C::name(...) / Type C::static_member = ...
     if (isName() && (is('::', 1) || (is('<', 1) && tmplClasses.has(peek().v)))) {
       const c = next().v;
       if (is('<')) typeArgs();
       expect('::');
-      if (is('operator')) fail('Operator overloading is not supported');
+      if (is('operator')) return [funcRest(t0, t, opName(), c, 'fn', tp)];
       const n = ident('a member name');
       if (is('(')) return [funcRest(t0, t, n.v, c, 'fn', tp)];
       i--;
