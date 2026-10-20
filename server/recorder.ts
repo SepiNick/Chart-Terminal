@@ -122,6 +122,25 @@ export function query(sym: string, from?: number, to?: number, limit = MAX_ROWS)
   return rows.map(r => (r.id == null ? { t: r.t, px: r.px, qty: r.qty, buy: !!r.buy } : { t: r.t, px: r.px, qty: r.qty, buy: !!r.buy, id: r.id }));
 }
 
+/**
+ * Forward paging for Market Replay: up to `limit` prints from `from` on (or strictly after `cursor`), plus the cursor of
+ * the next page (null at the end). The cursor is "t:rowid", so prints sharing one timestamp are never split or repeated.
+ */
+export function page(sym: string, from: number, cursor?: string, limit = 10_000): { prints: RecPrint[]; next: string | null } {
+  flush();
+  const [ct, cr] = cursor ? cursor.split(':').map(Number) : [from, -1], n = Math.min(MAX_ROWS, Math.max(1, limit));
+  if (!Number.isFinite(ct) || !Number.isFinite(cr)) throw bad('Bad cursor');
+  // t = ct AND rowid > cr, then t > ct: two index range scans instead of one OR the planner might not split.
+  const cols = 'rowid AS r, t, px, qty, buy, id';
+  const rows = db.prepare(`SELECT * FROM (
+      SELECT * FROM (SELECT ${cols} FROM prints WHERE sym = ? AND t = ? AND rowid > ? ORDER BY rowid LIMIT ?)
+      UNION ALL SELECT * FROM (SELECT ${cols} FROM prints WHERE sym = ? AND t > ? ORDER BY t, rowid LIMIT ?)
+    ) ORDER BY t, r LIMIT ?`).all(normSym(sym), ct, cr, n, normSym(sym), ct, n, n) as { r: number; t: number; px: number; qty: number; buy: number; id: number | null }[];
+  const prints = rows.map(r => (r.id == null ? { t: r.t, px: r.px, qty: r.qty, buy: !!r.buy } : { t: r.t, px: r.px, qty: r.qty, buy: !!r.buy, id: r.id }));
+  const last = rows.at(-1);
+  return { prints, next: rows.length === n && last ? `${last.t}:${last.r}` : null };
+}
+
 export function stats(symbols = config().symbols) {
   flush();
   const syms = [...new Set([...symbols, ...(db.prepare('SELECT DISTINCT sym FROM prints_days').all() as { sym: string }[]).map(r => r.sym)])];
@@ -173,6 +192,12 @@ route('GET', '/api/recorder/trades', c => {
   const sym = q.get('sym');
   if (!sym) throw bad('sym required');
   return query(sym, num('from'), num('to'), num('limit') ?? MAX_ROWS);
+});
+route('GET', '/api/recorder/page', c => {
+  const q = c.url.searchParams, sym = q.get('sym'), from = Number(q.get('from')), limit = Number(q.get('limit') || 10_000);
+  if (!sym) throw bad('sym required');
+  if (!Number.isFinite(from) || !Number.isFinite(limit)) throw bad('from must be a number (seconds)');
+  return page(sym, from, q.get('cursor') || undefined, limit);
 });
 
 if (!process.env.CT_NO_AUTOSTART) {

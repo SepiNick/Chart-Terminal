@@ -1,5 +1,6 @@
 // Order-flow model, no DOM: trades → footprint cells per bar, delta/CVD, imbalances, big prints; order-book history for the heatmap.
-export interface Print { t: number; px: number; qty: number; buy: boolean }   // t in seconds (ms precision); buy = aggressive buyer
+// t in seconds (ms precision); buy = aggressive buyer; bar = time of the activity bar (tick/range/…) it belongs to, if any
+export interface Print { t: number; px: number; qty: number; buy: boolean; bar?: number }
 export interface Cell { bid: number; ask: number; n: number }                 // bid = sold into the bid (sell aggressor), ask = bought at the ask
 export interface FBar {
   time: number; cells: Map<number, Cell>;      // key = bin index (price / row)
@@ -60,7 +61,7 @@ export class Footprint {
     for (const p of prints) { this.prints.push(p); this.apply(p) }
   }
   private apply(p: Print) {
-    const time = this.bucket(p.t);
+    const time = p.bar ?? this.bucket(p.t);
     let b = this.bars.get(time);
     if (!b) { b = { time, cells: new Map(), buy: 0, sell: 0, trades: 0, hi: p.px, lo: p.px, cvdOpen: this.cvd, cvdHigh: this.cvd, cvdLow: this.cvd, cvdClose: this.cvd, maxDelta: 0, minDelta: 0 }; this.bars.set(time, b) }
     const k = binOf(p.px, this.row), c = b.cells.get(k) ?? { bid: 0, ask: 0, n: 0 };
@@ -73,19 +74,28 @@ export class Footprint {
 }
 
 export interface BarStats { delta: number; volume: number; poc: number; vah: number; val: number; maxCell: number }
+/**
+ * Point of control (first row with the most volume) and value area: grow from the POC towards the larger neighbour until
+ * `pct` of the volume is inside. `rows` = [bin, volume] sorted by bin.
+ */
+export function valueArea(rows: [number, number][], pct = 0.7): { poc: number; vah: number; val: number } {
+  const total = rows.reduce((a, r) => a + r[1], 0);
+  let i = 0;
+  rows.forEach((r, j) => { if (r[1] > rows[i][1]) i = j });
+  let lo = i, hi = i, inside = rows[i]?.[1] ?? 0;
+  while (inside < total * pct && (lo > 0 || hi < rows.length - 1)) {
+    const down = lo > 0 ? rows[lo - 1][1] : -1, up = hi < rows.length - 1 ? rows[hi + 1][1] : -1;
+    if (up >= down) inside += rows[++hi][1]; else inside += rows[--lo][1];
+  }
+  const poc = rows[i]?.[0] ?? 0;
+  return { poc, vah: rows[hi]?.[0] ?? poc, val: rows[lo]?.[0] ?? poc };
+}
 /** Point of control and 70% value area of one footprint bar (bin indices). */
 export function barStats(b: FBar): BarStats {
   const rows = [...b.cells].sort((x, y) => x[0] - y[0]);
-  const vol = (c: Cell) => c.bid + c.ask, total = rows.reduce((a, [, c]) => a + vol(c), 0);
-  let poc = rows[0]?.[0] ?? 0, best = -1, maxCell = 0;
-  rows.forEach(([k, c]) => { if (vol(c) > best) { best = vol(c); poc = k } maxCell = Math.max(maxCell, c.bid, c.ask) });
-  // Value area: grow from the POC towards the larger neighbour until 70% of volume is inside.
-  let i = rows.findIndex(r => r[0] === poc), lo = i, hi = i, inside = best;
-  while (inside < total * 0.7 && (lo > 0 || hi < rows.length - 1)) {
-    const down = lo > 0 ? vol(rows[lo - 1][1]) : -1, up = hi < rows.length - 1 ? vol(rows[hi + 1][1]) : -1;
-    if (up >= down) inside += vol(rows[++hi][1]); else inside += vol(rows[--lo][1]);
-  }
-  return { delta: b.buy - b.sell, volume: b.buy + b.sell, poc, vah: rows[hi]?.[0] ?? poc, val: rows[lo]?.[0] ?? poc, maxCell };
+  let maxCell = 0;
+  for (const [, c] of rows) maxCell = Math.max(maxCell, c.bid, c.ask);
+  return { delta: b.buy - b.sell, volume: b.buy + b.sell, maxCell, ...valueArea(rows.map(([k, c]) => [k, c.bid + c.ask])) };
 }
 
 export interface Imbalance { bin: number; side: 'buy' | 'sell'; stacked: boolean }
@@ -120,6 +130,47 @@ export function bigPrints(ps: Print[], minNotional = 0): Print[] {
     th = n.length ? Math.max(n[Math.floor(n.length * 0.995)] ?? 0, (n[Math.floor(n.length / 2)] ?? 0) * 10) : Infinity;
   }
   return ps.filter(p => p.px * p.qty >= th);
+}
+
+export type ClusterMetric = 'volume' | 'delta' | 'bid' | 'ask' | 'trades';
+export interface ClusterHit { time: number; bin: number; value: number }
+const cellValue = (c: Cell, m: ClusterMetric) => m === 'volume' ? c.bid + c.ask : m === 'delta' ? c.ask - c.bid : m === 'bid' ? c.bid : m === 'ask' ? c.ask : c.n;
+/**
+ * Cluster Search: footprint cells whose metric lies in [min, max] (delta compares its absolute value; the hit keeps the sign).
+ * `min` 0 = automatic: the top 1% of the cells in `bars`, so the window the caller passes decides what "unusual" means.
+ */
+export function clusterSearch(bars: FBar[], metric: ClusterMetric, min = 0, max = Infinity): ClusterHit[] {
+  const all = bars.flatMap(b => [...b.cells].map(([bin, c]) => ({ time: b.time, bin, value: cellValue(c, metric) })));
+  if (!all.length) return [];
+  if (!(min > 0)) { const v = all.map(h => Math.abs(h.value)).sort((a, b) => a - b); min = Math.max(v[Math.floor(v.length * 0.99)], 1e-12) }
+  return all.filter(h => Math.abs(h.value) >= min && Math.abs(h.value) <= max);
+}
+
+/** `side` = the passive side that absorbed: 'buy' = resting bids soaked up aggressive selling at the low (bullish). */
+export interface Absorption { time: number; bin: number; side: 'buy' | 'sell'; vol: number }
+/**
+ * Absorption: heavy aggressive volume (≥ `mult` × the average cell of `bars`, and 1.5× the other side) at a bar's extreme
+ * (within `edge` rows), after which the next `look` bars never trade through that row. The last bar is never reported:
+ * nothing has confirmed it yet. `bars` sorted by time.
+ */
+export function absorption(bars: FBar[], row: number, mult = 3, look = 2, edge = 1): Absorption[] {
+  let vol = 0, n = 0;
+  for (const b of bars) for (const c of b.cells.values()) { vol += c.bid + c.ask; n++ }
+  const th = (vol / (n || 1)) * mult, out: Absorption[] = [];
+  bars.forEach((b, i) => {
+    const next = bars.slice(i + 1, i + 1 + look);
+    if (!next.length) return;
+    const lo = binOf(b.lo, row), hi = binOf(b.hi, row);
+    const nextLo = Math.min(...next.map(x => binOf(x.lo, row))), nextHi = Math.max(...next.map(x => binOf(x.hi, row)));
+    let buy: Absorption | null = null, sell: Absorption | null = null;
+    for (const [k, c] of b.cells) {
+      if (k <= lo + edge && c.bid >= th && c.bid >= 1.5 * c.ask && nextLo >= k && (!buy || c.bid > buy.vol)) buy = { time: b.time, bin: k, side: 'buy', vol: c.bid };
+      if (k >= hi - edge && c.ask >= th && c.ask >= 1.5 * c.bid && nextHi <= k && (!sell || c.ask > sell.vol)) sell = { time: b.time, bin: k, side: 'sell', vol: c.ask };
+    }
+    if (buy) out.push(buy);
+    if (sell) out.push(sell);
+  });
+  return out;
 }
 
 /** Order-book history for the liquidity heatmap: one snapshot per `every` seconds, kept for `keep` seconds. */

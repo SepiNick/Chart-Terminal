@@ -15,6 +15,8 @@ import { runScript, type ScriptError } from './pine/engine.ts';
 import { runMql } from './mql/engine.ts';
 import { mqlTester, type Job } from './tester/runner.ts';
 import { OrderFlow, defaultOF, ofActive, type OFCfg } from './orderflow/layer.ts';
+import { replayOn } from './orderflow/source.ts';   // orderflow: Market Replay prices stay off alerts / paper account
+import { parseOfTf } from './orderflow/tfbars.ts';
 import { runNinjaScript } from './ninja/engine.ts';
 import type { NtCompileResult } from './ninja/contract.ts';
 import type { CompileResult } from './mql/contract.ts';
@@ -183,7 +185,7 @@ export class ChartPane {
       if (!this.replay) this.refresh();
     };
     if (!isExpr(this.cfg.symbol)) {
-      this.unsub = streamBars(this.cfg.symbol, this.cfg.tf, b => { this.hooks.onPrice(this.cfg.symbol, b.close, b.time); onBar(b) });
+      this.unsub = streamBars(this.cfg.symbol, this.cfg.tf, b => { if (!replayOn(this.cfg.symbol, this.cfg.tf)) this.hooks.onPrice(this.cfg.symbol, b.close, b.time); onBar(b) });
       return;
     }
     const n = parse(this.cfg.symbol), syms = symbols(n);
@@ -274,9 +276,9 @@ export class ChartPane {
     if (prevLayer) Object.assign(this.layer, { cursor: prevLayer.cursor, color: prevLayer.color, hideAll: prevLayer.hideAll });
     this.main.attachPrimitive(this.layer);
     this.hooks.setupLayer(this);
-    if (ofActive(this.cfg.of) && !isPriceBased(this.cfg.type) && !isExpr(this.cfg.symbol)) {
+    if (ofActive(this.cfg.of, this.cfg.type) &&!isPriceBased(this.cfg.type) && !isExpr(this.cfg.symbol)) {
       this.of ??= new OrderFlow({
-        symbol: () => this.cfg.symbol, tfSec: () => tfSeconds(this.cfg.tf), bars: () => this.vb(), prec: () => this.prec, cfg: () => this.cfg.of ?? defaultOF(),
+        symbol: () => this.cfg.symbol, tfSec: () => tfSeconds(this.cfg.tf), tf: () => this.cfg.tf, type: () => this.cfg.type, bars: () => this.vb(), prec: () => this.prec, cfg: () => this.cfg.of ?? defaultOF(),
         colors: () => { const st = this.hooks.settings(); return { up: st.upColor, down: st.downColor, text: c('--text'), bg } },
         status: msg => { this.ofEl.textContent = msg; this.ofEl.hidden = !msg },
       });
@@ -464,14 +466,14 @@ export class ChartPane {
     }
   }
   private countdown() {
-    const last = this.vb().at(-1); if (!last || this.replay || isPriceBased(this.cfg.type)) return;
+    const last = this.vb().at(-1); if (!last || this.replay || isPriceBased(this.cfg.type) || replayOn(this.cfg.symbol, this.cfg.tf) || parseOfTf(this.cfg.tf)) return;
     const left = Math.max(0, Math.round(last.time + tfSeconds(this.cfg.tf) - Date.now() / 1000));
     const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), sec = left % 60;
     this.main.applyOptions({ title: left > 172800 ? `${Math.floor(left / 86400)}d ${h % 24}h` : `${h ? h + ':' : ''}${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` });
   }
   private quick() {
     const s = this.hooks.settings(), px = this.lastPrice();
-    this.quickEl.style.display = s.buySellButtons && px && !this.replay && !isExpr(this.cfg.symbol) ? '' : 'none';
+    this.quickEl.style.display = s.buySellButtons && px && !this.replay && !replayOn(this.cfg.symbol, this.cfg.tf) && !isExpr(this.cfg.symbol) ? '' : 'none';
     if (px) this.quickEl.innerHTML = `<button data-side="sell" class="qs">SELL<br><b>${this.fmt(px)}</b></button><button data-side="buy" class="qb">BUY<br><b>${this.fmt(px)}</b></button>`;
   }
   legend(b?: Bar) {
