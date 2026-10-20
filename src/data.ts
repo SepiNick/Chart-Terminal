@@ -1,5 +1,12 @@
 // Market data: Binance public mirror (no key, CORS-enabled). Exchange accounts come later via the local server.
+import { ofTfLabel, ofTfName, parseOfTf } from './orderflow/tfbars.ts';
 export interface Bar { time: number; open: number; high: number; low: number; close: number; volume: number }
+
+/**
+ * Other bar sources (order flow: activity intervals and Market Replay) register here; each returns null for requests that
+ * aren't theirs. They live in modules that import this one, hence a registry instead of an import.
+ */
+export const barHooks: { fetch: (sym: string, tf: string, endTime?: number) => Promise<Bar[]> | null; stream: (sym: string, tf: string, onBar: (b: Bar) => void) => (() => void) | null }[] = [];
 
 const API = 'https://data-api.binance.vision/api/v3';
 const WS = 'wss://data-stream.binance.vision';
@@ -9,10 +16,14 @@ export const TFS = ['1s', '1m', '3m', '5m', '15m', '30m', '45m', '1h', '2h', '3h
 const NATIVE = ['1s', '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'];
 const UNIT: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400, w: 604800, M: 2592000 };
 export const validTf = (tf: string) => /^\d+[smhdwM]$/.test(tf) && +tf.slice(0, -1) > 0;
-export const tfSeconds = (tf: string) => +tf.slice(0, -1) * UNIT[tf.at(-1)!];
-export const tfLabel = (tf: string) => { const n = tf.slice(0, -1), u = tf.at(-1)!; return u === 'M' ? `${n} month${+n > 1 ? 's' : ''}` : `${n}${{ s: ' second', m: ' minute', h: ' hour', d: ' day', w: ' week' }[u]}${+n > 1 ? 's' : ''}` };
-/** Parse what a user types ("15", "4h", "1D", "2W") into an interval. Bare numbers are minutes. */
+// orderflow: activity intervals (100T, R10, REV5, D500) are built from trades in src/orderflow; they count as 1 s for spacing.
+/** Clock intervals plus the order-flow activity intervals (client only; the server's validTf stays clock-only). */
+export const anyTf = (tf: string) => validTf(tf) || !!parseOfTf(tf);
+export const tfSeconds = (tf: string) => (parseOfTf(tf) ? 1 : +tf.slice(0, -1) * UNIT[tf.at(-1)!]);
+export const tfLabel = (tf: string) => { const of = parseOfTf(tf); if (of) return ofTfLabel(of); const n = tf.slice(0, -1), u = tf.at(-1)!; return u === 'M' ? `${n} month${+n > 1 ? 's' : ''}` : `${n}${{ s: ' second', m: ' minute', h: ' hour', d: ' day', w: ' week' }[u]}${+n > 1 ? 's' : ''}` };
+/** Parse what a user types ("15", "4h", "1D", "2W", "100T", "R10") into an interval. Bare numbers are minutes. */
 export function parseTf(s: string): string | null {
+  const of = parseOfTf(s); if (of) return ofTfName(of);
   const m = s.trim().match(/^(\d+)\s*([smhdwM]?)$/i); if (!m) return null;
   const u = m[2] === 'M' ? 'M' : (m[2] || 'm').toLowerCase();
   const tf = `${+m[1]}${u}`;
@@ -88,6 +99,7 @@ async function fetchNative(symbol: string, tf: string, endTime?: number): Promis
   return j.map(k2bar);
 }
 export async function fetchBars(symbol: string, tf: string, endTime?: number): Promise<Bar[]> {
+  for (const h of barHooks) { const r = h.fetch(symbol, tf, endTime); if (r) return r }
   if (isRemote(symbol)) return fetchRemote(symbol, tf, endTime);
   if (symbol.startsWith('BINANCE:')) symbol = symbol.slice(8);
   const { base, n } = baseOf(tf);
@@ -99,6 +111,7 @@ export async function fetchBars(symbol: string, tf: string, endTime?: number): P
 
 /** Live kline stream with auto-reconnect. Returns an unsubscribe function. */
 export function streamBars(symbol: string, tf: string, onBar: (b: Bar) => void): () => void {
+  for (const h of barHooks) { const r = h.stream(symbol, tf, onBar); if (r) return r }
   if (isRemote(symbol)) return streamRemote(symbol, tf, onBar);
   if (symbol.startsWith('BINANCE:')) symbol = symbol.slice(8);
   const { base, n } = baseOf(tf), sec = tfSeconds(tf);

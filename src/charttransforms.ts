@@ -3,14 +3,15 @@ import type { Bar } from './data.ts';
 import { atr, heikin } from './indicators.ts';
 
 export type ChartType = 'bars' | 'candles' | 'hollow' | 'volcandles' | 'line' | 'linemarkers' | 'step' | 'area' | 'hlcarea' | 'baseline'
-  | 'columns' | 'highlow' | 'ha' | 'renko' | 'linebreak' | 'kagi' | 'pnf' | 'range';
+  | 'columns' | 'highlow' | 'ha' | 'renko' | 'linebreak' | 'kagi' | 'pnf' | 'range'
+  | 'footprint' | 'tpo';   // orderflow: plain candles underneath; src/orderflow/layer.ts draws the footprint / TPO
 
 export const CHART_TYPES: { id: ChartType; name: string; priceBased: boolean; group: 'time' | 'price' }[] = ([
   ['bars', 'Bars'], ['candles', 'Candles'], ['hollow', 'Hollow candles'], ['volcandles', 'Volume candles'], ['line', 'Line'],
   ['linemarkers', 'Line with markers'], ['step', 'Step line'], ['area', 'Area'], ['hlcarea', 'HLC area'], ['baseline', 'Baseline'],
-  ['columns', 'Columns'], ['highlow', 'High-low'], ['ha', 'Heikin Ashi'],
+  ['columns', 'Columns'], ['highlow', 'High-low'], ['ha', 'Heikin Ashi'], ['footprint', 'Footprint'], ['tpo', 'TPO (market profile)'],
   ['renko', 'Renko'], ['linebreak', 'Line break'], ['kagi', 'Kagi'], ['pnf', 'Point & figure'], ['range', 'Range'],
-] as [ChartType, string][]).map(([id, name], i) => ({ id, name, priceBased: i > 12, group: i > 12 ? 'price' : 'time' }));
+] as [ChartType, string][]).map(([id, name], i) => ({ id, name, priceBased: i > 14, group: i > 14 ? 'price' : 'time' }));
 export const isPriceBased = (t: ChartType) => CHART_TYPES.find(x => x.id === t)!.priceBased;
 
 export interface TypeOpts {
