@@ -16,7 +16,10 @@ export interface DrawUIHost {
   remove(what: 'drawings' | 'indicators' | 'all'): void;
   commit(label: string): void;          // drawings changed outside the layer (dialog etc.)
   alertOn(d: Drawing): void;
+  paneLabels(): string[];               // panes of the active chart, for "Move to"
+  positionOrder(d: Drawing): void;      // send a Long/Short position drawing as a paper order with TP/SL
 }
+const isPosition = (d: Drawing) => d.type === 'long' || d.type === 'short';
 
 const fav = new Set(store.get<string[]>('favTools', []));
 const lastInGroup = store.get<Record<string, string>>('lastTool', {});
@@ -156,6 +159,7 @@ export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLa
         case 'tpl': templateMenu(r.left, r.bottom + 2, d, l); break;
         case 'props': openProps(d, l, host); break;
         case 'alert': host.alertOn(d); break;
+        case 'order': host.positionOrder(d); break;
         case 'lock': { const on = !d.locked; l.selected.forEach(x => (x.locked = on)); l.onChange(); renderFloating(cell, host, l); break }
         case 'clone': cloneDrawings(l); break;
         case 'more': drawingMenu(r.left, r.bottom + 2, d, l, host); break;
@@ -174,6 +178,7 @@ export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLa
     <select data-k="dash" title="Style">${DASHES.map(s => `<option ${s === d.style.dash ? 'selected' : ''}>${s}</option>`).join('')}</select>
     <button data-act="props" title="Settings">⚙</button>
     ${def?.priceAt ? '<button data-act="alert" title="Add alert on this drawing">⏰</button>' : ''}
+    ${isPosition(d) ? '<button data-act="order" title="Place as paper order with TP/SL">📤</button>' : ''}
     <button data-act="lock" class="${d.locked ? 'on' : ''}" title="Lock">🔒</button>
     <button data-act="clone" title="Clone (Ctrl+drag)">⧉</button>
     <button data-act="more" title="More">⋯</button>
@@ -213,7 +218,12 @@ export function drawingMenu(x: number, y: number, d: Drawing, l: DrawingLayer, h
     { label: d.locked ? 'Unlock' : 'Lock', icon: '🔒', action: () => { sel.forEach(s => (s.locked = !d.locked)); l.onChange(); l.update() } },
     { label: 'Hide', icon: '👁', action: () => { sel.forEach(s => (s.hidden = true)); l.select([]); l.onChange() } },
     ...(TOOL_MAP.get(d.type)?.priceAt ? [{ label: 'Add alert', icon: '⏰', action: () => host.alertOn(d) }] : []),
+    ...(isPosition(d) ? [{ label: 'Place paper order (TP/SL)…', icon: '📤', action: () => host.positionOrder(d) }] : []),
     { sep: true },
+    { label: 'Move to', sub: host.paneLabels().map((name, k) => ({
+      label: name, checked: l.paneOf(d) === k,
+      action: () => { sel.forEach(s => { if (k) s.pane = k; else delete s.pane }); l.onChange(); l.update() },
+    })) },
     { label: 'Visual order', sub: [
       { label: 'Bring to front', action: order('front') }, { label: 'Send to back', action: order('back') },
       { label: 'Bring forward', action: order('forward') }, { label: 'Send backward', action: order('backward') },

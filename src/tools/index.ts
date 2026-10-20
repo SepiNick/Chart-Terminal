@@ -25,9 +25,10 @@ export const GROUPS: { id: GroupId; name: string; icon: string }[] = [
   { id: 'annotations', name: 'Annotation tools', icon: 'T' },
 ];
 
-export type CursorMode = 'cross' | 'dot' | 'arrow' | 'demo' | 'eraser';
+export type CursorMode = 'cross' | 'magic' | 'dot' | 'arrow' | 'demo' | 'eraser';
 export const CURSORS: { id: CursorMode; name: string; icon: string }[] = [
   { id: 'cross', name: 'Cross', icon: '✛' },
+  { id: 'magic', name: 'Magic (snap to OHLC)', icon: '✧' },
   { id: 'dot', name: 'Dot', icon: '•' },
   { id: 'arrow', name: 'Arrow', icon: '↖' },
   { id: 'demo', name: 'Demonstration', icon: '◉' },
