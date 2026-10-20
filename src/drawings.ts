@@ -1,8 +1,9 @@
-import type { IChartApi, ISeriesApi, ISeriesPrimitive, IPrimitivePaneRenderer, IPrimitivePaneView, Logical, SeriesType, Time } from 'lightweight-charts';
+import { CrosshairMode, type IChartApi, type ISeriesApi, type ISeriesPrimitive, type IPrimitivePaneRenderer, type IPrimitivePaneView, type Logical, type SeriesType, type Time } from 'lightweight-charts';
 import type { Bar } from './data.ts';
 import type { Drawing, Geo, Pt, Style, ToolDef, XY } from './tools/types.ts';
 import { RecordingRenderer, hitShapes, rgba, type HitShape } from './tools/render.ts';
 import { TOOL_MAP, type CursorMode } from './tools/index.ts';
+import { nearestOHLC } from './tools/math.ts';
 
 export type { Drawing, Pt } from './tools/types.ts';
 export type Magnet = 'off' | 'weak' | 'strong';
@@ -46,24 +47,42 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   private draft: { d: Drawing; raw: Pt[]; placed: number; def: ToolDef } | null = null;
   private freehand = false;
-  private drag: { hit: Hit; x: number; y: number; orig: Pt[]; moved: boolean } | null = null;
+  private drag: { hit: Hit; k: number; x: number; y: number; orig: Pt[]; moved: boolean } | null = null;
   private measure: { a: Pt; b: Pt; done: boolean } | null = null;
   private zoomBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private mouse: XY | null = null;
   private hits = new Map<Drawing, HitShape[]>();
   private requestUpdate = () => {};
   private view: IPrimitivePaneView;
+  private subs = new Map<HTMLElement, () => void>();   // indicator panes we draw into: pane element -> requestUpdate
+  private baseMode: CrosshairMode;
 
   constructor(private host: Host, private el: HTMLElement) {
-    const renderer: IPrimitivePaneRenderer = { draw: t => this.render(t) };
+    const renderer: IPrimitivePaneRenderer = { draw: t => this.render(t, 0) };
     this.view = { renderer: () => renderer, zOrder: () => 'top' };
+    this.baseMode = host.chart.options().crosshair.mode;
     for (const ev of ['mousedown', 'mousemove', 'mouseup', 'dblclick', 'contextmenu', 'mouseleave'] as const)
       el.addEventListener(ev, e => this.onMouse(e), true);
     addEventListener('drawings-repaint', () => this.update()); // e.g. an image finished loading
   }
   attached({ requestUpdate }: { requestUpdate: () => void }) { this.requestUpdate = requestUpdate }
   paneViews() { return [this.view] }
-  update() { this.requestUpdate() }
+  update() { this.attachPanes(); this.requestUpdate(); this.subs.forEach(u => u()) }
+  /** Draw into every indicator pane too. Panes come and go (scripts re-render), so this runs on every update. */
+  attachPanes() {
+    const panes = this.host.chart.panes(), live = new Set<HTMLElement>();
+    panes.forEach((pane, k) => {
+      const el = pane.getHTMLElement(); if (!k || !el) return;
+      live.add(el);
+      if (this.subs.has(el)) return;
+      const renderer: IPrimitivePaneRenderer = { draw: t => this.render(t, pane.paneIndex()) }, view: IPrimitivePaneView = { renderer: () => renderer, zOrder: () => 'top' };
+      this.subs.set(el, () => {});
+      pane.attachPrimitive({ paneViews: () => [view], attached: ({ requestUpdate }) => this.subs.set(el, requestUpdate) });
+    });
+    for (const el of this.subs.keys()) if (!live.has(el)) this.subs.delete(el);
+  }
+  /** Pane a drawing renders in: its own if that pane exists on this chart, else the main pane. */
+  paneOf(d: Drawing): number { const k = d.pane ?? 0, p = this.host.chart.panes()[k]; return k && p?.getSeries().length ? k : 0 }
 
   get primary(): Drawing | null { return [...this.selected].at(-1) ?? null }
   select(ds: Drawing[], add = false) { if (!add) this.selected.clear(); ds.forEach(d => this.selected.add(d)); this.onSelect(); this.update() }
@@ -83,8 +102,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   }
   /** Move selected drawings by whole bars / pixels (arrow keys). */
   nudge(bars: number, px: number) {
-    const g = this.geo();
-    for (const d of this.selected) if (!d.locked) d.pts = d.pts.map(p => this.shift(p, bars * g.barWidth, px, g, TOOL_MAP.get(d.type)));
+    for (const d of this.selected) { const g = this.geo(this.paneOf(d)); if (!d.locked) d.pts = d.pts.map(p => this.shift(p, bars * g.barWidth, px, g, TOOL_MAP.get(d.type))) }
     this.onChange(); this.update();
   }
 
@@ -107,8 +125,9 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const i = Math.floor(l);
     return b[i].time + (l - i) * (b[i + 1].time - b[i].time);
   }
-  geo(): Geo {
-    const ts = this.host.chart.timeScale(), s = this.host.series;
+  /** Coordinates of pane k (0 = main): x from the shared time scale, y from that pane's first series. */
+  geo(k = 0): Geo {
+    const ts = this.host.chart.timeScale(), pane = this.host.chart.panes()[k], s = (k && pane?.getSeries()[0]) || this.host.series;
     const x0 = ts.logicalToCoordinate(0 as Logical) ?? 0, x1 = ts.logicalToCoordinate(1 as Logical) ?? 1;
     return {
       x: t => ts.logicalToCoordinate(this.logical(t) as Logical) ?? -1e4,
@@ -116,7 +135,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       t: x => this.timeAt(ts.coordinateToLogical(x) ?? 0),
       p: y => s.coordinateToPrice(y) ?? 0,
       logical: t => this.logical(t), timeAt: l => this.timeAt(l),
-      W: ts.width(), H: this.host.chart.panes()[0]?.getHeight() ?? 0, barWidth: x1 - x0 || 1,
+      W: ts.width(), H: pane?.getHeight() ?? 0, barWidth: x1 - x0 || 1,
       bars: this.host.bars(), tfSec: this.host.tfSec(), fmt: this.host.fmt,
     };
   }
@@ -132,7 +151,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (e?.ctrlKey) mode = mode === 'off' ? 'strong' : 'off'; // Ctrl temporarily inverts the magnet
     const bar = g.bars[Math.round(l)];
     if (mode !== 'off' && bar) {
-      const best = [bar.open, bar.high, bar.low, bar.close].reduce((a, c) => (Math.abs(g.y(c) - y) < Math.abs(g.y(a) - y) ? c : a));
+      const best = nearestOHLC(bar, y, g.y);
       if (mode === 'strong' || Math.abs(g.y(best) - y) < 14) p = best;
     }
     return { t, p };
@@ -144,44 +163,52 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   }
 
   // ---------- interaction ----------
-  private applyCursor() {
-    const c = this.cursor, ch = this.tool === 'cursor' && (c === 'cross' || c === 'demo');
-    this.host.chart.applyOptions({ crosshair: { vertLine: { visible: ch || this.tool !== 'cursor' }, horzLine: { visible: ch || this.tool !== 'cursor' } } });
+  applyCursor() {
+    const c = this.cursor, ch = this.tool === 'cursor' && (c === 'cross' || c === 'demo' || c === 'magic');
+    // Magic cursor: the crosshair snaps to the nearest open/high/low/close of the hovered bar.
+    const mode = this.tool === 'cursor' && c === 'magic' ? CrosshairMode.MagnetOHLC : this.baseMode;
+    this.host.chart.applyOptions({ crosshair: { mode, vertLine: { visible: ch || this.tool !== 'cursor' }, horzLine: { visible: ch || this.tool !== 'cursor' } } });
     this.el.style.cursor = this.tool === 'zoom' ? 'zoom-in' : this.tool === 'measure' ? 'crosshair' : this.tool !== 'cursor' ? 'crosshair' : c === 'dot' ? 'none' : c === 'eraser' ? 'not-allowed' : c === 'arrow' ? 'default' : '';
   }
-  private local(e: MouseEvent) {
-    const r = this.el.getBoundingClientRect(), g = this.geo();
-    const x = e.clientX - r.left, y = e.clientY - r.top;
-    return { x, y, g, inPane: x >= 0 && x <= g.W && y >= 0 && y <= g.H };
+  /** Mouse position relative to the pane under it (or pane `force`); k = -1 outside every pane. */
+  private local(e: MouseEvent, force?: number) {
+    const r = this.el.getBoundingClientRect(), panes = this.host.chart.panes();
+    const rect = (i: number) => panes[i]?.getHTMLElement()?.getBoundingClientRect();
+    const k = force ?? panes.findIndex((_, i) => { const b = rect(i); return !!b && e.clientY >= b.top && e.clientY < b.bottom });
+    const g = this.geo(Math.max(k, 0)), x = e.clientX - r.left, y = e.clientY - (rect(Math.max(k, 0))?.top ?? r.top);
+    return { x, y, g, k, inPane: k >= 0 && x >= 0 && x <= g.W && y >= 0 && y <= g.H };
   }
   private onMouse(e: MouseEvent) {
-    const { x, y, g, inPane } = this.local(e);
+    let { x, y, g, k, inPane } = this.local(e);
+    if (this.drag) ({ x, y, g } = this.local(e, this.drag.k));
+    else if (this.draft) { const dk = this.draft.d.pane ?? 0; inPane = inPane && k === dk; ({ x, y, g } = this.local(e, dk)); k = dk }
     const stop = () => { e.stopPropagation(); e.preventDefault() };
-    this.mouse = inPane ? [x, y] : null;
+    this.mouse = inPane && k === 0 ? [x, y] : null;
     switch (e.type) {
       case 'mousedown': {
         if (e.button !== 0 || !inPane) return;
         if (this.draft && !this.freehand) { stop(); this.click(this.draft.def, this.toPt(x, y, g, this.draft.def, e), g); return }
+        if (k && (this.tool === 'zoom' || this.tool === 'measure')) return;   // zoom box and ruler work in the main pane
         if (this.tool === 'zoom') { stop(); this.zoomBox = { x0: x, y0: y, x1: x, y1: y }; return }
         if (this.tool === 'measure') { stop(); const p = this.toPt(x, y, g, undefined, e); this.measure = { a: p, b: p, done: false }; return }
         const def = TOOL_MAP.get(this.tool);
         if (def) {
           stop();
-          if (def.points === 0) { this.freehand = true; this.startDraft(def, this.toPt(x, y, g, def, e)); }
-          else this.click(def, this.toPt(x, y, g, def, e), g);
+          if (def.points === 0) { this.freehand = true; this.startDraft(def, this.toPt(x, y, g, def, e), k); }
+          else this.click(def, this.toPt(x, y, g, def, e), g, k);
           return;
         }
         if (this.measure?.done) { this.measure = null; this.update() }
-        const hit = this.findHit(x, y);
+        const hit = this.findHit(x, y, k);
         if (this.cursor === 'eraser') { if (hit) { stop(); this.remove(hit.d) } return }
-        if (e.shiftKey && !hit) { stop(); const p = this.toPt(x, y, g, undefined, e); this.measure = { a: p, b: p, done: false }; return }
+        if (e.shiftKey && !hit && !k) { stop(); const p = this.toPt(x, y, g, undefined, e); this.measure = { a: p, b: p, done: false }; return }
         if (!hit) { if (this.selected.size) this.select([]); return }
         if (e.ctrlKey && !e.altKey && this.selected.has(hit.d) && hit.handle < 0) { // Ctrl+drag clones
           const c = structuredClone(hit.d); c.id = Date.now(); c.locked = false;
           this.drawings.push(c); hit.d = c;
           this.select([c]);
         } else this.select([hit.d], e.ctrlKey);
-        if (!hit.d.locked) { stop(); this.drag = { hit, x, y, orig: hit.d.pts.map(p => ({ ...p })), moved: false } }
+        if (!hit.d.locked) { stop(); this.drag = { hit, k, x, y, orig: hit.d.pts.map(p => ({ ...p })), moved: false } }
         return;
       }
       case 'mousemove': {
@@ -195,7 +222,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
           this.rebuildDraft(g);
           stop(); return;
         }
-        if (this.tool === 'cursor' && this.cursor !== 'eraser') this.el.style.cursor = inPane && this.findHit(x, y) ? 'pointer' : this.cursor === 'dot' ? 'none' : this.cursor === 'arrow' ? 'default' : '';
+        if (this.tool === 'cursor' && this.cursor !== 'eraser') this.el.style.cursor = inPane && this.findHit(x, y, k) ? 'pointer' : this.cursor === 'dot' ? 'none' : this.cursor === 'arrow' ? 'default' : '';
         if (this.cursor === 'dot' || this.cursor === 'demo') this.update();
         return;
       }
@@ -210,14 +237,14 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         if (this.drag) { const moved = this.drag.moved; this.drag = null; if (moved) this.onChange() }
         return;
       }
-      case 'dblclick': { const hit = inPane && this.findHit(x, y); if (hit) { stop(); this.onEdit(hit.d) } return }
-      case 'contextmenu': { const hit = inPane && this.findHit(x, y); if (hit) { stop(); this.select([hit.d], this.selected.has(hit.d)); this.onContext(hit.d, e) } return }
+      case 'dblclick': { const hit = inPane && this.findHit(x, y, k); if (hit) { stop(); this.onEdit(hit.d) } return }
+      case 'contextmenu': { const hit = inPane && this.findHit(x, y, k); if (hit) { stop(); this.select([hit.d], this.selected.has(hit.d)); this.onContext(hit.d, e) } return }
       case 'mouseleave': this.mouse = null; this.update(); return;
     }
   }
-  private startDraft(def: ToolDef, pt: Pt) {
+  private startDraft(def: ToolDef, pt: Pt, pane = 0) {
     const raw = def.points === 1 || def.points === 0 ? [pt] : [pt, { ...pt }];
-    const d: Drawing = { id: Date.now(), type: def.id, pts: raw.slice(), style: styleFor(def, this.color, this.templates(def.id)) };
+    const d: Drawing = { id: Date.now(), type: def.id, pts: raw.slice(), style: styleFor(def, this.color, this.templates(def.id)), ...(pane ? { pane } : {}) };
     this.draft = { d, raw, placed: 1, def };
   }
   private rebuildDraft(g: Geo) {
@@ -225,8 +252,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     dr.d.pts = dr.def.build ? dr.def.build(dr.raw.map(p => ({ ...p })), g, dr.d) : dr.raw.slice();
     this.update();
   }
-  private click(def: ToolDef, pt: Pt, g: Geo) {
-    if (!this.draft) this.startDraft(def, pt);
+  private click(def: ToolDef, pt: Pt, g: Geo, pane = 0) {
+    if (!this.draft) this.startDraft(def, pt, pane);
     else this.draft.raw[this.draft.placed++] = pt;
     const dr = this.draft!;
     if (dr.placed < def.points) { if (dr.raw.length <= dr.placed) dr.raw.push({ ...pt }); this.rebuildDraft(g); return }
@@ -270,31 +297,34 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   }
 
   // ---------- hit testing ----------
-  handlesOf(d: Drawing, g = this.geo()): XY[] {
+  handlesOf(d: Drawing, g = this.geo(this.paneOf(d))): XY[] {
     const def = TOOL_MAP.get(d.type), P = this.P(d, g, def);
     return def?.handles ? def.handles(d, P, g) : P;
   }
-  findHit(x: number, y: number): Hit | null {
-    const g = this.geo();
+  findHit(x: number, y: number, k = 0): Hit | null {
+    const g = this.geo(k);
     for (const d of this.selected) {
-      if (!isVisible(d, g.tfSec) || this.hideAll) continue;
+      if (!isVisible(d, g.tfSec) || this.hideAll || this.paneOf(d) !== k) continue;
       const h = this.handlesOf(d, g).findIndex(([hx, hy]) => Math.hypot(hx - x, hy - y) < 7);
       if (h >= 0) return { d, handle: h };
     }
     for (const d of [...this.drawings].reverse()) {
-      const shapes = this.hits.get(d);
+      const shapes = this.paneOf(d) === k && this.hits.get(d);
       if (shapes && hitShapes(shapes, x, y)) return { d, handle: -1 };
     }
     return null;
   }
 
   // ---------- rendering ----------
-  private render(target: Target) {
+  private render(target: Target, k: number) {
     target.useMediaCoordinateSpace(({ context: ctx }: { context: CanvasRenderingContext2D }) => {
-      const g = this.geo();
-      this.hits.clear();
-      if (!this.hideAll) for (const d of this.drawings) if (isVisible(d, g.tfSec)) this.renderOne(ctx, d, g, true);
-      if (this.draft) this.renderOne(ctx, this.draft.d, g, false);
+      const g = this.geo(k);
+      for (const d of this.drawings) if (this.paneOf(d) === k) {
+        this.hits.delete(d);
+        if (!this.hideAll && isVisible(d, g.tfSec)) this.renderOne(ctx, d, g, true);
+      }
+      if (this.draft && (this.draft.d.pane ?? 0) === k) this.renderOne(ctx, this.draft.d, g, false);
+      if (k) return;
       if (this.measure) this.renderMeasure(ctx, g);
       if (this.zoomBox) {
         const z = this.zoomBox;
