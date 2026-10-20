@@ -7,6 +7,8 @@ import {
 import { $, $$, esc, store, toast } from './store.ts';
 import { award } from './journal/analytics.ts';
 import { openWorkspace, workspaceChanged } from './journal/workspace.ts';
+import { replayTrade } from './journal/replay.ts';
+import type { ChartPane } from './chart.ts';
 
 export interface JournalHost {
   /** Timeframe of a chart showing this symbol, if any. */
@@ -17,6 +19,10 @@ export interface JournalHost {
   shot(): HTMLCanvasElement | null;
   /** Show this symbol on the active chart around a time. */
   show(sym: string, t: number): void;
+  /** Show this symbol and timeframe on the active chart; resolves to its pane once bars are loaded. */
+  pane(sym: string, tf: string): Promise<ChartPane>;
+  /** Paper account, latest prices and the watchlist (portfolio risk). */
+  portfolio(): { acct: Account; price: (sym: string) => number | undefined; watch: string[] };
 }
 let host: JournalHost;
 let j: Journal = migrate({ ...newJournal(), ...store.get<Partial<Journal> | null>('journal', null) });
@@ -42,7 +48,7 @@ export function journalSync(a: Account) {
   const first = !j.synced;   // first run imports the existing paper history silently
   const r = syncFills(j, a, Math.floor(Date.now() / 1000), sym => ({ tf: host.tfOf(sym), source: source || undefined, ...host.bracketOf(sym) }));
   // A bracket is attached right after the fill that opens the position: pick it up on the next sync too.
-  for (const t of j.trades) if (t.status === 'open' && t.stop == null && t.target == null) Object.assign(t, host.bracketOf(t.sym));
+  for (const t of j.trades) if (t.status === 'open' && (t.accountId ?? 'paper') === 'paper' && t.stop == null && t.target == null) Object.assign(t, host.bracketOf(t.sym));
   if (first || (!r.opened.length && !r.closed.length)) { save(first); if (first) render(); return }
   if (cfg.askOpen) r.opened.forEach(t => ask(t.id, 'open'));
   if (cfg.askClose) r.closed.forEach(t => ask(t.id, 'close'));
@@ -127,6 +133,8 @@ function filter(): Filter {
 const dayStart = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() / 1000 };
 
 export function renderJournal() { render() }
+/** Trades the panel shows: everything except backtest accounts (Bar Replay trades must not mix into live stats). */
+function live() { const bt = new Set((j.accounts ?? []).filter(a => a.kind === 'backtest').map(a => a.id)); return j.trades.filter(t => !bt.has(t.accountId ?? 'paper')) }
 /** Shared with the full journal workspace. */
 export const journal = () => j;
 export const journalHost = () => host;
@@ -151,20 +159,20 @@ function render() {
 }
 
 function tradesView() {
-  const ts = filterTrades(j.trades, filter()).sort((a, b) => b.openTime - a.openTime);
+  const ts = filterTrades(live(), filter()).sort((a, b) => b.openTime - a.openTime);
   if (!ts.length) return `<div class="muted">${j.trades.length ? 'No trades match the filters.' : 'No trades yet. Every paper trade you open or close is recorded here automatically, and you are asked why.'}</div>`;
   return ts.slice(0, 300).map(t => {
     const r = rMultiple(t), warn = incomplete(t);
     return `<div class="jt ${warn ? 'warn-row' : ''}" data-id="${esc(t.id)}" title="${warn ? 'Missing setup or reasons — click to complete' : 'Click to edit'}">
       <div class="row"><b class="${t.dir === 'long' ? 'up' : 'dn'}">${t.dir === 'long' ? '▲' : '▼'} ${esc(t.sym)}</b><span class="muted">${dt(t.openTime)}</span><span class="grow"></span>
-        ${t.status === 'open' ? '<span class="tag">OPEN</span>' : `<b class="${cls(t.net)}">${money(t.net)}</b>`}${r != null ? `<span class="muted">${r.toFixed(1)}R</span>` : ''}${warn ? '<span class="warn">⚠</span>' : ''}</div>
+        ${t.kind !== 'notrade' ? '<button class="x" data-replay title="Replay this trade with Bar Replay">▶</button>' : ''}${t.status === 'open' ? '<span class="tag">OPEN</span>' : `<b class="${cls(t.net)}">${money(t.net)}</b>`}${r != null ? `<span class="muted">${r.toFixed(1)}R</span>` : ''}${warn ? '<span class="warn">⚠</span>' : ''}</div>
       <div class="muted jt-sub">${esc(t.setup ?? 'no setup')}${t.emotionIn ? ` · ${esc(t.emotionIn)}` : ''}${t.mistakes?.length ? ` · <span class="dn">${esc(t.mistakes.join(', '))}</span>` : ''}${t.entryReason ? ` · ${esc(t.entryReason.slice(0, 60))}` : ''}</div></div>`;
   }).join('');
 }
 
 const pct = (v: number | null) => (v == null ? '—' : `${v.toFixed(0)}%`);
 function statsView() {
-  const s = stats(filterTrades(j.trades, filter()));
+  const s = stats(filterTrades(live(), filter()));
   if (!s.trades) return `<div class="muted">No closed trades${s.open ? ` (${s.open} open)` : ''}.</div>`;
   const k = (label: string, v: string, c = '') => `<div><span>${label}</span><b class="${c}">${v}</b></div>`;
   const groups: Record<string, string> = { bySetup: 'Setup', byEmotion: 'Emotion at entry', byMistake: 'Mistake', bySymbol: 'Symbol', byDir: 'Direction', byWeekday: 'Weekday', byHour: 'Hour' };
@@ -188,7 +196,7 @@ function spark(curve: number[]) {
 
 let month = (() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() } })();
 function calendarView() {
-  const s = stats(j.trades), first = new Date(month.y, month.m, 1), days = new Date(month.y, month.m + 1, 0).getDate(), lead = (first.getDay() + 6) % 7;
+  const s = stats(live()), first = new Date(month.y, month.m, 1), days = new Date(month.y, month.m + 1, 0).getDate(), lead = (first.getDay() + 6) % 7;
   const cells: string[] = Array.from({ length: lead }, () => '<div></div>');
   let total = 0;
   for (let d = 1; d <= days; d++) {
@@ -203,14 +211,14 @@ function calendarView() {
     <div id="jDayView"></div>`;
 }
 function dayView(key: string) {
-  const ts = j.trades.filter(t => dayKey(t.closeTime ?? t.openTime) === key);
+  const ts = live().filter(t => dayKey(t.closeTime ?? t.openTime) === key);
   $('#jDayView').innerHTML = `<h4>${esc(key)}</h4><textarea id="jNote" rows="3" placeholder="Daily note: market conditions, mood, plan for tomorrow…">${esc(j.notes[key] ?? '')}</textarea>
     ${ts.map(t => `<div class="jt" data-id="${esc(t.id)}"><b class="${t.dir === 'long' ? 'up' : 'dn'}">${esc(t.sym)}</b> <span class="${cls(t.net)}">${t.status === 'open' ? 'open' : money(t.net)}</span> <span class="muted">${esc(t.setup ?? '')}</span></div>`).join('')}`;
   $<HTMLTextAreaElement>('#jNote').oninput = e => { const v = (e.target as HTMLTextAreaElement).value.trim(); if (v) j.notes[key] = v; else delete j.notes[key]; save() };
 }
 
 function setupsView() {
-  const s = stats(j.trades), by = new Map(s.bySetup.map(g => [g.key, g]));
+  const s = stats(live()), by = new Map(s.bySetup.map(g => [g.key, g]));
   return `<div class="muted">Playbooks: the setups you trade. Stats are over all closed trades.</div>
     <table class="jgroup"><tr><th>Setup</th><th>#</th><th>Win</th><th>Net</th><th></th></tr>${j.setups.map((x, i) => { const g = by.get(x); return `<tr><td>${esc(x)}</td><td>${g?.n ?? 0}</td><td>${g ? g.winRate.toFixed(0) + '%' : '—'}</td><td class="${cls(g?.net ?? 0)}">${g ? g.net.toFixed(2) : '—'}</td><td><button class="x" data-rename="${i}" title="Rename">✎</button><button class="x" data-del-setup="${i}" title="Remove from list">✕</button></td></tr>` }).join('')}</table>
     <div class="row"><input id="jNewSetup" placeholder="New setup name" class="grow"><button id="jAddSetup">Add</button></div>`;
@@ -227,7 +235,7 @@ export function initJournal(h: JournalHost) {
   $('#jView').onclick = e => {
     const el = e.target as HTMLElement;
     const card = el.closest<HTMLElement>('[data-id]');
-    if (card) { openWorkspace('form', card.dataset.id); return }
+    if (card) { if (el.closest('[data-replay]')) void replayTrade(card.dataset.id!); else openWorkspace('form', card.dataset.id); return }
     const m = el.closest<HTMLElement>('[data-month]');
     if (m) { const d = new Date(month.y, month.m + +m.dataset.month!, 1); month = { y: d.getFullYear(), m: d.getMonth() }; render(); return }
     const day = el.closest<HTMLElement>('[data-day]');
@@ -249,7 +257,7 @@ export function initJournal(h: JournalHost) {
   $('#jAskClose').onchange = e => { cfg.askClose = (e.target as HTMLInputElement).checked; store.set('journalCfg', cfg) };
   const download = (name: string, text: string, type: string) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click() };
   $('#jOpen').onclick = () => openWorkspace('dashboard');
-  $('#jCsv').onclick = () => download(`journal_${new Date().toISOString().slice(0, 10)}.csv`, toCsv(filterTrades(j.trades, filter())), 'text/csv');
+  $('#jCsv').onclick = () => download(`journal_${new Date().toISOString().slice(0, 10)}.csv`, toCsv(filterTrades(live(), filter())), 'text/csv');
   $('#jBackup').onclick = () => download(`journal_backup_${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(j), 'application/json');
   $<HTMLInputElement>('#jRestore').onchange = async e => {
     const input = e.target as HTMLInputElement, f = input.files?.[0]; input.value = '';

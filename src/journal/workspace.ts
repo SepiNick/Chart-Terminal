@@ -5,6 +5,8 @@ import type { JTrade } from '../journal.ts';
 import { balance, closed, dashboard, dayScores, dayKeyOf, periodRange, scope, tradeTime, rOf, rrExpected, addImported, parseCsv, parseMtHtml, transfersOf, type Group, type Period } from './analytics.ts';
 import { renderForm } from './form.ts';
 import { renderPage } from './pages.ts';
+import { replayTrade } from './replay.ts';
+import { riskPage } from '../risk/page.ts';
 import { toCsv } from '../journal.ts';
 import { $, $$, esc, store, toast } from '../store.ts';
 
@@ -47,7 +49,7 @@ export const kpi = (label: string, value: string, c = '', title = '') => `<div c
 const NAV: [string, string, string?][] = [
   ['dashboard', '▦ Dashboard'], ['journals', '☰ Journals'], ['checklists', '☑ Checklists'], ['discipline', '🔥 Discipline path'],
   ['an-daily', 'Daily', 'Analyses'], ['an-psych', 'Psychology & behaviour', 'Analyses'], ['an-time', 'Time & efficiency', 'Analyses'], ['an-quality', 'Execution quality', 'Analyses'], ['an-pro', 'Professional', 'Analyses'],
-  ['props', 'Prop challenges', 'Tools'], ['calendar', 'Economic calendar', 'Tools'], ['clock', 'Forex sessions clock', 'Tools'], ['resume', 'Trading resume', 'Tools'], ['compare', 'Compare accounts', 'Tools'],
+  ['props', 'Prop challenges', 'Tools'], ['calendar', 'Economic calendar', 'Tools'], ['clock', 'Forex sessions clock', 'Tools'], ['resume', 'Trading resume', 'Tools'], ['compare', 'Compare accounts', 'Tools'], ['risk', 'Portfolio risk', 'Tools'],
   ['notes', '✎ Notes'], ['settings', '⚙ Accounts & settings'],
 ];
 export function openWorkspace(p = 'dashboard', a = '') {
@@ -91,6 +93,7 @@ function renderNow() {
   if (page === 'dashboard') main.innerHTML = dashboardPage();
   else if (page === 'journals') main.innerHTML = journalsPage();
   else if (page === 'form') renderForm(main, arg);
+  else if (page === 'risk') riskPage(main);
   else renderPage(main, page, arg);
   main.onclick = page === 'dashboard' || page === 'journals' ? onMainClick : main.onclick;
   main.onchange = page === 'dashboard' || page === 'journals' ? onMainChange : main.onchange;
@@ -173,13 +176,13 @@ function journalsPage() {
   list = list.sort((a, b) => { const x = sorter(a), y = sorter(b); return (x < y ? -1 : x > y ? 1 : 0) * (ws.desc ? -1 : 1) });
   const cols = ws.cols.filter(c => COLS[c]), per = 25, pages = Math.max(1, Math.ceil(list.length / per));
   ws.page = Math.min(ws.page, pages - 1);
-  const head = `<tr>${cols.map(c => `<th data-sort="${c}">${COLS[c].label}${ws.sort === c ? (ws.desc ? ' ▾' : ' ▴') : ''}</th>`).join('')}</tr>`;
-  const row = (t: JTrade) => `<tr class="click ${t.kind !== 'notrade' && !t.entryReasons?.length && !t.entryReason ? 'warn-row' : ''}" data-open="${esc(t.id)}">${cols.map(c => `<td>${COLS[c].cell(t)}</td>`).join('')}</tr>`;
+  const head = `<tr>${cols.map(c => `<th data-sort="${c}">${COLS[c].label}${ws.sort === c ? (ws.desc ? ' ▾' : ' ▴') : ''}</th>`).join('')}<th></th></tr>`;
+  const row = (t: JTrade) => `<tr class="click ${t.kind !== 'notrade' && !t.entryReasons?.length && !t.entryReason ? 'warn-row' : ''}" data-open="${esc(t.id)}">${cols.map(c => `<td>${COLS[c].cell(t)}</td>`).join('')}<td>${t.kind !== 'notrade' ? `<button class="x" data-replay="${esc(t.id)}" title="Replay this trade on the chart with Bar Replay">▶</button>` : ''}</td></tr>`;
   let body = '';
   if (ws.group) {
     const key = (t: JTrade) => ws.group === 'day' ? fmtDate(t.openTime, false) : ws.group === 'sym' ? t.sym : ws.group === 'setup' ? t.setup ?? '(no setup)' : journal().accounts?.find(a => a.id === t.accountId)?.name ?? '';
     const groups = new Map<string, JTrade[]>(); list.forEach(t => groups.set(key(t), [...(groups.get(key(t)) ?? []), t]));
-    body = [...groups].map(([k, xs]) => { const net = xs.reduce((s, x) => s + (x.status === 'closed' ? x.net : 0), 0); return `<tr class="grp"><th colspan="${cols.length}">${esc(k)} <span class="muted">${xs.length} entries</span> <b class="${cls(net)}">${money(net)}</b></th></tr>${xs.map(row).join('')}` }).join('');
+    body = [...groups].map(([k, xs]) => { const net = xs.reduce((s, x) => s + (x.status === 'closed' ? x.net : 0), 0); return `<tr class="grp"><th colspan="${cols.length + 1}">${esc(k)} <span class="muted">${xs.length} entries</span> <b class="${cls(net)}">${money(net)}</b></th></tr>${xs.map(row).join('')}` }).join('');
   } else body = list.slice(ws.page * per, ws.page * per + per).map(row).join('');
   const pg = (i: number) => `<button data-page="${i}" class="${i === ws.page ? 'on' : ''}">${i + 1}</button>`;
   return `<div class="jw-toolbar">
@@ -192,20 +195,21 @@ function journalsPage() {
       <button data-act="new" class="on">＋ New entry</button>
     </div>
     <div class="jw-colpick" hidden>${Object.entries(COLS).map(([k, c]) => `<label><input type="checkbox" data-col="${k}" ${ws.cols.includes(k) ? 'checked' : ''}> ${c.label}</label>`).join('')}</div>
-    <div class="jw-tablewrap"><table class="jw-table">${head}${body || `<tr><td colspan="${cols.length}" class="muted">No entries for this account and period. Trades on the paper account are recorded automatically; add others with “New entry” or import a statement.</td></tr>`}</table></div>
+    <div class="jw-tablewrap"><table class="jw-table">${head}${body || `<tr><td colspan="${cols.length + 1}" class="muted">No entries for this account and period. Trades on the paper account are recorded automatically; add others with “New entry” or import a statement.</td></tr>`}</table></div>
     ${!ws.group && pages > 1 ? `<div class="jw-pager">${Array.from({ length: pages }, (_, i) => pg(i)).join('')}</div>` : ''}
     <div class="muted">${list.length} entries · rows marked yellow are missing an entry reason.</div>`;
 }
 
 // ---------- events for dashboard and journals ----------
 function onMainClick(e: MouseEvent) {
-  const el = e.target as HTMLElement, b = el.closest<HTMLElement>('[data-dash],[data-heat],[data-sort],[data-page],[data-open],[data-act],[data-day]');
+  const el = e.target as HTMLElement, b = el.closest<HTMLElement>('[data-dash],[data-heat],[data-sort],[data-page],[data-replay],[data-open],[data-act],[data-day]');
   if (!b) return;
   if (b.dataset.dash) { ws.dashTab = b.dataset.dash; saveWs(); renderNow() }
   else if (b.dataset.heat) { ws.heat = b.dataset.heat; saveWs(); renderNow() }
   else if (b.dataset.day) { ws.q = ''; ws.period = 'custom'; ws.from = ws.to = b.dataset.day; saveWs(); go('journals') }
   else if (b.dataset.sort) { ws.desc = ws.sort === b.dataset.sort ? !ws.desc : true; ws.sort = b.dataset.sort; saveWs(); renderNow() }
   else if (b.dataset.page) { ws.page = +b.dataset.page; saveWs(); renderNow() }
+  else if (b.dataset.replay) void replayTrade(b.dataset.replay);
   else if (b.dataset.open) go('form', b.dataset.open);
   else if (b.dataset.act === 'new') go('form', '');
   else if (b.dataset.act === 'cols') { const p = $('.jw-colpick'); p.hidden = !p.hidden }
