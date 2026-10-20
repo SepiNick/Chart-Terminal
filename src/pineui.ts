@@ -1,7 +1,7 @@
 // Script editor panel (Pine + MQL4/MQL5 + NinjaScript), script library/installation, inputs dialog and console.
 import type { ChartPane, PaneCfg } from './chart.ts';
 import { createPineEditor, type PineEditor } from './pine/editor.ts';
-import { compile, isError } from './pine/engine.ts';
+import { compile, isError, setInstalledScripts } from './pine/engine.ts';
 import { BUILTIN_SCRIPTS, NEW_INDICATOR, NEW_STRATEGY } from './pine/builtins.ts';
 import { fromBroker } from './pine/report.ts';
 import { renderTester } from './testerui.ts';
@@ -32,6 +32,7 @@ let editingId = store.get<string>('pineEditing', '');
 let editor: PineEditor | null = null;
 let host: PineHost;
 const save = () => store.set('scripts', scripts);
+setInstalledScripts(() => Object.values(scripts).filter(s => langOf(s) === 'pine').map(s => s.src));   // Pine `import` resolves libraries here
 export const langOf = (s: Script | undefined): Lang => s?.lang ?? 'pine';
 const isMql = (l: Lang) => l === 'mql4' || l === 'mql5' || l === 'mqh';
 const isCode = (l: Lang) => l !== 'pine';   // file-named (MQL or C#) rather than titled by indicator()

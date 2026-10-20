@@ -91,6 +91,7 @@ export class ChartPane {
   private scriptPaneBase = 0;
   private lastScriptRun = 0;
   private scriptTimer = 0;
+  private secBars = new Map<string, Bar[] | null>();   // pine request.security: other symbol/tf bars, fetched on demand (null = failed)
   ind: { key: string; name: string; calc: (b: Bar[]) => Record<string, Series>; plots: Record<string, ISeriesApi<SeriesType>>; hidden?: boolean }[] = [];
   private vol: ISeriesApi<'Histogram'> | null = null;
   private cmp: { sym: string; unsub: () => void }[] = [];
@@ -157,7 +158,7 @@ export class ChartPane {
   // ---------- data ----------
   async load() {
     const tok = ++this.loadTok;
-    this.unsub(); this.exitReplay(false); this.of?.reset();
+    this.unsub(); this.exitReplay(false); this.of?.reset(); this.secBars.clear();
     this.bars = []; this.noMore = false;
     try {
       const b = await this.fetch();
@@ -346,7 +347,17 @@ export class ChartPane {
       const run: ScriptRun = 'msg' in job ? { id: ref.id, name: sc.name, ms: 0, error: job }
         : job.kind === 'mql' ? this.runMqlJob(ref.id, sc.name, job, ref.inputs)
         : job.kind === 'ninja' ? this.runNinjaJob(ref.id, job, ref.inputs)
-        : (() => { const res = runScript(job.src, this.vb(), { ...job.opts, inputs: ref.inputs }); return { id: ref.id, name: res.out?.meta.shorttitle || res.out?.meta.title || sc.name, ...res } })();
+        : (() => {
+          const res = runScript(job.src, this.vb(), { ...job.opts, inputs: ref.inputs, security: (s, tf) => this.secBars.get(`${s}|${tf}`) ?? undefined });
+          // pine request.security: fetch what the script asked for, then run the scripts again
+          for (const q of res.out?.securityMissing ?? []) {
+            const k = `${q.symbol}|${q.tf}`;
+            if (this.secBars.has(k)) continue;
+            this.secBars.set(k, null);
+            fetchBars(q.symbol, q.tf).then(b => { this.secBars.set(k, b); if (this.chart) this.renderScripts() }).catch(e => toast(`${q.symbol} ${q.tf}: ${(e as Error).message}`));
+          }
+          return { id: ref.id, name: res.out?.meta.shorttitle || res.out?.meta.title || sc.name, ...res };
+        })();
       const res = run;
       if (res.out && !ref.hidden) {
         run.view = renderScript(this.chart, this.main, res.out, this.vb(), res.out.meta.overlay ? 0 : pane + 1, color);
