@@ -180,3 +180,59 @@ test('input validation', async () => {
   const sc = validateInput({ ...ok, condition: undefined, value: undefined, source: { kind: 'script', script: 'indicator("x")\nalertcondition(close > 1, "a")', event: 'alertcondition', inputs: { len: 5 } } });
   assert.deepEqual(sc.source, { kind: 'script', script: 'indicator("x")\nalertcondition(close > 1, "a")', event: 'alertcondition', index: 0, inputs: { len: 5 } });
 });
+
+test('MQL scripts: Alert() calls and expert deals fire script alerts (compiled on the server from sources)', async () => {
+  const { buildJob, runJob } = await import('../scripts.ts');
+  const { NEW_MQL5_EA } = await import('../../src/mql/templates.ts');
+  const wave = Array.from({ length: 200 }, (_, i) => bar(i, 100 + Math.sin(i / 6) * 10));
+  const AL = `void OnTick() { if(iClose(_Symbol, PERIOD_CURRENT, 0) > 105) Alert("high ", iClose(_Symbol, PERIOD_CURRENT, 0)); }`;
+  const code = (main: string, src: string) => ({ lang: 'mql5' as const, files: { [main]: src }, main, prec: 2 });
+
+  const al = runJob(buildJob(code('A.mq5', AL), 'BTCUSDT', '1m'), wave, {});
+  assert.equal(al.error, undefined);
+  const i = wave.findIndex(b => b.close > 105);
+  const a1 = alert({ source: { kind: 'script', script: AL, code: code('A.mq5', AL), event: 'alert' } });
+  assert.match(E.scriptHits(a1, E.newState(), al.out!, i, false)[0]?.message ?? '', /^high /);
+
+  const ea = runJob(buildJob(code('E.mq5', NEW_MQL5_EA), 'BTCUSDT', '1m'), wave, {});
+  const deals = E.dealsOf(ea.out!)!;
+  assert.ok(deals.length >= 2, `the EA trades (${deals.length})`);
+  const a2 = alert({ source: { kind: 'script', script: NEW_MQL5_EA, code: code('E.mq5', NEW_MQL5_EA), event: 'strategy' } }), st = E.newState();
+  const j = wave.findIndex(b => b.time === deals[0].time), hits = E.scriptHits(a2, st, ea.out!, j, false, wave[j].time);
+  assert.ok(hits.length >= 1);
+  assert.equal(hits[0].vars['strategy.order.action'], deals[0].type);
+  assert.equal(E.scriptHits(a2, st, ea.out!, j, false, wave[j].time).length, 0, 'a deal fires once');
+});
+
+test('alert validation compiles MQL code and refuses compiled JS', async () => {
+  const { validateInput } = await import('./validate.ts');
+  const base = { sym: 'BTCUSDT', tf: '1m', frequency: 'every_time', channels: [], message: '', active: true };
+  const ok = validateInput({ ...base, source: { kind: 'script', script: 'x', event: 'alert', code: { lang: 'mql5', files: { 'A.mq5': 'void OnTick() { Alert("x"); }' }, main: 'A.mq5', prec: 2 } } });
+  assert.equal((ok.source as { code?: { lang: string } }).code?.lang, 'mql5');
+  assert.throws(() => validateInput({ ...base, source: { kind: 'script', script: 'x', event: 'alert', code: { lang: 'mql5', files: { 'A.mq5': 'void OnTick( {' }, main: 'A.mq5' } } }), /Script error/);
+  assert.throws(() => validateInput({ ...base, source: { kind: 'script', script: 'x', event: 'alert', code: { lang: 'mql5', files: { 'A.mq5': '' }, main: 'A.mq5', js: 'process.exit()' } } }), /not compiled/);
+});
+
+test('live wiring: script alerts run in the engine worker, once per closed bar, and fire', async t => {
+  process.env.CT_DATA_DIR ??= mkdtempSync(join(tmpdir(), 'ct-alerts-'));
+  const I = await import('./index.ts');
+  const { engineStop } = await import('../engine.ts');
+  t.after(() => engineStop());
+  let cb: ((b: ReturnType<typeof bar>[], closed: boolean) => void) | undefined;
+  const fired: string[] = [];
+  I.deps.watch = (_s, _tf, f) => { cb = f; return () => {} };
+  I.deps.notify = async n => { fired.push(n.body); return [] };
+  const closes = [9, 9, 11, 11, 9, 11, 12, 8, 11], bars = series(closes);
+  const a = I.createAlert({ sym: 'BTCUSDT', tf: '1m', frequency: 'once_per_bar_close', channels: [], message: '', active: true,
+    source: { kind: 'script', script: 'indicator("x")\nalertcondition(ta.crossover(close, 10), "Up", "up {{close}}")', event: 'alertcondition' } });
+  for (let n = 2; n <= bars.length; n++) { cb!(bars.slice(0, n), true); await I.settled() }
+  // crossovers at bars 2, 5 and 8; once_per_bar_close sees 2 and 5 when the next bar begins, 8 is still forming
+  assert.deepEqual(fired, ['up 11', 'up 11']);
+
+  const bad = I.createAlert({ sym: 'BTCUSDT', tf: '1m', frequency: 'every_time', channels: [], message: '', active: true,
+    source: { kind: 'script', script: 'strategy("s")\nalert(str.tostring(nope))', event: 'alert' } });
+  cb!(bars, true); await I.settled();
+  const listed = (await (await import('../core/db.ts')).db.prepare('SELECT data FROM alerts WHERE id = ?').get(bad.id)) as { data: string };
+  assert.match(JSON.parse(listed.data).stoppedReason, /script error.*nope/);
+  void a;
+});

@@ -51,7 +51,7 @@ export function conditionMet(c: Condition, s: Sample, amount = 0): boolean {
 }
 
 /** Per-alert memory between evaluations (in memory only; a restart starts fresh). */
-export interface EvalState { prev?: number; plo?: number; phi?: number; firedBar?: number; lastFireAt?: number; fires: number[]; seen: Set<string>; lastRun?: number }
+export interface EvalState { prev?: number; plo?: number; phi?: number; firedBar?: number; lastFireAt?: number; fires: number[]; seen: Set<string> }
 export const newState = (): EvalState => ({ fires: [], seen: new Set() });
 
 /** Frequency gate for a hit on bar `barTime` at `now` (ms). once_per_bar_close hits only come from closed bars (see `pick`). */
@@ -98,8 +98,20 @@ export function evalLevel(a: Alert, st: EvalState, values: number[], i: number, 
 // Price is left out on purpose: a fill on the forming bar (process_orders_on_close) may move while the bar forms.
 const fillKey = (f: { time: number; id: string; side: string }) => `${f.time}|${f.id}|${f.side}`;
 
-/** Script events on bar `i`: alertcondition[index] fired, alert() calls, or strategy fills (each fill fires once). */
-export function scriptHits(a: Alert, st: EvalState, out: Outputs, i: number, closedMode: boolean): { message?: string; vars: Record<string, string> }[] {
+type Deal = { time: number; type: string; volume: number; price?: number; comment?: string; ticket?: number };
+/** The strategy's fills as MQL deals / NinjaScript executions; undefined for Pine and non-strategies. */
+export const dealsOf = (out: Outputs) => (out as Outputs & { mqlDeals?: Deal[] }).mqlDeals;
+const seenOnce = (st: EvalState, k: string) => {
+  if (st.seen.has(k)) return false;
+  st.seen.add(k); if (st.seen.size > 500) st.seen.delete(st.seen.values().next().value!);
+  return true;
+};
+
+/**
+ * Script events on bar `i` (time `barTime`): alertcondition[index] fired, alert() calls (Pine alert(), MQL / NinjaScript
+ * Alert()), or strategy fills (Pine broker fills, MQL deals, NinjaScript executions; each fill fires once).
+ */
+export function scriptHits(a: Alert, st: EvalState, out: Outputs, i: number, closedMode: boolean, barTime = -Infinity): { message?: string; vars: Record<string, string> }[] {
   const src = a.source;
   if (src.kind !== 'script') return [];
   if (src.event === 'alertcondition') {
@@ -109,11 +121,11 @@ export function scriptHits(a: Alert, st: EvalState, out: Outputs, i: number, clo
   if (src.event === 'alert') {
     return out.alerts.filter(x => x.bar === i && (closedMode || !x.freq.includes('close'))).map(x => ({ message: x.message, vars: {} }));
   }
+  const deals = dealsOf(out);
+  if (!out.broker && deals) return deals.filter(d => (d.type === 'buy' || d.type === 'sell') && d.time >= barTime && seenOnce(st, `${d.time}|${d.ticket ?? ''}|${d.type}|${d.volume}`))
+    .map(d => ({ message: d.comment || undefined, vars: { 'strategy.order.action': d.type, 'strategy.order.contracts': String(d.volume), 'strategy.order.price': d.price != null ? String(d.price) : '', 'strategy.order.comment': d.comment ?? '' } }));
   const pos = out.broker?.positionSize ?? 0;
-  return (out.broker?.fills ?? []).filter(f => f.bar >= i && !st.seen.has(fillKey(f))).filter(f => {
-    st.seen.add(fillKey(f)); if (st.seen.size > 500) st.seen.delete(st.seen.values().next().value!);
-    return true;
-  }).map(f => ({ message: f.comment || undefined, vars: { 'strategy.order.action': f.side, 'strategy.order.contracts': String(f.qty), 'strategy.order.price': String(f.price), 'strategy.order.id': f.id, 'strategy.order.comment': f.comment, 'strategy.position_size': String(pos) } }));
+  return (out.broker?.fills ?? []).filter(f => f.bar >= i && seenOnce(st, fillKey(f))).map(f => ({ message: f.comment || undefined, vars: { 'strategy.order.action': f.side, 'strategy.order.contracts': String(f.qty), 'strategy.order.price': String(f.price), 'strategy.order.id': f.id, 'strategy.order.comment': f.comment, 'strategy.position_size': String(pos) } }));
 }
 
 // Same contract as notify's `render` (§4); kept local so this module stays pure (importing notify would open the database).

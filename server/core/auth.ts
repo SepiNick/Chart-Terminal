@@ -51,4 +51,12 @@ export function sessionOf(req: IncomingMessage): string | null {
 export const sessionCookie = (token: string, secure: boolean) => `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_DAYS * 86400}${secure ? '; Secure' : ''}`;
 export const clearCookie = (secure: boolean) => `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`;
 export const clientIp = (req: IncomingMessage) => req.socket.remoteAddress ?? '';
-export const listSessions = () => db.prepare('SELECT created, last_seen, agent, ip FROM sessions ORDER BY last_seen DESC').all();
+/** Public id of a session: a prefix of its token's hash (never the token). `current` marks the caller's own. */
+export const sessionId = (token: string) => hash(token).slice(0, 16);
+export const listSessions = (mine: string | null) => (db.prepare('SELECT substr(token_hash, 1, 16) AS id, created, last_seen, agent, ip FROM sessions ORDER BY last_seen DESC').all() as { id: string }[])
+  .map(s => ({ ...s, current: !!mine && s.id === sessionId(mine) }));
+/** Sign one session out; false when there is no such session. */
+export function endSessionById(id: string): boolean {
+  if (!/^[0-9a-f]{16}$/.test(id)) return false;
+  return db.prepare("DELETE FROM sessions WHERE substr(token_hash, 1, 16) = ?").run(id).changes > 0;
+}

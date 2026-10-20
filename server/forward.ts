@@ -1,18 +1,21 @@
-// Server-side forward tests (docs/phase5-contracts.md §6): run a chart strategy (Pine / MQL / NinjaScript job) on the
-// live series and mirror each new strategy fill as a market order into the synced paper account (`acct` state key).
+// Server-side forward tests (docs/phase5-contracts.md §6): run a chart strategy (Pine / MQL / NinjaScript) on the live
+// series and mirror each new strategy fill as a market order into the synced paper account (`acct` state key).
+// Hybrid: while a browser shows the same strategy on the same chart it runs it and sends the fills (`forward.fills`),
+// which takes the load off the server; otherwise the server runs it in the engine worker thread (engine.ts).
 import { randomUUID } from 'node:crypto';
 import { db, migration } from './core/db.ts';
-import { route, broadcast, bad, HttpError } from './core/http.ts';
+import { route, broadcast, bad, HttpError, onWs } from './core/http.ts';
 import { watchSeries, isExprSym, type Bar } from './core/bars.ts';
 import { stateGet, stateSet } from './state.ts';
 import { notify, type Channel } from './notify/index.ts';
-import { validTf, tfSeconds } from '../src/data.ts';
-import { runScript } from '../src/pine/engine.ts';
-import { compileMql, runMql } from '../src/mql/engine.ts';
-import { compileNinja, runNinjaScript } from '../src/ninja/engine.ts';
-import type { Outputs } from '../src/pine/interp.ts';
-import type { Job } from '../src/tester/runner.ts';
+import { validTf } from '../src/data.ts';
+import { scriptSig } from '../src/scriptsig.ts';
 import { newAccount, placeOrder, type Account } from '../src/trading.ts';
+import { buildJob, runFills, fillsOf, type ScriptSource, type SimpleFill } from './scripts.ts';
+import { engineFills, engineForget, engineStop } from './engine.ts';
+import { validSource } from './scriptsource.ts';
+
+export { buildJob, runFills, fillsOf };
 
 migration('forward/1', `
   CREATE TABLE forward (id TEXT PRIMARY KEY, name TEXT NOT NULL, sym TEXT NOT NULL, tf TEXT NOT NULL, source TEXT NOT NULL, inputs TEXT NOT NULL,
@@ -22,39 +25,20 @@ migration('forward/1', `
     t INTEGER NOT NULL, side TEXT NOT NULL, qty REAL NOT NULL, px REAL NOT NULL, error TEXT);
   CREATE INDEX forward_log_fwd ON forward_log (fwd, n);`);
 
-/** Script sources only — the server compiles them itself and never runs JS sent by a client. */
-export interface ForwardSource { lang: 'pine' | 'mql4' | 'mql5' | 'ninja'; files: Record<string, string>; main: string; cls?: string; prec: number }
+export type ForwardSource = ScriptSource;
 export interface ForwardInput { name: string; sym: string; tf: string; source: ForwardSource; inputs?: Record<string, unknown>; qtyMult: number; channels: Channel[] }
-export interface ForwardInfo { id: string; name: string; sym: string; tf: string; qtyMult: number; channels: Channel[]; created: number; start: number | null; status: 'starting' | 'running' | 'error'; fills: number; lastRun: number | null; lastError: string | null }
+/** runsIn: 'browser' while an open chart runs the strategy and sends the fills, else 'server'. sig: see src/scriptsig.ts. */
+export interface ForwardInfo { id: string; name: string; sym: string; tf: string; qtyMult: number; channels: Channel[]; created: number; start: number | null; status: 'starting' | 'running' | 'error'; fills: number; lastRun: number | null; lastError: string | null; sig: string; runsIn: 'browser' | 'server' }
 export interface ForwardLog { at: number; t: number; side: 'buy' | 'sell'; qty: number; px: number; error: string | null }
-type SimpleFill = { time: number; side: 'buy' | 'sell'; qty: number };
+export interface RunReq { id: string; source: ForwardSource; sym: string; tf: string; inputs: Record<string, unknown> }
+
+/** Run a test's strategy on `bars` in the engine worker. */
+export const runInWorker = (x: RunReq, bars: Bar[]) => engineFills({ ...x, key: `fwd:${x.id}` }, bars);
 
 /** Swappable for tests (no network, fake clock). */
-export const deps = { watch: watchSeries, now: () => Date.now(), notify, throttleMs: 2000 };
+export const deps = { watch: watchSeries, now: () => Date.now(), notify, throttleMs: 2000, run: runInWorker, leaseMs: 15_000 };
 
 export const fillKey = (f: SimpleFill) => `${f.time}|${f.side}|${+f.qty.toFixed(8)}`;
-/** Fills of any engine's outputs: Pine broker fills, MQL deals, NinjaScript executions (exposed as mqlDeals). */
-export function fillsOf(out: Outputs | undefined): SimpleFill[] {
-  const o = out as (Outputs & { mqlDeals?: { time: number; type: string; volume: number }[] }) | undefined;
-  if (o?.broker) return o.broker.fills.map(f => ({ time: f.time, side: f.side, qty: f.qty }));
-  return (o?.mqlDeals ?? []).filter(d => d.type === 'buy' || d.type === 'sell').map(d => ({ time: d.time, side: d.type as 'buy' | 'sell', qty: d.volume }));
-}
-/** Run a job on bars and return its fills; throws the script's error. */
-export function runFills(job: Job, bars: Bar[], inputs: Record<string, unknown>): SimpleFill[] {
-  if (job.kind === 'pine') {
-    const r = runScript(job.src, bars, { ...job.opts, inputs: inputs as never });
-    if (r.error) throw Error(r.error.msg);
-    return fillsOf(r.out);
-  }
-  if (job.kind === 'mql') {
-    const r = runMql(job.js, bars, { ...job.opts, inputs });
-    if (r.error) throw Error(r.error);
-    return fillsOf(r.out);
-  }
-  const r = runNinjaScript(job.cr, job.cls, bars, { ...job.opts, inputs });
-  if (r.result.error) throw Error(r.result.error);
-  return fillsOf(r.out);
-}
 
 /**
  * Pure step: given the fills of the latest run, return the ones to mirror (time ≥ start, not seen before) and the
@@ -78,57 +62,84 @@ export function mirror(sym: string, f: SimpleFill, qty: number, px: number, ts: 
 }
 
 interface Row { id: string; name: string; sym: string; tf: string; source: string; inputs: string; qty_mult: number; channels: string; created: number; start: number | null; done: string; fills: number; last_run: number | null; last_error: string | null }
-const running = new Map<string, () => void>(), jobs = new Map<string, Job>();
+const running = new Map<string, () => void>();
+const leases = new Map<string, number>();   // id → when a browser last sent fills
+const sigs = new Map<string, string>();
+const sigOf = (r: Row) => { let s = sigs.get(r.id); if (!s) sigs.set(r.id, (s = scriptSig(JSON.parse(r.source), JSON.parse(r.inputs)))); return s };
+const leased = (id: string) => deps.now() - (leases.get(id) ?? -Infinity) < deps.leaseMs;
 
-const info = (r: Row): ForwardInfo => ({ id: r.id, name: r.name, sym: r.sym, tf: r.tf, qtyMult: r.qty_mult, channels: JSON.parse(r.channels), created: r.created, start: r.start, status: r.last_error ? 'error' : r.start == null ? 'starting' : 'running', fills: r.fills, lastRun: r.last_run, lastError: r.last_error });
+const info = (r: Row): ForwardInfo => ({ id: r.id, name: r.name, sym: r.sym, tf: r.tf, qtyMult: r.qty_mult, channels: JSON.parse(r.channels), created: r.created, start: r.start, status: r.last_error ? 'error' : r.start == null ? 'starting' : 'running', fills: r.fills, lastRun: r.last_run, lastError: r.last_error, sig: sigOf(r), runsIn: leased(r.id) ? 'browser' : 'server' });
 const rows = () => db.prepare('SELECT * FROM forward ORDER BY created').all() as unknown as Row[];
+const rowOf = (id: string) => db.prepare('SELECT * FROM forward WHERE id = ?').get(id) as Row | undefined;
 export const list = () => rows().map(info);
 const changed = () => broadcast({ type: 'forward', list: list() });
 
-function evaluate(id: string, bars: Bar[]) {
-  const r = db.prepare('SELECT * FROM forward WHERE id = ?').get(id) as Row | undefined;
-  const last = bars.at(-1);
-  if (!r || !last) return;
+/** Mirror the new ones among `fills` (from the worker or a browser); `last` is the series' latest bar. */
+function apply(id: string, fills: SimpleFill[], last: { time: number; close: number }) {
+  const r = rowOf(id); if (!r) return;
   const now = deps.now();
-  let err: string | null = null;
-  try {
-    const job = jobs.get(id);
-    if (!job) throw Error('Not compiled');
-    const step = freshFills(runFills(job, bars, JSON.parse(r.inputs)), r.start, new Set(JSON.parse(r.done)), last.time);
-    for (const f of step.fresh) {
-      const qty = +(f.qty * r.qty_mult).toFixed(8);
-      const e = qty > 0 ? mirror(r.sym, f, qty, last.close, now / 1000) : 'Size is 0 after the multiplier';
-      db.prepare('INSERT INTO forward_log (fwd, at, t, side, qty, px, error) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, now, f.time, f.side, qty, last.close, e);
-      if (!e) deps.notify({
-        title: `${r.name} forward test`, body: `${f.side === 'buy' ? 'Bought' : 'Sold'} ${qty} ${r.sym} at ${last.close} (paper)`,
-        channels: [...new Set<Channel>(['popup', ...(JSON.parse(r.channels) as Channel[])])],
-        data: { forwardId: id, sym: r.sym, tf: r.tf, side: f.side, qty, price: last.close, url: `/?${new URLSearchParams({ symbol: r.sym, tf: r.tf })}` },
-      }).catch(() => {});
-    }
-    const mirrored = step.fresh.length;
-    db.prepare('UPDATE forward SET start = ?, done = ?, fills = fills + ?, last_run = ?, last_error = NULL WHERE id = ?').run(step.start, JSON.stringify([...step.done]), mirrored, now, id);
-    if (mirrored || r.start == null || r.last_error) changed();
-  } catch (e) {
-    err = (e as Error).message || String(e);
-    db.prepare('UPDATE forward SET last_run = ?, last_error = ? WHERE id = ?').run(now, err, id);
-    if (err !== r.last_error) changed();
+  const step = freshFills(fills, r.start, new Set(JSON.parse(r.done)), last.time);
+  for (const f of step.fresh) {
+    const qty = +(f.qty * r.qty_mult).toFixed(8);
+    const e = qty > 0 ? mirror(r.sym, f, qty, last.close, now / 1000) : 'Size is 0 after the multiplier';
+    db.prepare('INSERT INTO forward_log (fwd, at, t, side, qty, px, error) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, now, f.time, f.side, qty, last.close, e);
+    if (!e) deps.notify({
+      title: `${r.name} forward test`, body: `${f.side === 'buy' ? 'Bought' : 'Sold'} ${qty} ${r.sym} at ${last.close} (paper)`,
+      channels: [...new Set<Channel>(['popup', ...(JSON.parse(r.channels) as Channel[])])],
+      data: { forwardId: id, sym: r.sym, tf: r.tf, side: f.side, qty, price: last.close, url: `/?${new URLSearchParams({ symbol: r.sym, tf: r.tf })}` },
+    }).catch(() => {});
   }
+  const mirrored = step.fresh.length;
+  db.prepare('UPDATE forward SET start = ?, done = ?, fills = fills + ?, last_run = ?, last_error = NULL WHERE id = ?').run(step.start, JSON.stringify([...step.done]), mirrored, now, id);
+  if (mirrored || r.start == null || r.last_error) changed();
+}
+function fail(id: string, msg: string) {
+  const r = rowOf(id); if (!r) return;
+  db.prepare('UPDATE forward SET last_run = ?, last_error = ? WHERE id = ?').run(deps.now(), msg, id);
+  if (msg !== r.last_error) changed();
 }
 
-/** Compile the stored sources (never client-supplied JS) and start watching; a compile error is shown as the test's error. */
-function run(r: Pick<Row, 'id' | 'sym' | 'tf' | 'source'>) {
+// One run in flight per test; bars that arrive meanwhile are kept (latest only) and run right after.
+const busy = new Map<string, Bar[] | null>(), inflight = new Set<Promise<void>>();
+/** Resolves once no server run is in flight (tests). */
+export async function settled() { while (inflight.size) await Promise.all(inflight) }
+function schedule(id: string, bars: Bar[]) {
+  if (busy.has(id)) { busy.set(id, bars.slice()); return }
+  const r = rowOf(id), last = bars.at(-1);
+  if (!r || !last) return;
+  busy.set(id, null);
+  const p: Promise<void> = deps.run({ id, source: JSON.parse(r.source), sym: r.sym, tf: r.tf, inputs: JSON.parse(r.inputs) }, bars)
+    .then(f => { if (!leased(id)) apply(id, f, { time: last.time, close: last.close }) }, e => fail(id, (e as Error).message || String(e)))
+    .finally(() => { inflight.delete(p); const q = busy.get(id); busy.delete(id); if (q && running.has(id)) schedule(id, q) });
+  inflight.add(p);
+}
+
+function run(r: Pick<Row, 'id' | 'sym' | 'tf'>) {
   const { id, sym, tf } = r;
-  try { jobs.set(id, buildJob(JSON.parse(r.source), sym, tf)) }
-  catch (e) { db.prepare('UPDATE forward SET last_error = ? WHERE id = ?').run((e as Error).message, id); return }
   let lastRun = -Infinity;
-  // ponytail: engines run synchronously on the server thread; move to a worker_thread if many tests make ticks lag.
   running.set(id, deps.watch(sym, tf, (bars, closed) => {
     const t = deps.now();
+    if (leased(id)) return;   // an open chart runs it
+    if (leases.delete(id)) changed();   // that browser went away: the server takes over
     if (!closed && t - lastRun < deps.throttleMs) return;
     lastRun = t;
-    evaluate(id, bars);
+    schedule(id, bars);
   }));
 }
+
+// A browser that shows this strategy (same sources, inputs, symbol and interval: same `sig`) hands in its fills.
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+export function browserFills(id: string, sig: unknown, fills: unknown, last: unknown): boolean {
+  const r = rowOf(id), l = last as { time?: unknown; close?: unknown } | null;
+  if (!r || sig !== sigOf(r) || !Array.isArray(fills) || fills.length > 5000 || !l || !finite(l.time) || !finite(l.close) || l.close <= 0) return false;
+  if (!fills.every(f => f && finite(f.time) && (f.side === 'buy' || f.side === 'sell') && finite(f.qty) && f.qty > 0)) return false;
+  const was = leased(id);
+  leases.set(id, deps.now());
+  apply(id, (fills as SimpleFill[]).map(f => ({ time: f.time, side: f.side, qty: f.qty })), { time: l.time, close: l.close });
+  if (!was) changed();
+  return true;
+}
+onWs('forward.fills', (_c, m) => { browserFills(String(m.id ?? ''), m.sig, m.fills, m.last) });
 
 /** Throws HttpError 400 when the sources don't compile, before anything is stored. */
 export function create(x: ForwardInput): string {
@@ -136,36 +147,20 @@ export function create(x: ForwardInput): string {
   const id = randomUUID(), source = JSON.stringify(x.source);
   db.prepare('INSERT INTO forward (id, name, sym, tf, source, inputs, qty_mult, channels, created) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run(id, x.name, x.sym, x.tf, source, JSON.stringify(x.inputs ?? {}), x.qtyMult, JSON.stringify(x.channels), deps.now());
-  run({ id, sym: x.sym, tf: x.tf, source });
+  run({ id, sym: x.sym, tf: x.tf });
   changed();
   return id;
 }
 export function remove(id: string): boolean {
-  running.get(id)?.(); running.delete(id); jobs.delete(id);
+  running.get(id)?.(); running.delete(id); leases.delete(id); sigs.delete(id);
+  engineForget(`fwd:${id}`);
   const ok = db.prepare('DELETE FROM forward WHERE id = ?').run(id).changes > 0;
   if (ok) changed();
   return ok;
 }
 export const log = (id: string, limit = 500): ForwardLog[] => db.prepare('SELECT at, t, side, qty, px, error FROM forward_log WHERE fwd = ? ORDER BY n DESC LIMIT ?').all(id, limit) as unknown as ForwardLog[];
 export function resumeAll() { for (const r of rows()) if (!running.has(r.id)) run(r) }
-export function stopAll() { running.forEach(s => s()); running.clear(); jobs.clear() }
-
-/** Build the engine job on the server with the trusted compilers, mirroring ChartPane.testerJob. */
-export function buildJob(s: ForwardSource, symbol: string, tf: string): Job {
-  const tfSec = tfSeconds(tf), tick = 10 ** -s.prec, main = s.files[s.main];
-  if (s.lang === 'pine') return { kind: 'pine', src: main, opts: { symbol, tf, tfSec, mintick: tick } };
-  const err = (e?: { file: string; line: number; msg: string }) => Error(e ? `${e.file}(${e.line}): ${e.msg}` : 'Compilation failed');
-  if (s.lang === 'mql4' || s.lang === 'mql5') {
-    const cr = compileMql(s.main, s.files);
-    if (!cr.ok || !cr.js) throw err(cr.errors[0]);
-    return { kind: 'mql', js: cr.js, opts: { dialect: cr.dialect, symbol: symbol.replace(/^[A-Z0-9]+:/, ''), tfSec, digits: s.prec, spreadPoints: 0 } };
-  }
-  const cr = compileNinja(s.files);
-  if (!cr.ok || !cr.js) throw err(cr.errors[0]);
-  const cls = s.cls ?? main.match(/class\s+(\w+)\s*:\s*(?:[\w.]*\.)?(Indicator|Strategy)\b/)?.[1];
-  if (!cls || !cr.classes.some(c => c.name === cls)) throw Error('No Indicator or Strategy class in this file');
-  return { kind: 'ninja', cr, cls, opts: { symbol, tfSec, tickSize: tick, pointValue: 1, initialCapital: 10000, commissionPerContract: 0 } };
-}
+export function stopAll() { running.forEach(s => s()); running.clear(); leases.clear(); engineStop() }
 
 const CHANNELS: Channel[] = ['popup', 'push', 'telegram', 'email', 'webhook'];
 export function validate(b: unknown): ForwardInput {
@@ -183,33 +178,6 @@ export function validate(b: unknown): ForwardInput {
   if (channels.some(c => !CHANNELS.includes(c))) throw bad('Bad channel');
   return { name, sym: x.sym, tf: x.tf, source, inputs: x.inputs ?? {}, qtyMult, channels: [...new Set(channels)] };
 }
-/** Only source code is accepted: anything that looks like compiled JS (`job`, `js`, `cr` anywhere) is refused. */
-function hasJsKey(v: unknown, depth = 0): boolean {
-  if (!v || typeof v !== 'object' || depth > 20) return false;
-  return Object.entries(v).some(([k, x]) => k === 'js' || k === 'cr' || k === 'job' || hasJsKey(x, depth + 1));
-}
-const LANGS = ['pine', 'mql4', 'mql5', 'ninja'];
-function validSource(b: Record<string, unknown>): ForwardSource {
-  if (hasJsKey(b)) throw bad('Send script sources, not compiled code');
-  const { lang, files, main, cls, prec = 2 } = b as Partial<ForwardSource>;
-  if (typeof lang !== 'string' || !LANGS.includes(lang)) throw bad('Bad lang');
-  if (!files || typeof files !== 'object' || Array.isArray(files)) throw bad('files required');
-  const names = Object.keys(files);
-  if (!names.length || names.length > 50) throw bad('1 to 50 files');
-  let size = 0;
-  for (const n of names) {
-    if (!/^[^\u0000-\u001f]{1,120}$/.test(n) || typeof files[n] !== 'string') throw bad(`Bad file ${n.slice(0, 40)}`);
-    size += n.length + files[n].length;
-  }
-  if (size > 1024 * 1024) throw bad('Sources larger than 1 MB');
-  if (typeof main !== 'string' || !Object.hasOwn(files, main)) throw bad('main must name one of the files');
-  if (cls != null && (typeof cls !== 'string' || !/^\w{1,100}$/.test(cls))) throw bad('Bad class name');
-  if (!Number.isInteger(prec) || prec < 0 || prec > 12) throw bad('Bad precision');
-  // Pine runs one file; keep only what the language uses.
-  const own = lang === 'pine' ? [main] : names;
-  return { lang: lang as ForwardSource['lang'], files: Object.fromEntries(own.map(n => [n, files[n]])), main, cls: cls ?? undefined, prec };
-}
-
 route('GET', '/api/forward', () => list());
 route('POST', '/api/forward', c => ({ id: create(validate(c.body)) }));
 route('DELETE', '/api/forward/:id', c => { if (!remove(c.params.id)) throw new HttpError(404, 'No such forward test') });

@@ -16,6 +16,7 @@ import { compileNinja } from './ninja/engine.ts';
 import type { NtCompileResult } from './ninja/contract.ts';
 import { showMenu } from './menu.ts';
 import { store, $, esc, toast } from './store.ts';
+import type { ScriptSource } from './alerttypes.ts';
 
 export type Lang = 'pine' | 'mql4' | 'mql5' | 'mqh' | 'ninja';
 export interface Script { id: string; name: string; src: string; updated: number; lang?: Lang }
@@ -128,6 +129,14 @@ function saveCurrent(): Script | null {
 }
 
 export const scriptById = (id: string) => scripts[id];
+/** A chart script as sources for the server (forward tests, MQL / NinjaScript alerts): the script plus every installed file of its language (#include / other classes). */
+export function sourceFor(id: string, prec: number): ScriptSource | null {
+  const s = scripts[id]; if (!s) return null;
+  const lang = langOf(s), fam = (l: Lang) => (isMql(l) ? 'mql' : l);
+  if (lang === 'mqh') return null;
+  if (lang === 'pine') return { lang, files: { 'main.pine': s.src }, main: 'main.pine', prec };
+  return { lang, files: Object.fromEntries(Object.values(scripts).filter(x => fam(langOf(x)) === fam(lang)).map(x => [x.name, x.src])), main: s.name, prec };
+}
 export const compileById = (id: string) => compileMqlScript(id);
 
 // ---------- NinjaScript (C#) compilation: every installed .cs file is compiled together ----------

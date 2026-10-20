@@ -36,7 +36,7 @@ const STYLE: Record<string, string> = { line: 'style_line', bar: 'style_histogra
 function toOutputs(r: NtResult, bars: Bar[]): Outputs {
   const out: Outputs = {
     meta: { kind: 'indicator', title: r.name, shorttitle: r.name, overlay: r.overlay },
-    inputs: [], plots: [], hlines: [], fills: [], bgcolors: r.backColors, barcolors: r.barColors, alertconditions: [], alerts: [], drawings: [],
+    inputs: [], plots: [], hlines: [], fills: [], bgcolors: r.backColors, barcolors: r.barColors, alertconditions: [], alerts: (r.alerts ?? []).map(a => ({ bar: a.bar, message: a.msg, freq: 'all' })), drawings: [],
     logs: r.logs.map(l => ({ bar: l.bar, level: 'info' as const, msg: l.msg })), warnings: r.error ? [r.error] : [],
   };
   r.plots.forEach((p, i) => {

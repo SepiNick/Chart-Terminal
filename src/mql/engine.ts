@@ -129,6 +129,8 @@ export function runMql(js: string, bars: Bar[], o: MqlRunOpts): MqlRun {
   }
 
   const out = toOutputs(env, prog, kind, o.dialect, bars, broker);
+  // Alert() calls, so server-side script alerts work for MQL like Pine's alert().
+  out.alerts = logs.filter(l => l.level === 'alert').map(l => ({ bar: l.bar, message: l.msg, freq: 'all' }));
   out.inputs = prog.inputs.map((i): ScriptInput => {
     const t = i.type.toLowerCase(), raw = o.inputs?.[i.name] ?? (i.options ? i.options.find(x => x.value === i.def)?.name ?? i.def : i.def);
     return { id: i.name, title: i.comment?.trim() || i.name, group: i.group, def: i.def as never, value: raw as never, options: i.options?.map(x => x.name),

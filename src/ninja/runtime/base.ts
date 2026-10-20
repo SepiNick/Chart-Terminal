@@ -8,7 +8,7 @@ const PERIOD_SEC: Record<string, number> = { Second: 1, Minute: 60, Day: 86400, 
 
 export class Engine {
   opts: NtRunOptions; classes: Record<string, any>; builtins: Record<string, any>; ctxs: BarsCtx[];
-  cache = new Map<string, any>(); scripts: any[] = []; logs: { bar: number; msg: string }[] = [];
+  cache = new Map<string, any>(); scripts: any[] = []; logs: { bar: number; msg: string }[] = []; alerts: { bar: number; msg: string }[] = [];
   draws = new Map<string, any>(); root: any = null; pending: BarsCtx | null = null; warned = new Set<string>();
   constructor(opts: NtRunOptions, classes: Record<string, any>, builtins: Record<string, any>) {
     this.opts = opts; this.classes = classes; this.builtins = builtins;
@@ -177,7 +177,7 @@ export class NinjaScriptBase {
   Print(v: unknown) { this.__eng.log(fmt(v)) }
   Log(msg: unknown) { this.__eng.log(fmt(msg)) }
   ClearOutputWindow() { this.__eng.logs.length = 0 }
-  Alert(_id: string, _priority: string, message: string) { this.__eng.log('Alert: ' + fmt(message)) }
+  Alert(_id: string, _priority: string, message: string) { this.__eng.log('Alert: ' + fmt(message)); this.__eng.alerts.push({ bar: this.__eng.ctxs[0].cur, msg: fmt(message) }) }
   PlaySound() { }
   RearmAlert() { }
   RemoveDrawObject(tag: string) { this.__eng.draws.delete(String(tag)) }

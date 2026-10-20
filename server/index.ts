@@ -10,6 +10,7 @@ import './notify/index.ts';
 import './alerts/index.ts';
 import './forward.ts';
 import './recorder.ts';
+import './share.ts';
 import { startLan } from './lan.ts';
 import * as cx from './ccxt.ts';
 

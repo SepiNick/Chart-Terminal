@@ -93,10 +93,16 @@ export async function handle(req: IncomingMessage, res: ServerResponse, secure: 
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY_HEADERS }).end(JSON.stringify(out));
   } catch (e) {
     const status = e instanceof HttpError ? e.status : e instanceof SyntaxError ? 400 : 502;
-    // After a 413 the rest of the body is unread: discard it and close the connection so it can't corrupt the next request.
-    const close = status === 413 ? { connection: 'close' } : {};
-    if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json', ...close, ...SECURITY_HEADERS }).end(JSON.stringify({ error: (e as Error).message }));
-    else res.end();
+    const send = () => {
+      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json', ...SECURITY_HEADERS }).end(JSON.stringify({ error: (e as Error).message }));
+      else res.end();
+    };
+    // After a 413 the rest of the body is still arriving (readBody drains it). Answer once it has, or the client gets a
+    // connection reset instead of the 413; a client that keeps sending is cut off after 5 s.
+    if (status === 413 && !req.readableEnded) {
+      const t = setTimeout(() => { res.setHeader('connection', 'close'); send(); req.destroy() }, 5000);
+      req.once('end', () => { clearTimeout(t); send() });
+    } else send();
   }
 }
 export function sameOrigin(req: IncomingMessage) {

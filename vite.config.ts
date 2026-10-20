@@ -7,6 +7,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: 'http://127.0.0.1:8787', changeOrigin: false },
       '/ws': { target: 'ws://127.0.0.1:8787', ws: true, changeOrigin: false },
+      '/s/': { target: 'http://127.0.0.1:8787', changeOrigin: false },   // shared snapshot images
     },
   },
 });
