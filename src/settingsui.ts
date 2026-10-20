@@ -136,7 +136,7 @@ async function loadRecorder() {
   $('#recDays').textContent = String(r.retentionDays ?? 30);
   const stats = r.stats ?? [], total = stats.reduce((a, s) => a + (s.approxBytes || 0), 0);
   $('#recT').innerHTML = '<tr><th>Symbol</th><th>From</th><th>To</th><th>Trades</th><th>Size</th></tr>' + (stats.map(s =>
-    `<tr><td>${esc(s.sym)}</td><td>${esc(day(s.from))}</td><td>${esc(day(s.to))}</td><td>${esc(fmtVol(s.count || 0))}</td><td>≈ ${esc(bytes(s.approxBytes))}</td></tr>`).join('') || '<tr><td class="muted" colspan="5">Nothing recorded yet</td></tr>')
+    `<tr><td>${esc(s.sym)}</td><td>${esc(day(s.from))}</td><td>${esc(day(s.to))}</td><td>${esc(s.count >= 1000 ? fmtVol(s.count) : String(s.count || 0))}</td><td>≈ ${esc(bytes(s.approxBytes))}</td></tr>`).join('') || '<tr><td class="muted" colspan="5">Nothing recorded yet</td></tr>')
     + (stats.length > 1 ? `<tr><td colspan="4" class="muted">Total</td><td>≈ ${esc(bytes(total))}</td></tr>` : '');
 }
 const bytes = (n = 0) => (n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : (n / 1024).toFixed(0) + ' KB');
