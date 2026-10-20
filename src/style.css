@@ -197,3 +197,33 @@ kbd{font:11px ui-monospace,Consolas,monospace;background:var(--bg);border:1px so
 .chip{display:inline-flex;align-items:center;gap:2px;border:1px solid var(--line);border-radius:12px;padding:1px 4px 1px 8px}
 @media (max-width:900px){#jw{grid-template-columns:1fr;grid-template-rows:auto 1fr}#jwNav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line)}#jwNav h4{display:none}.jw-notes{grid-template-columns:1fr}.jw-sess{grid-template-columns:80px 1fr}.jw-sess .jw-track,.jw-sess small{grid-column:1/-1}.jw-grid{grid-template-columns:1fr}.jw-bar{grid-template-columns:80px 1fr 80px}.jw-bar em{display:none}.jw-meter{grid-template-columns:110px 1fr 70px}}
 @media print{body>*:not(#jw){display:none!important}#jw{position:static;display:block}#jwNav,#jwHead,.jw-toolbar{display:none}}
+/* phase 5: alerts dialog, alerts panel, server settings */
+[hidden]{display:none!important}
+#alertDlg{width:min(540px,96vw)}
+.alform{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 10px;align-items:center;max-height:66vh;overflow:auto;margin-bottom:6px}
+.alform>label,.alform .lbl,.srv>label,.srv .lbl{color:var(--muted)}
+.alform input:not([type=checkbox]),.alform select,.alform textarea{width:100%;min-width:0}
+.alform .row input:not([type=checkbox]),.srv .row input:not([type=checkbox]){flex:1;min-width:0}
+.alform .al-tf{max-width:80px}.alform .row label{display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
+.alform textarea{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px;resize:vertical}
+.alform .chips button{font:11px ui-monospace,Consolas,monospace}
+.al-span{grid-column:1/-1}#alHookRows{display:flex;flex-direction:column;gap:4px}
+.al-err{min-height:1.4em;margin-bottom:6px}.al-foot{font-size:11px}
+#alertT td{white-space:normal;vertical-align:top}#alertT td:last-child{white-space:nowrap}
+.al-st{margin-top:2px}
+.pill{font-size:10px;padding:1px 6px;border-radius:8px;background:var(--line)}
+.pill.active{background:color-mix(in srgb,var(--up) 22%,transparent);color:var(--up)}.pill.stopped{background:color-mix(in srgb,var(--down) 22%,transparent);color:var(--down)}
+.al-log{border-bottom:1px solid var(--line);padding:4px 0;color:var(--text)}
+.dlv{font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid var(--line)}.dlv.ok{color:var(--up)}.dlv.bad{color:var(--down)}
+#srvBody{display:flex;flex-direction:column;gap:10px;max-height:72vh;overflow:auto;margin-bottom:10px}
+.srv{display:grid;grid-template-columns:130px minmax(0,1fr);gap:6px 10px;align-items:center;border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.srv h4{grid-column:1/-1;margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.srv .hint{grid-column:1/-1;margin:0;font-size:11px}.srv>input{width:100%;min-width:0}
+.srv .row.wrap{gap:4px 12px}.srv a{color:var(--accent)}.srv table td{white-space:nowrap}
+.st{font-size:11px}.chip-btn{margin:2px 4px 2px 0}
+.fp{font:11px ui-monospace,Consolas,monospace;word-break:break-all}
+@media (max-width:600px){
+  .alform,.srv{grid-template-columns:minmax(0,1fr)}.alform>label,.alform .lbl,.srv>label,.srv .lbl{margin-bottom:-4px}
+  dialog{padding:12px}.alform input,.alform select,.alform textarea,.srv input{font-size:16px}
+  .srv .al-span{overflow-x:auto}
+}
