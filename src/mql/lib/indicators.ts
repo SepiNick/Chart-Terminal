@@ -1,8 +1,13 @@
 // Technical indicator APIs: MQL4 (value at shift) and MQL5 (handles + CopyBuffer) over the shared Calc engine.
 import { MqlArray, type Env, type Rt } from '../contract.ts';
 import { Calc, IND, runOn } from './calc.ts';
-import { num, val, str, isTime, idxAt, setErr, DBL_MAX, type Sources } from './util.ts';
+import { num, val, str, isTime, idxAt, setErr, DBL_MAX, type Sources, type Src } from './util.ts';
 import type { MqlParam } from './structs.ts';
+
+/** What a handle / iCustom reads: builtin Calc outputs or another program's indicator buffers (engine.ts provides those). */
+export interface Feed { update(): number; at(buf: number, i: number, n: number): number; nbuf: number; src: Src; shift(buf: number): number }
+/** rt.__custom(name, symbol, timeframe, inputs): run another installed indicator file; null when none has that name. */
+export type CustomFactory = (name: string, sym: unknown, tf: unknown, params: unknown[]) => Feed | null;
 
 export function installIndicators(rt: Rt, env: Env, srcs: Sources) {
   const m4 = env.dialect === 'mql4';
@@ -14,6 +19,17 @@ export function installIndicators(rt: Rt, env: Env, srcs: Sources) {
     let c = cache.get(key);
     if (!c) { c = new Calc(IND[name](...ps), srcs(sym, tf), ap); cache.set(key, c) }
     return c;
+  };
+  // iCustom: one program run per (name, symbol, timeframe, inputs), shared by the MQL4 and MQL5 forms.
+  const customs = new Map<string, Feed | null>();
+  const custom = (name: unknown, sym: unknown, tf: unknown, params: unknown[]): Feed | null => {
+    const key = `${str(name)}|${str(sym)}|${num(tf)}|${JSON.stringify(params.map(val))}`;
+    if (!customs.has(key)) {
+      const f = (rt.__custom as CustomFactory | undefined)?.(str(name), sym, tf, params.map(val)) ?? null;
+      if (!f) warn('ic' + str(name), `iCustom("${str(name)}"): no installed indicator with that name`);
+      customs.set(key, f);
+    }
+    return customs.get(key)!;
   };
 
   if (m4) {
@@ -46,7 +62,16 @@ export function installIndicators(rt: Rt, env: Env, srcs: Sources) {
       iFractals: (s: A, tf: A, mode: A, sh: A) => v(calc('fractals', [], s, tf), num(mode) === 2 ? 1 : 0, sh),
       iIchimoku: (s: A, tf: A, t: A, k: A, sn: A, mode: A, sh: A) => v(calc('ichi', [t, k, sn], s, tf), Math.max(0, num(mode) - 1), sh),
       iRVI: (s: A, tf: A, p: A, mode: A, sh: A) => v(calc('rvi', [p], s, tf), num(mode) ? 1 : 0, sh),
-      iCustom: (_s: A, _tf: A, name: A) => { warn('ic' + str(name), `iCustom("${str(name)}"): custom indicators from other files are not supported yet; returning 0`); return 0 },
+      iAD: (s: A, tf: A, sh: A) => v(calc('ad', [], s, tf), 0, sh),
+      iChaikin: (s: A, tf: A, f: A, sl: A, m: A, sh: A) => v(calc('chaikin', [f, sl, m], s, tf), 0, sh),
+      iBWMFI: (s: A, tf: A, sh: A) => v(calc('bwmfi', [], s, tf), 0, sh),
+      iGator: (s: A, tf: A, jp: A, js: A, tp: A, ts: A, lp: A, ls: A, m: A, ap: A, mode: A, sh: A) => v(calc('gatorosc', [jp, js, tp, ts, lp, ls, m], s, tf, num(ap)), num(mode) === 2 ? 2 : 0, sh),
+      // iCustom(symbol, timeframe, name, inputs..., mode, shift): buffer `mode` of the other program, `shift` bars back.
+      iCustom: (s: A, tf: A, name: A, ...rest: A[]) => {
+        const f = custom(name, s, tf, rest.slice(0, -2)); if (!f) return 0;
+        const n = f.update(), x = f.at(num(rest.at(-2)), n - num(rest.at(-1)), n);
+        return Number.isNaN(x) ? 0 : x;
+      },
     });
     // *OnArray: the array is read with its logical indexing; shift i = logical element i (newest first for series).
     const onArr = (spec: string, p: unknown[], a: MqlArray<number>, total: unknown, k: number, shift: unknown) => {
@@ -69,13 +94,22 @@ export function installIndicators(rt: Rt, env: Env, srcs: Sources) {
   }
 
   // ---- MQL5: handles ----
-  const handles = new Map<number, { c: Calc; map: number[] }>(), byKey = new Map<string, number>();
+  const handles = new Map<number, Feed>(), byKey = new Map<string, number>();
   let nextH = 10;
   const ap5 = (x: unknown) => { const v = num(x); return v >= 1 && v <= 7 ? v - 1 : 0 };
-  const mk = (name: string, p: unknown[], sym: unknown, tf: unknown, ap: number, map: number[]) => {
-    const c = calc(name, p, sym, tf, ap), key = `${name}|${p.map(num).join(',')}|${str(sym)}|${num(tf)}|${ap}`;
+  const reg = (key: string, f: () => Feed) => {
     const old = byKey.get(key); if (old != null && handles.has(old)) return old;
-    const h = nextH++; handles.set(h, { c, map }); byKey.set(key, h); return h;
+    const h = nextH++; handles.set(h, f()); byKey.set(key, h); return h;
+  };
+  const mk = (name: string, p: unknown[], sym: unknown, tf: unknown, ap: number, map: number[]) =>
+    reg(`${name}|${p.map(num).join(',')}|${str(sym)}|${num(tf)}|${ap}`, () => {
+      const c = calc(name, p, sym, tf, ap);
+      return { update: () => c.update(), at: (b, i, n) => c.at(map[b], i, n), nbuf: map.length, src: c.src, shift: b => c.spec.shift?.[map[b]] ?? 0 };
+    });
+  const mkCustom = (s: unknown, tf: unknown, name: unknown, params: unknown[]) => {
+    const f = custom(name, s, tf, params);
+    if (!f) { setErr(rt, 4802); return -1 }
+    return reg(`custom|${str(name)}|${str(s)}|${num(tf)}|${JSON.stringify(params.map(val))}`, () => f);
   };
   type A = unknown;
   const L1 = [0], L2 = [0, 1], L3 = [0, 1, 2];
@@ -114,39 +148,43 @@ export function installIndicators(rt: Rt, env: Env, srcs: Sources) {
     iFrAMA: (s, tf, p, sh, ap) => mk('frama', [p, sh], s, tf, ap5(ap), L1),
     iVIDyA: (s, tf, cmo, ema, sh, ap) => mk('vidya', [cmo, ema, sh], s, tf, ap5(ap), L1),
     iTriX: (s, tf, p, ap) => mk('trix', [p], s, tf, ap5(ap), L1),
-    iCustom: (_s, _tf, name) => { warn('ic' + str(name), `iCustom("${str(name)}"): custom indicators from other files are not supported yet; INVALID_HANDLE`); setErr(rt, 4802); return -1 },
+    iAD: (s, tf) => mk('ad', [], s, tf, 0, L1),
+    iChaikin: (s, tf, f, sl, m) => mk('chaikin', [f, sl, m], s, tf, 0, L1),
+    iBWMFI: (s, tf) => mk('bwmfi', [], s, tf, 0, L2),
+    iGator: (s, tf, jp, js, tp, ts, lp, ls, m, ap) => mk('gatorosc', [jp, js, tp, ts, lp, ls, m], s, tf, ap5(ap), [0, 1, 2, 3]),
+    iCustom: (s, tf, name, ...params) => mkCustom(s, tf, name, params),
   };
   Object.assign(rt, fns);
-  const IND_FN: Record<string, string> = { AC: 'iAC', ADX: 'iADX', ADXW: 'iADXWilder', ALLIGATOR: 'iAlligator', AMA: 'iAMA', AO: 'iAO', ATR: 'iATR', BANDS: 'iBands', BEARS: 'iBearsPower', BULLS: 'iBullsPower', CCI: 'iCCI', DEMA: 'iDEMA', DEMARKER: 'iDeMarker', ENVELOPES: 'iEnvelopes', FORCE: 'iForce', FRACTALS: 'iFractals', FRAMA: 'iFrAMA', ICHIMOKU: 'iIchimoku', MA: 'iMA', MACD: 'iMACD', MFI: 'iMFI', MOMENTUM: 'iMomentum', OBV: 'iOBV', OSMA: 'iOsMA', RSI: 'iRSI', RVI: 'iRVI', SAR: 'iSAR', STDDEV: 'iStdDev', STOCHASTIC: 'iStochastic', TEMA: 'iTEMA', TRIX: 'iTriX', VIDYA: 'iVIDyA', VOLUMES: 'iVolumes', WPR: 'iWPR' };
+  const IND_FN: Record<string, string> = { AC: 'iAC', AD: 'iAD', ADX: 'iADX', ADXW: 'iADXWilder', ALLIGATOR: 'iAlligator', AMA: 'iAMA', AO: 'iAO', ATR: 'iATR', BANDS: 'iBands', BEARS: 'iBearsPower', BULLS: 'iBullsPower', BWMFI: 'iBWMFI', CCI: 'iCCI', CHAIKIN: 'iChaikin', DEMA: 'iDEMA', DEMARKER: 'iDeMarker', ENVELOPES: 'iEnvelopes', FORCE: 'iForce', FRACTALS: 'iFractals', FRAMA: 'iFrAMA', GATOR: 'iGator', ICHIMOKU: 'iIchimoku', MA: 'iMA', MACD: 'iMACD', MFI: 'iMFI', MOMENTUM: 'iMomentum', OBV: 'iOBV', OSMA: 'iOsMA', RSI: 'iRSI', RVI: 'iRVI', SAR: 'iSAR', STDDEV: 'iStdDev', STOCHASTIC: 'iStochastic', TEMA: 'iTEMA', TRIX: 'iTriX', VIDYA: 'iVIDyA', VOLUMES: 'iVolumes', WPR: 'iWPR' };
 
   Object.assign(rt, {
     IndicatorCreate: (s: A, tf: A, type: A, cnt: A, params?: MqlArray<MqlParam>) => {
       const name = Object.keys(rt).find(k => k.startsWith('IND_') && rt[k] === num(type))?.slice(4) ?? '';
-      const f = fns[IND_FN[name]];
-      if (!f || name === 'CUSTOM') { warn('ind' + name, `IndicatorCreate(IND_${name}) is not supported`); return -1 }
+      const f = name === 'CUSTOM' ? fns.iCustom : fns[IND_FN[name]];
+      if (!f) { warn('ind' + name, `IndicatorCreate(IND_${name}) is not supported`); return -1 }
       const ps: unknown[] = [];
       for (let i = 0; i < Math.min(num(cnt), params?.size ?? 0); i++) {
         const p = params!.get(i);
-        ps.push(p.type === rt.TYPE_DOUBLE || p.type === rt.TYPE_FLOAT ? p.double_value : p.type === rt.TYPE_STRING ? p.string_value : p.integer_value);
+        ps.push(p.type === rt.TYPE_DOUBLE || p.type === rt.TYPE_FLOAT ? p.double_value : p.type === rt.TYPE_STRING || (name === 'CUSTOM' && i === 0) ? p.string_value : p.integer_value);
       }
       return f(s, tf, ...ps);
     },
     IndicatorRelease: (h: A) => handles.delete(num(h)),
-    BarsCalculated: (h: A) => { const H = handles.get(num(h)); return H ? H.c.update() + 1 : -1 },
+    BarsCalculated: (h: A) => { const H = handles.get(num(h)); return H ? H.update() + 1 : -1 },
     CopyBuffer: (h: A, buf: A, start: A, count: A, out: MqlArray<number>) => {
       const H = handles.get(num(h)), b = num(buf);
       if (!H) { setErr(rt, 4807); return -1 }
-      if (b < 0 || b >= H.map.length) { setErr(rt, 4602); return -1 }
-      const k = H.map[b], c = H.c, n = c.update(), s = c.src, st = val(start), ct = val(count);
+      if (b < 0 || b >= H.nbuf) { setErr(rt, 4602); return -1 }
+      const n = H.update(), s = H.src, st = val(start), ct = val(count);
       let lo: number, hi: number;
       if (isTime(st)) {
         if (isTime(ct)) { const a = Math.min(num(st), num(ct)), z = Math.max(num(st), num(ct)); hi = idxAt(s, z); lo = idxAt(s, a - 1) + 1 }
         else { hi = idxAt(s, num(st)); lo = hi - num(ct) + 1 }
       } else { hi = n - num(st); lo = hi - num(ct) + 1 }
-      hi = Math.min(hi, n + Math.max(0, c.spec.shift?.[k] ?? 0)); lo = Math.max(0, lo);
+      hi = Math.min(hi, n + Math.max(0, H.shift(b))); lo = Math.max(0, lo);
       if (hi < lo || n < 0) { setErr(rt, 4806); return -1 }
       const vals: number[] = [];
-      for (let i = lo; i <= hi; i++) { const x = c.at(k, i, n); vals.push(Number.isNaN(x) ? DBL_MAX : x) }
+      for (let i = lo; i <= hi; i++) { const x = H.at(b, i, n); vals.push(Number.isNaN(x) ? DBL_MAX : x) }
       return fillOut(out, vals);
     },
   });

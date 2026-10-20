@@ -24,7 +24,11 @@ const money = (x: number) => Math.round(x * 100) / 100;
 const lots = (x: number) => +x.toFixed(8);
 const eod = (t: number) => Math.floor(t / 86400) * 86400 + 86400;
 interface Tick { bid: number; ask: number; time: number }
-interface Opts { sl?: number; tp?: number; magic?: number; comment?: string; order: number; reason: number; target?: Pos; noComm?: boolean; entryCode?: number }
+interface Opts { sl?: number; tp?: number; magic?: number; comment?: string; order: number; reason: number; target?: Pos; noComm?: boolean; entryCode?: number; swap?: number }
+/** ENUM_TRADE_TRANSACTION_TYPE */
+export const TX = { ORDER_ADD: 0, ORDER_UPDATE: 1, ORDER_DELETE: 2, HISTORY_ADD: 3, HISTORY_UPDATE: 4, HISTORY_DELETE: 5, DEAL_ADD: 6, DEAL_UPDATE: 7, DEAL_DELETE: 8, POSITION: 9, REQUEST: 10 };
+/** One trade transaction for OnTradeTransaction (MqlTradeTransaction fields; request/result only on TRADE_TRANSACTION_REQUEST). */
+export interface Tx { trans: Record<string, number | string>; req?: Partial<TradeReq>; res?: TradeRes }
 
 export class MtBroker implements BrokerView {
   env: BrokerEnv;
@@ -37,6 +41,9 @@ export class MtBroker implements BrokerView {
   history4: Closed4[] = [];    // MQL4 account history
   stopOutLevel = 50;
   marginCallLevel = 100;
+  /** Trade transactions waiting for OnTradeTransaction/OnTrade; null = nobody listens (nothing is recorded). */
+  txq: Tx[] | null = null;
+  private told = new Set<number>();
   private bal: number;
   private tick?: Tick;
   private nOrd = 1;
@@ -110,8 +117,28 @@ export class MtBroker implements BrokerView {
   }
   private same(a: number, b: number) { return Math.abs(a - b) <= this.tol }
 
+  // ---------- trade transactions ----------
+  private tx(type: number, x: Record<string, number | string>) { this.txq?.push({ trans: { symbol: this.env.symbol, type, ...x } }) }
+  private txOrder(type: number, o: Ord) {
+    if (!this.txq) return;
+    this.tx(type, { order: o.ticket, order_type: o.code, order_state: o.state, price: o.price, price_trigger: o.stopLimit, price_sl: o.sl, price_tp: o.tp,
+      volume: o.volume || o.volumeInit, position: o.positionId, position_by: o.positionBy, time_type: o.typeTime, time_expiration: o.expiration });
+  }
+  /** Order moved to history: ORDER_DELETE + HISTORY_ADD, once per order. */
+  private txDone(o: Ord) {
+    if (!this.txq || this.told.has(o.ticket)) return;
+    this.told.add(o.ticket);
+    this.txOrder(TX.ORDER_DELETE, o);
+    if (!this.mql4) this.txOrder(TX.HISTORY_ADD, o);
+  }
+
   // ---------- trade requests (MqlTradeRequest semantics; dry = OrderCheck) ----------
   send(r: Partial<TradeReq>, dry = false): TradeRes {
+    const res = this.request(r, dry);
+    if (!dry) this.txq?.push({ trans: { symbol: r.symbol || this.env.symbol, type: TX.REQUEST }, req: { ...r }, res: { ...res } });
+    return res;
+  }
+  private request(r: Partial<TradeReq>, dry: boolean): TradeRes {
     const eq = this.equity();
     const res: TradeRes = { retcode: 0, deal: 0, order: 0, volume: 0, price: 0, bid: this.bid, ask: this.ask, comment: '', request_id: 0, retcode_external: 0,
       balance: this.bal, equity: eq, profit: this.profit(), margin: this.margin(), margin_free: this.freeMargin(), margin_level: this.marginLevel() };
@@ -159,6 +186,7 @@ export class MtBroker implements BrokerView {
         const o: Ord = { ticket: this.nOrd++, code: type, type: ORDER_NAMES[type], volume: vol, volumeInit: vol, price, stopLimit: sp, sl, tp, time: this.now, timeDone: 0,
           expiration: exp, typeTime: tt, filling: r.type_filling ?? 0, state: ST.PLACED, magic: r.magic ?? 0, comment: r.comment ?? '', symbol: sym, positionId: 0, positionBy: 0, reason: RS.EXPERT };
         this.orders.push(o);
+        this.txOrder(TX.ORDER_ADD, o);
         Object.assign(res, { order: o.ticket, volume: vol, price });
         return ok();
       }
@@ -169,6 +197,7 @@ export class MtBroker implements BrokerView {
         if (this.badStops(p.type, this.closePrice(p), sl, tp)) return fail(RC.INVALID_STOPS);
         if (dry) return ok();
         p.sl = sl; p.tp = tp; p.timeUpdate = this.now;
+        this.tx(TX.POSITION, { position: p.identifier, price: p.price, price_sl: sl, price_tp: tp, volume: p.volume });
         return ok();
       }
       case 7: { // TRADE_ACTION_MODIFY
@@ -182,6 +211,7 @@ export class MtBroker implements BrokerView {
         if (bad) return fail(bad);
         if (dry) return ok();
         Object.assign(o, { price, stopLimit: sp, sl, tp, typeTime: tt, expiration: exp });
+        this.txOrder(TX.ORDER_UPDATE, o);
         res.order = o.ticket;
         return ok();
       }
@@ -217,13 +247,20 @@ export class MtBroker implements BrokerView {
       expiration: 0, typeTime: 0, filling: r.type_filling ?? 0, state: ST.FILLED, magic: r.magic ?? 0, comment: r.comment ?? '', symbol: this.env.symbol,
       positionId: posId ?? t, positionBy: r.position_by ?? 0, reason };
     if (!this.mql4) this.historyOrders.push(o);
+    this.txOrder(TX.ORDER_ADD, o);
     return o;
   }
   private addDeal(side: Side, entryCode: number, vol: number, px: number, profit: number, comm: number, o: Opts, position: number): Deal {
-    this.bal = money(this.bal + profit + comm);
+    const swap = o.swap ?? 0;
+    this.bal = money(this.bal + profit + comm + swap);
     const d: Deal = { ticket: this.nDeal++, order: o.order, position, time: this.now, type: side, entry: ENTRY[entryCode], entryCode, volume: vol, price: px,
-      profit, commission: comm, swap: 0, magic: o.magic ?? 0, comment: o.comment ?? '', symbol: this.env.symbol, reason: o.reason };
+      profit, commission: comm, swap, magic: o.magic ?? 0, comment: o.comment ?? '', symbol: this.env.symbol, reason: o.reason };
     this.deals.push(d);
+    if (this.txq) {
+      this.tx(TX.DEAL_ADD, { deal: d.ticket, order: d.order, deal_type: side === 'buy' ? 0 : 1, price: px, volume: vol, position });
+      const ho = this.historyOrders.find(x => x.ticket === d.order);
+      if (ho) this.txDone(ho);
+    }
     return d;
   }
   /** Fill a deal: opens a position, adds to / reduces / reverses the netting position, or closes `target` (hedging). */
@@ -231,9 +268,9 @@ export class MtBroker implements BrokerView {
     const t = o.target, comm = this.commission(vol);
     if (t && t.type !== side) {
       if (this.hedging || vol <= t.volume + EPS) return this.closePos(t, Math.min(vol, t.volume), px, o);
-      const profit = this.pnl(t.type, t.volume, t.price, px), rest = lots(vol - t.volume); // netting reversal: one in/out deal
-      Object.assign(t, { type: side, volume: rest, price: px, time: this.now, timeUpdate: this.now, sl: o.sl ?? 0, tp: o.tp ?? 0, commission: money(comm * rest / vol) });
-      return this.addDeal(side, 2, vol, px, profit, comm, o, t.identifier);
+      const profit = this.pnl(t.type, t.volume, t.price, px), rest = lots(vol - t.volume), swap = t.swap; // netting reversal: one in/out deal
+      Object.assign(t, { type: side, volume: rest, price: px, time: this.now, timeUpdate: this.now, sl: o.sl ?? 0, tp: o.tp ?? 0, commission: money(comm * rest / vol), swap: 0 });
+      return this.addDeal(side, 2, vol, px, profit, comm, { ...o, swap }, t.identifier);
     }
     if (t) { // netting: add to position
       const v = lots(t.volume + vol);
@@ -250,15 +287,16 @@ export class MtBroker implements BrokerView {
   private closePos(p: Pos, vol: number, px: number, o: Opts): Deal {
     const profit = this.pnl(p.type, vol, p.price, px), comm = o.noComm ? 0 : this.commission(vol);
     const full = vol >= p.volume - EPS, part = full ? p.commission : money(p.commission * vol / p.volume), tag = TAG[o.reason] ?? '';
+    const swap = full ? p.swap : money(p.swap * vol / p.volume);
     if (this.mql4) {
       const nt = full ? 0 : this.nOrd++;
       this.history4.push({ ticket: p.ticket, code: p.type === 'buy' ? 0 : 1, volume: vol, price: p.price, time: p.time, closePrice: px, closeTime: this.now, sl: p.sl, tp: p.tp,
-        profit, commission: money(part + comm), swap: p.swap, magic: p.magic, comment: full ? p.comment + tag : `to #${nt}`, expiration: 0, symbol: p.symbol });
+        profit, commission: money(part + comm), swap, magic: p.magic, comment: full ? p.comment + tag : `to #${nt}`, expiration: 0, symbol: p.symbol });
       if (nt) { p.comment = `from #${p.ticket}`; p.ticket = nt }
     }
     if (full) this.positions.splice(this.positions.indexOf(p), 1);
-    else Object.assign(p, { volume: lots(p.volume - vol), commission: money(p.commission - part), timeUpdate: this.now });
-    return this.addDeal(p.type === 'buy' ? 'sell' : 'buy', o.entryCode ?? 1, vol, px, profit, comm, { ...o, magic: o.magic ?? p.magic, comment: o.comment || tag }, p.identifier);
+    else Object.assign(p, { volume: lots(p.volume - vol), commission: money(p.commission - part), swap: money(p.swap - swap), timeUpdate: this.now });
+    return this.addDeal(p.type === 'buy' ? 'sell' : 'buy', o.entryCode ?? 1, vol, px, profit, comm, { ...o, magic: o.magic ?? p.magic, comment: o.comment || tag, swap }, p.identifier);
   }
   private closeAuto(p: Pos, px: number, reason: number) {
     const order = this.mql4 ? 0 : this.mkOrder(p.type === 'buy' ? 1 : 0, p.volume, px, { magic: p.magic, comment: TAG[reason] }, p.identifier, reason).ticket;
@@ -267,6 +305,7 @@ export class MtBroker implements BrokerView {
   private finishOrder(o: Ord, state: number) {
     this.orders.splice(this.orders.indexOf(o), 1);
     o.state = state; o.timeDone = this.now;
+    this.txDone(o);
     if (!this.mql4) { this.historyOrders.push(o); return }
     this.history4.push({ ticket: o.ticket, code: o.code, volume: o.volume, price: o.price, time: o.time, closePrice: sideOf(o.code) === 'buy' ? this.bid : this.ask, closeTime: this.now,
       sl: o.sl, tp: o.tp, profit: 0, commission: 0, swap: 0, magic: o.magic, comment: state === ST.EXPIRED ? o.comment + '[expiration]' : o.comment, expiration: o.expiration, symbol: o.symbol });
@@ -288,6 +327,7 @@ export class MtBroker implements BrokerView {
     // Ticks inside one bar form a continuous path (fill at the level); a new bar / first tick is a gap (fill at market).
     const tf = this.env.tfSec ?? 0, cont = !!prev && (!tf || Math.floor(prev.time / tf) === Math.floor(time / tf));
     const at = (lvl: number, from: number, to: number) => (cont && (lvl - from) * (lvl - to) <= 0 ? lvl : to);
+    if (prev) this.rollover(prev.time, time);
     for (const o of [...this.orders]) if (o.expiration && time >= o.expiration) this.finishOrder(o, ST.EXPIRED);
     for (const o of [...this.orders]) {
       const buy = o.code % 2 === 0, cur = buy ? ask : bid, from = prev ? (buy ? prev.ask : prev.bid) : cur;
@@ -295,6 +335,7 @@ export class MtBroker implements BrokerView {
         if (!(buy ? cur >= o.price : cur <= o.price)) continue;
         Object.assign(o, { code: o.code - 4, price: o.stopLimit });
         o.type = ORDER_NAMES[o.code];
+        this.txOrder(TX.ORDER_UPDATE, o);
       }
       const limit = o.code <= 3;
       if (limit ? (buy ? cur <= o.price : cur >= o.price) : (buy ? cur >= o.price : cur <= o.price)) this.activate(o, at(o.price, from, cur));
@@ -305,6 +346,19 @@ export class MtBroker implements BrokerView {
       else if (p.tp > 0 && (buy ? cur >= p.tp : cur <= p.tp)) this.closeAuto(p, at(p.tp, from, cur), RS.TP);
     }
     this.stopOut();
+  }
+  /** Daily rollover at 00:00 server time for every midnight in (from, to]: swap points × point × contract size × lots on positions
+   *  open before it, none for the nights after Saturday/Sunday, triple for the night after the swap3Day weekday (Wednesday). */
+  private rollover(from: number, to: number) {
+    const a = this.acct;
+    if ((!a.swapLong && !a.swapShort) || !this.positions.length) return;
+    for (let d = Math.floor(from / 86400) + 1; d <= Math.floor(to / 86400); d++) {
+      const ended = new Date((d - 1) * 86400000).getUTCDay();
+      if (ended === 0 || ended === 6) continue;
+      const k = ended === (a.swap3Day ?? 3) ? 3 : 1;
+      for (const p of this.positions) if (p.time < d * 86400)
+        p.swap = money(p.swap + k * (p.type === 'buy' ? a.swapLong ?? 0 : a.swapShort ?? 0) * this.env.point * a.contractSize * p.volume);
+    }
   }
   /** Close the worst position while margin level ≤ stop-out level. */
   private stopOut() {

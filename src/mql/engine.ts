@@ -5,16 +5,39 @@ import type { Bar } from '../data.ts';
 import { MqlArray, MqlError, type CompiledProgram, type Env, type BrokerView, type ChartObject, type PlotProps, type Dialect, type CompileResult, type Rt } from './contract.ts';
 import { compile, instantiate } from './compiler/index.ts';
 import { installStd, STD_OUT_PARAMS, STD_STRUCTS, STD_CLASSES, NATIVE_INCLUDES } from './lib/index.ts';
-import { installTrade, TRADE_OUT_PARAMS, TRADE_STRUCTS, TRADE_CLASSES, TRADE_INCLUDES } from './trade/index.ts';
+import { installTrade, MtBroker, TRADE_OUT_PARAMS, TRADE_STRUCTS, TRADE_CLASSES, TRADE_INCLUDES } from './trade/index.ts';
+import { MqlTradeRequest, MqlTradeResult, MqlTradeTransaction, copyResult } from './trade/mql5.ts';
+import { sources, tfToSec } from './lib/util.ts';
+import type { CustomFactory, Feed } from './lib/indicators.ts';
 import type { Outputs, Plot, Drawing2, ScriptInput } from '../pine/interp.ts';
 import type { Trade } from '../pine/strategy.ts';
 
-export function compileMql(mainPath: string, files: Record<string, string>): CompileResult {
-  return compile(mainPath, files, {
+/** iCustom / file name → lookup key: last path segment, no extension, case-insensitive ("Examples\\MACD.ex5" → "macd"). */
+const customKey = (s: string) => s.split(/[\\/]+/).pop()!.replace(/\.(mq[45]|ex[45])$/i, '').toLowerCase();
+
+/**
+ * Compile `mainPath`. Every other installed .mq4/.mq5 file whose name appears as a string literal in the program's
+ * sources (main file + .mqh) is compiled too and embedded as rt.__customs, so iCustom/IndicatorCreate(IND_CUSTOM) can run it
+ * from the same plain-data job (`js`) in the browser, the tester worker and the server.
+ */
+export function compileMql(mainPath: string, files: Record<string, string>, stack: string[] = []): CompileResult {
+  const r = compile(mainPath, files, {
     outParams: { ...STD_OUT_PARAMS, ...TRADE_OUT_PARAMS },
     builtinStructs: [...STD_STRUCTS, ...TRADE_STRUCTS], builtinClasses: [...STD_CLASSES, ...TRADE_CLASSES],
     nativeIncludes: [...NATIVE_INCLUDES, ...TRADE_INCLUDES],
   });
+  if (!r.ok || !r.js) return r;
+  const lits = new Set<string>();
+  for (const [k, src] of Object.entries(files)) if (k === mainPath || /\.mqh$/i.test(k)) for (const m of src.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)) lits.add(customKey(m[1]));
+  const customs: Record<string, { js: string; dialect: Dialect }> = {};
+  for (const k of Object.keys(files)) {
+    const n = customKey(k);
+    if (!/\.mq[45]$/i.test(k) || k === mainPath || !lits.has(n) || customs[n] || stack.includes(k)) continue;
+    const c = compileMql(k, files, [...stack, mainPath]);
+    if (c.ok && c.js) customs[n] = { js: c.js, dialect: c.dialect };
+  }
+  if (Object.keys(customs).length) r.js = r.js.replace("'use strict';", () => `'use strict';\nrt.__customs = ${JSON.stringify(customs)};`);
+  return r;
 }
 
 export type MqlKind = 'expert' | 'indicator' | 'script';
@@ -27,6 +50,8 @@ export interface MqlRunOpts {
 export interface MqlRun {
   kind: MqlKind; out: Outputs; logs: { level: string; msg: string; bar: number }[];
   broker?: BrokerView; equity: number[]; initialBalance: number; error?: string; ms: number;
+  /** The run's sandboxed files (FileOpen/FileWrite), by lower-case name. */
+  files: Map<string, string>;
 }
 
 const EMPTY = 1.7976931348623157e308, EMPTY4 = 2147483647;   // EMPTY_VALUE: DBL_MAX in MQL5, INT_MAX in MQL4
@@ -77,11 +102,12 @@ export function runMql(js: string, bars: Bar[], o: MqlRunOpts): MqlRun {
     now: () => view[cur]?.time ?? 0, barsFor: (s, tf) => (o.barsFor?.(s, tf) ?? []),
     log: (level, msg) => { if (logs.length < 2000) logs.push({ level, msg, bar: cur }) },
     objects: new Map<string, ChartObject>(), buffers: new Map(), plots: new Map<number, PlotProps>(),
-    indicator: { levels: [] }, stop: () => { stopped = true }, account,
+    indicator: { levels: [] }, stop: () => { stopped = true }, account, files: new Map(),
   };
   const rt: Rt = {};
   installStd(rt, env);
   installTrade(rt, env);
+  wireCustom(rt, env);
   const prog = instantiate(js, rt);
   for (const [k, v] of Object.entries(o.inputs ?? {})) {
     const def = prog.inputs.find(i => i.name === k);
@@ -114,6 +140,17 @@ export function runMql(js: string, bars: Bar[], o: MqlRunOpts): MqlRun {
   }
   function runExpert() {
     const model = o.model ?? 'ohlc', spread = o.spreadPoints * point;
+    const mb = broker as MtBroker;
+    if (o.dialect === 'mql5' && (h.OnTrade || h.OnTradeTransaction)) mb.txq = [];
+    // Trade events are delivered between ticks, like the terminal's event queue: every transaction, then one OnTrade.
+    const drain = () => {
+      for (let guard = 0; mb.txq?.length && guard < 100; guard++) {
+        const q = mb.txq.splice(0);
+        if (h.OnTradeTransaction) for (const t of q)
+          call('OnTradeTransaction', Object.assign(new MqlTradeTransaction(), t.trans), Object.assign(new MqlTradeRequest(), t.req ?? {}), t.res ? copyResult(new MqlTradeResult(), t.res) : new MqlTradeResult());
+        call('OnTrade');
+      }
+    };
     for (let i = 0; i < n && !stopped; i++) {
       const b = bars[i];
       const ticks = model === 'open' ? [b.open] : model === 'close' ? [b.close] : b.close >= b.open ? [b.open, b.low, b.high, b.close] : [b.open, b.high, b.low, b.close];
@@ -122,7 +159,9 @@ export function runMql(js: string, bars: Bar[], o: MqlRunOpts): MqlRun {
         if (stopped) return;
         price = p; reveal(i, p, k === 0);
         broker.onTick(p, p + spread, b.time);
+        drain();
         call('OnTick') ?? call('start');
+        drain();
       });
       equity[i] = broker.equity();
     }
@@ -136,7 +175,69 @@ export function runMql(js: string, bars: Bar[], o: MqlRunOpts): MqlRun {
     return { id: i.name, title: i.comment?.trim() || i.name, group: i.group, def: i.def as never, value: raw as never, options: i.options?.map(x => x.name),
       type: i.options ? 'string' : t === 'bool' ? 'bool' : t === 'string' ? 'string' : t === 'color' ? 'color' : /int|long|short|char|datetime/.test(t) ? 'int' : 'float' };
   });
-  return { kind, out, logs, broker: kind === 'expert' ? broker : undefined, equity, initialBalance: account.balance, error, ms: performance.now() - t0 };
+  return { kind, out, logs, broker: kind === 'expert' ? broker : undefined, equity, initialBalance: account.balance, error, ms: performance.now() - t0, files: env.files! };
+}
+
+/** rt.__custom for iCustom: look the name up in the embedded rt.__customs and run that program as an indicator. */
+function wireCustom(rt: Rt, env: Env) {
+  rt.__custom = ((name, sym, tf, params) => {
+    const c = (rt.__customs as Record<string, { js: string; dialect: Dialect }> | undefined)?.[customKey(name)];
+    return c ? customFeed(c.js, c.dialect, env, sym, tf, params) : null;
+  }) satisfies CustomFactory;
+}
+
+/**
+ * Run a compiled indicator incrementally on the caller's bars, the way the terminal does: OnCalculate (or start() with
+ * IndicatorCounted) is called again whenever the caller's tick moved, with prev_calculated, so the forming bar only ever
+ * sees ticks so far. Buffers are read by index (chronological data), as iCustom modes / CopyBuffer buffer numbers.
+ */
+function customFeed(js: string, dialect: Dialect, penv: Env, sym: unknown, tf: unknown, params: unknown[]): Feed {
+  const src = sources(penv)(sym, tf), cb: Bar[] = [];
+  let cur = -1, prev = 0, total = 0, last = '', failed = false;
+  const env: Env = {
+    ...penv, dialect, bars: cb, cur: () => cur, price: () => cb[cur]?.close ?? 0, now: () => cb[cur]?.time ?? 0,
+    symbol: !sym || sym === '0' ? penv.symbol : String(sym), tfSec: tfToSec(penv, tf),
+    objects: new Map(), buffers: new Map(), plots: new Map(), indicator: { levels: [] }, stop: () => {},
+  };
+  const rt: Rt = {};
+  installStd(rt, env); installTrade(rt, env); wireCustom(rt, env);
+  const fail = (e: unknown) => { if (!failed) penv.log('error', `iCustom: ${e instanceof Error ? e.message : String(e)}`); failed = true };
+  let prog: CompiledProgram | null = null;
+  try {
+    prog = instantiate(js, rt);
+    params.forEach((v, k) => { const d = prog!.inputs[k]; if (d) prog!.setInput(d.name, v) });
+    const init = (prog.handlers.OnInit ?? prog.handlers.init)?.();
+    if (typeof init === 'number' && init !== 0) throw new MqlError(`OnInit failed with code ${init}`);
+  } catch (e) { fail(e) }
+  const empty = dialect === 'mql4' ? EMPTY4 : EMPTY, series = dialect === 'mql4';
+  const cols = ['time', 'open', 'high', 'low', 'close', 'volume', 'volume', 'spread'] as const;
+  const arrs = cols.map(() => { const a = new MqlArray<number>(0); a.series = series; return a });
+  const update = () => {
+    const n = src.cur(), key = `${n}|${penv.now()}|${penv.price()}`;
+    if (key === last || n < 0 || failed || !prog) return n;
+    last = key;
+    for (let i = Math.max(0, total - 1); i <= n; i++) {
+      const b = { ...src.bar(i) };
+      cb[i] = b;
+      cols.forEach((c, k) => { arrs[k].data[i] = c === 'spread' ? penv.spreadPoints : b[c] });
+    }
+    cb.length = n + 1; cur = n;
+    for (const a of arrs) a.data.length = n + 1;
+    for (const { arr } of env.buffers.values()) { if (series) arr.series = true; while (arr.data.length < n + 1) arr.data.push(empty as never) }
+    try {
+      const h = prog.handlers, oc = h.OnCalculate;
+      if (oc) {
+        const r = oc.length <= 4 ? oc(n + 1, prev, 0, arrs[4]) : oc(n + 1, prev, ...arrs);
+        prev = typeof r === 'number' ? r : n + 1;
+      } else { rt.__counted = total ? total - 1 : 0; (h.start ?? h.OnStart)?.() }
+    } catch (e) { fail(e) }
+    total = n + 1;
+    return n;
+  };
+  return {
+    update, src, nbuf: 512, shift: () => 0,
+    at: (b, i) => { const v = env.buffers.get(b)?.arr.data[i]; return v == null || i < 0 ? NaN : v },
+  };
 }
 
 /** Convert indicator buffers, levels and chart objects into Pine Outputs for rendering. */

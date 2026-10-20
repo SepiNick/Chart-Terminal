@@ -79,8 +79,9 @@ export interface CtorDecl { k: 'ctor'; params: Param[]; init: { kind: 'base' | '
 export interface IndexerDecl { k: 'indexer'; t: TypeRef; params: Param[]; get: Accessor | null; set: Accessor | null; mods: Mods; pos: Pos }
 export interface ClassDecl { k: 'class'; kind: 'class' | 'struct' | 'interface'; name: string; mods: Mods; attrs: Attr[]; bases: TypeRef[]; tparams: string[]; members: Member[]; ns: string; pos: Pos }
 export interface EnumDecl { k: 'enum'; name: string; items: { name: string; value: Expr | null; pos: Pos }[]; ns: string; pos: Pos }
-export type Member = FieldDecl | PropDecl | MethodDecl | CtorDecl | IndexerDecl | ClassDecl | EnumDecl;
-export type Decl = ClassDecl | EnumDecl;
+export interface DelegateDecl { k: 'delegate'; name: string; ret: TypeRef; params: Param[]; ns: string; pos: Pos }
+export type Member = FieldDecl | PropDecl | MethodDecl | CtorDecl | IndexerDecl | ClassDecl | EnumDecl | DelegateDecl;
+export type Decl = ClassDecl | EnumDecl | DelegateDecl;
 
 export class CsSyntaxError extends Error {
   pos: Pos;
