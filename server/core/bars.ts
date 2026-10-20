@@ -31,7 +31,8 @@ export function watchSeries(sym: string, tf: string, onUpdate: (bars: Bar[], clo
   let s = series.get(k);
   if (!s) {
     const entry = { bars: [] as Bar[], subs: new Set<(b: Bar[], closed: boolean) => void>(), stop: () => {}, ready: Promise.resolve() };
-    entry.ready = fetchBars(sym, tf).then(b => { entry.bars = b.slice(-1500) }).catch(e => console.error(`[bars] ${k}: ${(e as Error).message}`)).then(() => {
+    // Exchanges answer blocks with whole HTML pages: keep the log to one short line.
+    entry.ready = fetchBars(sym, tf).then(b => { entry.bars = b.slice(-1500) }).catch(e => console.error(`[bars] ${k}: ${(e as Error).message.replace(/\s+/g, ' ').slice(0, 200)}`)).then(() => {
       entry.stop = streamBars(sym, tf, b => {
         const last = entry.bars.at(-1);
         if (last && b.time < last.time) return;
