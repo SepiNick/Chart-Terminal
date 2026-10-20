@@ -17,7 +17,8 @@ if bar_index % 6 == 0
     strategy.entry("L", strategy.long)
 if bar_index % 6 == 3
     strategy.close("L")`;
-const job = { kind: 'pine' as const, src: SRC, opts: { symbol: 'BTCUSDT', tf: '1m', tfSec: 60, mintick: 0.01 } };
+const source = { lang: 'pine' as const, files: { 't.pine': SRC }, main: 't.pine', prec: 2 };
+const job = F.buildJob(source, 'BTCUSDT', '1m');
 
 test('freshFills: first run records the start, later runs mirror only new fills once', () => {
   const f = (time: number, side: 'buy' | 'sell' = 'buy') => ({ time, side, qty: 1 });
@@ -39,7 +40,7 @@ test('forward test lifecycle mirrors fills into the paper account', () => {
   F.deps.watch = (_s, _tf, cb) => { subs.push(cb); return () => { stops++ } };
   F.deps.notify = async n => { notices.push(n); return [] };
 
-  const id = F.create({ name: 'T', sym: 'BTCUSDT', tf: '1m', job, qtyMult: 2, channels: ['telegram'] });
+  const id = F.create({ name: 'T', sym: 'BTCUSDT', tf: '1m', source, qtyMult: 2, channels: ['telegram'] });
   assert.equal(F.list()[0].status, 'starting');
   const feed = (n: number, closed: boolean) => subs.at(-1)!(bars.slice(0, n), closed);
 
@@ -72,8 +73,29 @@ test('forward test lifecycle mirrors fills into the paper account', () => {
 
   // Script errors are reported, not thrown.
   assert.equal(F.remove(id), true); assert.equal(stops, 2); assert.deepEqual(F.list(), []);
-  const bad = F.create({ name: 'B', sym: 'BTCUSDT', tf: '1m', job: { ...job, src: 'strategy("x")\nplot(nope)' }, qtyMult: 1, channels: [] });
+  const bad = F.create({ name: 'B', sym: 'BTCUSDT', tf: '1m', source: { ...source, files: { 't.pine': 'strategy("x")\nplot(nope)' } }, qtyMult: 1, channels: [] });
   feed(30, true);
   assert.equal(F.list()[0].status, 'error'); assert.match(F.list()[0].lastError!, /nope/);
   F.remove(bad);
+});
+
+test('POST body: only sources are accepted, compiled JS is refused, MQL compiles on the server', async () => {
+  const { NEW_MQL5_EA } = await import('../src/mql/templates.ts');
+  const base = { name: 'X', sym: 'BTCUSDT', tf: '1h', qtyMult: 1, channels: [] };
+  const status = (f: () => unknown) => { try { f(); return 0 } catch (e) { return (e as { status?: number }).status } };
+  assert.equal(status(() => F.validate({ ...base, job: { kind: 'mql', js: 'process.exit(1)', opts: {} } })), 400);
+  assert.equal(status(() => F.validate({ ...base, lang: 'mql5', files: { 'a.mq5': NEW_MQL5_EA }, main: 'a.mq5', js: 'x' })), 400);
+  assert.equal(status(() => F.validate({ ...base, lang: 'ninja', files: { 'a.cs': '' }, main: 'a.cs', inputs: { cr: { js: 'x' } } })), 400);
+  assert.equal(status(() => F.validate({ ...base, lang: 'pine', files: { 'a.pine': 'x'.repeat(1024 * 1024 + 1) }, main: 'a.pine' })), 400);
+  assert.equal(status(() => F.validate({ ...base, lang: 'pine', files: Object.fromEntries(Array.from({ length: 51 }, (_, i) => [`f${i}`, ''])), main: 'f0' })), 400);
+  assert.equal(status(() => F.validate({ ...base, lang: 'pine', files: { 'a.pine': SRC }, main: 'b.pine' })), 400);
+
+  F.deps.watch = () => () => {};
+  const mql = F.validate({ ...base, lang: 'mql5', files: { 'MyExpert.mq5': NEW_MQL5_EA }, main: 'MyExpert.mq5', prec: 2 });
+  const id = F.create(mql);
+  assert.equal(F.list().find(f => f.id === id)!.lastError, null);
+  assert.equal(F.buildJob(mql.source, 'BTCUSDT', '1h').kind, 'mql');
+  assert.equal(status(() => F.create(F.validate({ ...base, lang: 'mql5', files: { 'B.mq5': 'void OnTick( {' }, main: 'B.mq5' }))), 400);
+  const pine = F.create(F.validate({ ...base, lang: 'pine', files: { 'a.pine': SRC, 'other.pine': 'x' }, main: 'a.pine' }));
+  F.remove(id); F.remove(pine);
 });
