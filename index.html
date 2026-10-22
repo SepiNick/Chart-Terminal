@@ -145,11 +145,12 @@
         <button id="domCenter" class="x" title="Re-centre on the market (scroll the ladder to move it)">⌖</button></h3>
       <div class="row" id="domStats"></div>
       <table id="domLadder"></table>
-      <div class="muted dom-hint">Click a bid to place a paper buy limit, an ask for a sell limit. Quantity comes from the order ticket.</div>
+      <div class="muted dom-hint">Click a bid to buy, an ask to sell on <b id="domAcct">paper</b> (limit on the passive side, stop beyond the market). Quantity comes from the order ticket.</div><!-- accounts -->
       <h3>Time &amp; Sales <span class="grow"></span><label class="muted"><input type="checkbox" id="domAgg"> merge</label><input id="domMin" type="number" min="0" placeholder="min value" title="Hide trades below this value (quote currency)" style="width:80px"></h3>
       <table id="domTape"></table>
     </div>
     <div class="side" id="s-liqs"></div><!-- derivs: filled by src/derivs/liqpanel.ts -->
+    <div class="side" id="s-accts"></div><!-- accounts: filled by src/broker/ui.ts -->
     <div class="side" id="s-journal">
       <h3>Journal <span class="grow"></span><button id="jOpen" class="x" title="Open the full journal: dashboard, journals, analyses and tools">⤢ Open</button><button id="jCsv" class="x" title="Export the filtered trades as CSV">⤒ CSV</button><button id="jMenu" class="x" title="Journal settings, backup and restore">⚙</button></h3>
       <div class="tabs" id="jTabs"><button data-jt="trades">Trades</button><button data-jt="stats">Stats</button><button data-jt="calendar">Calendar</button><button data-jt="setups">Setups</button></div>
@@ -166,6 +167,7 @@
     <button data-side="dom" title="DOM / Level 2 and Time &amp; Sales">≣</button>
     <button data-side="liqs" title="Liquidations (live)">💥</button><!-- derivs -->
     <button data-side="journal" title="Trading journal">📓</button>
+    <button data-side="accts" title="Accounts: paper and exchange testnets">🏦</button><!-- accounts -->
     <span class="grow"></span>
     <button id="keysBtn" title="Keyboard shortcuts (Ctrl+/)">⌨</button>
   </nav>
