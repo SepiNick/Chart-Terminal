@@ -87,7 +87,7 @@ export function accountMenu() {
     const r = b.getBoundingClientRect();
     m.style.top = `${r.bottom + 4}px`; m.style.right = `${Math.max(4, innerWidth - r.right)}px`;
     m.innerHTML = `<div class="ctx-i muted" style="pointer-events:none">Signed in · ${esc(LABEL[st])}</div><hr>
-      <div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div><hr>
+      <div class="ctx-i" data-a="accts">Exchange accounts…</div><div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div><hr>
       <div class="ctx-i" data-a="logout">Log out</div>`;
     document.body.append(m);
     const off = () => { m.remove(); removeEventListener('pointerdown', out, true) };
@@ -96,6 +96,7 @@ export function accountMenu() {
     m.onclick = ev => {
       const a = (ev.target as HTMLElement).closest<HTMLElement>('[data-a]')?.dataset.a; if (!a) return;
       off();
+      if (a === 'accts' && !document.getElementById('s-accts')?.classList.contains('on')) document.querySelector<HTMLElement>('#rail [data-side="accts"]')?.click();   // accounts
       if (a === 'sessions') void sessions();
       if (a === 'shares') void shares();
       if (a === 'password') changePassword();
