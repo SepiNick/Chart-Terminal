@@ -1,15 +1,19 @@
 // DOM / Level 2 side panel: price ladder (bids, asks, traded volume, own orders), spread and book imbalance,
-// click-to-trade limit orders on the paper account, and a Time & Sales tape with big-print highlighting.
+// click-to-trade limit/stop orders on the active broker (paper or an exchange testnet, src/broker/registry.ts), and a Time & Sales tape with big-print highlighting.
 import { streamBook, streamPrints, hasOrderFlow } from './feed.ts';
 import { aggregatePrints, autoRow, binOf, bigPrints, type BookSnap, type Print } from './model.ts';
-import { $, esc, store } from '../store.ts';
+import { $, esc, store, toast } from '../store.ts';
+import { activeBroker, onBrokers } from '../broker/registry.ts';
 
 export interface DomHost {
   symbol(): string;
   prec(): number;
-  /** Paper limit order at a ladder price (the host confirms and validates). */
+  /** Last price of the active chart, the order ticket's quantity, and the user's OK (true when instant orders are on). */
+  last(): number | undefined;
+  qty(): number;
+  confirm(msg: string): boolean;
+  /** Before a broker is registered: the old paper path (the host confirms and validates). */
   limit(side: 'buy' | 'sell', price: number): void;
-  /** Resting paper orders on this symbol. */
   orders(sym: string): { side: 'buy' | 'sell'; price: number; qty: number }[];
 }
 let host: DomHost;
@@ -23,6 +27,8 @@ const visible = () => $('#s-dom').classList.contains('on');
 
 export function initDom(h: DomHost) {
   host = h;
+  const acct = () => { $('#domAcct').textContent = activeBroker()?.account.label ?? 'paper' };
+  onBrokers(acct); acct();
   $('#domMult').onchange = e => { cfg.mult = +(e.target as HTMLSelectElement).value; save(); step = 0; draw() };
   $('#domCenter').onclick = () => { center = 0; draw() };
   $('#domAgg').onchange = e => { cfg.agg = (e.target as HTMLInputElement).checked; save(); drawTape() };
@@ -30,11 +36,30 @@ export function initDom(h: DomHost) {
   $<HTMLSelectElement>('#domMult').value = String(cfg.mult); $<HTMLInputElement>('#domAgg').checked = cfg.agg; $<HTMLInputElement>('#domMin').value = String(cfg.minTape || '');
   $('#domLadder').onclick = e => {
     const td = (e.target as HTMLElement).closest<HTMLElement>('td[data-side]'); if (!td) return;
-    host.limit(td.dataset.side as 'buy' | 'sell', +td.closest<HTMLElement>('tr')!.dataset.px!);
+    trade(td.dataset.side as 'buy' | 'sell', +td.closest<HTMLElement>('tr')!.dataset.px!);
   };
   $('#domLadder').onwheel = e => { e.preventDefault(); center = (center || midBin()) + (e.deltaY > 0 ? -3 : 3); draw() };
 }
 const save = () => store.set('domCfg', cfg);
+
+/** Below the market a buy rests as a limit, above it as a stop (and the reverse for sells). */
+export const ladderKind = (side: 'buy' | 'sell', price: number, last: number) => ((side === 'buy') === (price < last) ? 'limit' : 'stop');
+function trade(side: 'buy' | 'sell', price: number) {
+  const b = activeBroker();
+  if (!b) return host.limit(side, price);
+  const last = host.last(), qty = host.qty(), s = host.symbol();
+  if (!last) return toast('No price yet');
+  if (!(qty > 0)) return toast('Set a quantity in the order ticket');
+  const kind = ladderKind(side, price, last);
+  if (!host.confirm(`${side.toUpperCase()} ${kind} ${qty} ${s} @ ${price} on ${b.account.label}?`)) return;
+  b.place({ sym: s, side, kind, qty, ...(kind === 'limit' ? { price } : { stopPrice: price }) }).then(() => draw(), e => toast((e as Error).message, 6000));
+}
+/** Resting orders of the active broker on this symbol (limit price or stop trigger). */
+function myOrders(s: string) {
+  const b = activeBroker();
+  if (!b) return host.orders(s);
+  return (b.state()?.orders ?? []).filter(o => o.sym === s && o.status === 'open' && (o.price ?? o.stopPrice) != null).map(o => ({ side: o.side, price: (o.price ?? o.stopPrice)!, qty: o.qty - o.filled }));
+}
 const midBin = () => { if (!book?.bids[0] || !book.asks[0]) return 0; return binOf((book.bids[0][0] + book.asks[0][0]) / 2, step) };
 
 /** Follow the active chart's symbol while the panel is open; stop streaming when it closes. */
@@ -73,7 +98,7 @@ function draw() {
   const ks = Array.from({ length: n }, (_, i) => c + half - i);
   const maxQ = Math.max(1e-12, ...ks.map(k => Math.max(bids.get(k) ?? 0, asks.get(k) ?? 0)));
   const maxT = Math.max(1e-12, ...ks.map(k => { const t = traded.get(k); return t ? t.buy + t.sell : 0 }));
-  const mine = host.orders(sym), prec = Math.max(0, Math.min(8, -Math.floor(Math.log10(step) + 1e-9)));
+  const mine = myOrders(sym), prec = Math.max(0, Math.min(8, -Math.floor(Math.log10(step) + 1e-9)));
   const bestBidK = binOf(bb, step), bestAskK = binOf(ba, step);
   $('#domLadder').innerHTML = '<tr><th>Bid</th><th>Price</th><th>Ask</th><th title="Traded at this price since the panel opened">Traded</th></tr>' + ks.map(k => {
     const px = k * step, b = bids.get(k) ?? 0, a = asks.get(k) ?? 0, t = traded.get(k), my = mine.filter(o => binOf(o.price, step) === k);

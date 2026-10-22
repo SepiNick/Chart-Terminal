@@ -26,6 +26,7 @@ import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, r
 import { serverMode, onServer, api } from './sync.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
+import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 
 // ---------- layouts (grid arrangements) ----------
 interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
@@ -755,6 +756,7 @@ function showSide(name: string) {
   $('#body').classList.toggle('no-panel', !st.side);
   if (st.side === 'screener') renderScreener();
   if (st.side === 'journal') renderJournal();
+  if (st.side === 'accts') renderAccounts();   // accounts
   domSync();
 }
 $('#rail').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) showSide(s) };
@@ -1053,6 +1055,8 @@ journalSync(st.acct);
 initDom({
   symbol: () => active()?.cfg.symbol ?? '',
   prec: () => active()?.prec ?? 2,
+  last: () => pxOf(active().cfg.symbol), qty: () => +$<HTMLInputElement>('#tQty').value,   // accounts: DOM trades on the active broker
+  confirm: msg => st.settings.instantOrders || confirm(msg),
   orders: sym => st.acct.orders.filter(o => o.sym === sym && o.price != null).map(o => ({ side: o.side, price: o.price!, qty: o.qty })),
   limit(side, price) {
     const p = active(), last = pxOf(p.cfg.symbol), qty = +$<HTMLInputElement>('#tQty').value;
@@ -1065,6 +1069,7 @@ initDom({
 });
 domSync();
 initLiqPanel({ symbol: () => active()?.cfg.symbol ?? '' });   // derivs
+initAccountsUI();   // accounts: loads the exchange testnet accounts in server mode
 
 // ---------- boot ----------
 document.documentElement.dataset.theme = st.settings.theme;
