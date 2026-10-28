@@ -23,7 +23,7 @@ migration('brokers/1', `
   CREATE TABLE broker_emu (id TEXT PRIMARY KEY, account TEXT NOT NULL, data TEXT NOT NULL);
 `);
 
-interface Meta { syms: string[]; trippedDay?: string; okStatus?: 'active' | 'tripped' }
+interface Meta { syms: string[]; trippedDay?: string; okStatus?: 'active' | 'tripped' | 'pending' }
 interface Row { acct: BrokerAccount; meta: Meta }
 /** A server-emulated order: `trigger` waits for a price and then sends `send`; `bracket` waits for its entry to fill. */
 export interface Emu {
@@ -176,7 +176,8 @@ async function poll(id: string): Promise<BrokerState> {
   } catch (e) {
     const msg = scrub(e, secretsOf(id));
     r.errors++;
-    if (row.acct.status !== 'error' && polls(row.acct)) { row.meta.okStatus = row.acct.status === 'tripped' ? 'tripped' : 'active'; setStatus(row, 'error', msg) }
+    // Return to the real status after the error: a demoted (pending) account must never come back as active unchecked.
+    if (row.acct.status !== 'error' && polls(row.acct)) { row.meta.okStatus = row.acct.status === 'tripped' || row.acct.status === 'pending' ? row.acct.status : 'active'; setStatus(row, 'error', msg) }
     console.error(`[brokers] ${id}: ${msg}`);
     throw new HttpError(502, msg);
   }
@@ -430,7 +431,8 @@ function setBracket(id: string, parent: BrokerOrder, p: OrderPatch) {
 
 export async function modifyOrder(id: string, oid: string, x: unknown): Promise<BrokerOrder> {
   const row = activeRow(id), p = validPatch(x), ad = adapterOf(id);
-  if (p.sl === null && row.acct.guard.requireStop) throw bad('A stop-loss is required on this account: move the SL instead of removing it');
+  // Only an active account that doesn't require stops may drop an SL (demoting is exactly how requireStop gets turned off).
+  if (p.sl === null && (row.acct.guard.requireStop || row.acct.status !== 'active')) throw bad('A stop-loss is required on this account: move the SL instead of removing it');
   const e = emus.get(oid);
   if (e && e.account === id && e.kind === 'trigger') {
     if (e.order.status !== 'open') throw bad('This order is no longer open');
@@ -512,8 +514,9 @@ function start(id: string) {
 function stop(id: string) { const r = rt(id); if (r.timer) clearTimeout(r.timer); r.timer = undefined; r.unwatch?.(); r.unwatch = undefined }
 for (const r of rows.values()) {
   if (polls(r.acct)) start(r.acct.id);
-  // A demoted account with emulated stops waiting: one refresh makes it live again, then it polls like before the restart.
-  else if (r.acct.status === 'pending' && emusOf(r.acct.id).length && !process.env.CT_NO_AUTOSTART) refresh(r.acct.id).then(() => start(r.acct.id), () => {});
+  // A demoted account that may hold positions: one refresh makes it live again, then it polls like before the restart.
+  // (Only accounts that traded have tracked symbols, and trading needs a passed check: never-checked ones stay locked.)
+  else if (r.acct.status === 'pending' && (emusOf(r.acct.id).length || r.meta.syms.length) && !process.env.CT_NO_AUTOSTART) refresh(r.acct.id).then(() => start(r.acct.id), () => {});
 }
 
 // ---------- routes (all need a login) ----------

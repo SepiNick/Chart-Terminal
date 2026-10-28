@@ -304,3 +304,19 @@ test('demoting an active account (stop-loss switched off) keeps protecting and s
   assert.deepEqual(f.placed.slice(before).map(o => [o.side, o.qty]), [['sell', 5]], 'the emulated SL still fires');
   await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'market', qty: 0.1 }).catch(() => {});   // closing stays allowed (nothing left here)
 });
+
+test('a demoted account stays pending through a connection error and can\'t drop an SL', async () => {
+  const { id, f } = await activeAccount();
+  const entry = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 95, qty: 5, sl: 90 });
+  await B.refresh(id);
+  B.updateAccount(id, { guard: { requireStop: false } });
+  assert.equal(B.listAccounts().find(x => x.id === id)!.status, 'pending');
+  await rejects(B.modifyOrder(id, entry.id, { sl: null }), /stop-loss is required/);
+  f.fail = 'network down';
+  await assert.rejects(B.refresh(id));
+  assert.equal(B.listAccounts().find(x => x.id === id)!.status, 'error');
+  f.fail = '';
+  await B.refresh(id);
+  assert.equal(B.listAccounts().find(x => x.id === id)!.status, 'pending', 'back to pending, not active');
+  await rejects(B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 1 }), /pending/);
+});
