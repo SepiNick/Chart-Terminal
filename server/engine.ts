@@ -46,7 +46,8 @@ export function engineStop(msg = 'Stopped') { for (const s of slots) restart(s, 
 
 function workerOf(s: Slot): Worker {
   if (s.w) return s.w;
-  const w = (s.w = new Worker(new URL('./engineworker.ts', import.meta.url)));
+  // Bundled (desktop app) the worker sits next to the bundle as .js.
+  const w = (s.w = new Worker(new URL(import.meta.url.endsWith('.ts') ? './engineworker.ts' : './engineworker.js', import.meta.url)));
   w.unref();
   w.on('message', (m: { n: number; value?: never; error?: string }) => {
     const p = s.pending.get(m.n); if (!p) return;
