@@ -19,6 +19,7 @@ export interface OrderCtx {
   dayEquity: number;        // in the account's main quote, for the breaker
   dayStart?: number;
   hasStop: boolean;         // an open stop on the opposite side for this symbol already protects the position
+  pending?: number;         // other resting orders on this side that would open/add (base units): they count toward the cap
   skipStop?: boolean;       // emulated child orders that were checked when placed
 }
 export type Verdict = { ok: true; reducing: boolean } | { ok: false; reason: string; trip?: boolean };
@@ -40,7 +41,7 @@ export function checkOrder(o: Pick<OrderReq, 'side' | 'qty' | 'reduceOnly' | 'sl
   if (breakerHit(c.guard, c.dayEquity, c.dayStart))
     return { ok: false, trip: true, reason: `Circuit breaker: today's loss ${dayLossPct(c.dayEquity, c.dayStart).toFixed(2)}% reached the ${c.guard.maxDailyLossPct}% limit — only reducing orders until 00:00 UTC` };
   if (!(c.equity > 0)) return { ok: false, reason: 'No equity in this quote currency' };
-  const after = Math.abs(c.pos + (o.side === 'buy' ? o.qty : -o.qty)) * c.price, cap = (c.equity * c.guard.maxPositionPct) / 100;
+  const after = Math.abs(c.pos + (o.side === 'buy' ? 1 : -1) * ((c.pending ?? 0) + o.qty)) * c.price, cap = (c.equity * c.guard.maxPositionPct) / 100;
   if (after > cap * (1 + 1e-9)) return { ok: false, reason: `Position cap: ${fmt(after)} notional would exceed ${c.guard.maxPositionPct}% of equity (${fmt(cap)})` };
   if (c.guard.requireStop && !c.skipStop && !o.sl && !c.hasStop) return { ok: false, reason: 'A stop-loss is required: add an SL to this order or place a stop first' };
   return { ok: true, reducing: false };
