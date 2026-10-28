@@ -9,7 +9,8 @@ import { DrawingLayer, type Drawing } from './drawings.ts';
 import { createMainSeries, toSeriesData, transformBars, isPriceBased, typeDefaults, CHART_TYPES, type ChartType, type TypeOpts } from './charttypes.ts';
 import { isExpr, parse, symbols, combine } from './symmath.ts';
 import type { Settings } from './settings.ts';
-import type { Account, Side } from './trading.ts';
+import type { Side } from './trading.ts';
+import type { Broker, BrokerOrder, OrderPatch } from './broker/types.ts';
 import { $, esc, calcPrec, fmtVol, toast } from './store.ts';
 import { runScript, type ScriptError } from './pine/engine.ts';
 import { runMql } from './mql/engine.ts';
@@ -36,7 +37,7 @@ export interface Hooks {
   settings: () => Settings;
   drawings: (sym: string) => Drawing[];
   alerts: () => Alert[];
-  account: () => Account;
+  broker: () => Broker | undefined;   // the active account: its positions and orders are drawn (and dragged) here
   hidden: () => { indicators: boolean; positions: boolean };
   onPrice: (sym: string, px: number, ts: number) => void;
   onCrosshair: (pane: ChartPane, time: number | null, p: MouseEventParams) => void;
@@ -53,6 +54,7 @@ export interface Hooks {
   scriptSettings: (pane: ChartPane, id: string) => void;
   onReplay?: (pane: ChartPane) => void;   // replay started, stepped or ended on this chart (by the user, not by following)
 }
+const KIND_LABEL: Record<BrokerOrder['kind'], string> = { market: 'MARKET', limit: 'LIMIT', stop: 'STOP', stop_limit: 'STOP LIMIT', trailing_stop: 'TRAIL' };
 const PAL = ['#2962ff', '#ff9800', '#e91e63', '#00bcd4', '#9c27b0', '#4caf50', '#795548', '#607d8b'];
 const SCALE = { normal: PriceScaleMode.Normal, log: PriceScaleMode.Logarithmic, percent: PriceScaleMode.Percentage, indexed: PriceScaleMode.IndexedTo100 };
 const DASH = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted };
@@ -103,6 +105,12 @@ export class ChartPane {
   private markers!: ISeriesMarkersPluginApi<Time>;
   private lines: IPriceLine[] = [];
   private scaleLines: IPriceLine[] = [];
+  private olEl!: HTMLElement;   // order-line handles: drag to modify, × to cancel
+  private olItems: { el: HTMLElement; price: number }[] = [];
+  private olLoop = 0;
+  private dragging = false;
+  private overlayPending = false;
+  private posInfo: { line: IPriceLine; qty: number; entry: number; label: string } | null = null;
   private unsub = () => {};
   private loadTok = 0;
   private loadingMore = false;
@@ -127,7 +135,8 @@ export class ChartPane {
   constructor(cell: HTMLElement, cfg: PaneCfg, hooks: Hooks) {
     this.cell = cell; this.hooks = hooks;
     this.cfg = { compare: [], scripts: [], ...cfg, ind: [...cfg.ind] };
-    cell.innerHTML = '<div class="chart"></div><div class="legend"></div><div class="quick"></div><button class="rt" title="Scroll to the most recent bar">»</button><div class="ofstatus"></div><div class="pbtns" hidden></div>';
+    cell.innerHTML = '<div class="chart"></div><div class="legend"></div><div class="quick"></div><button class="rt" title="Scroll to the most recent bar">»</button><div class="ofstatus"></div><div class="pbtns" hidden></div><div class="olines"></div>';
+    this.olEl = $('.olines', cell);
     this.chartEl = $('.chart', cell); this.legendEl = $('.legend', cell); this.quickEl = $('.quick', cell); this.rtBtn = $('.rt', cell); this.ofEl = $('.ofstatus', cell); this.pbEl = $('.pbtns', cell);
     this.chartEl.addEventListener('mousemove', e => this.paneButtons(e));
     cell.addEventListener('mouseleave', () => (this.pbEl.hidden = true));
@@ -221,7 +230,7 @@ export class ChartPane {
     this.hooks.onCfgChange();
     if (reload) this.load(); else this.build();
   }
-  destroy() { clearTimeout(this.scriptTimer); this.unsub(); this.of?.reset(); this.cmp.forEach(c => c.unsub()); this.loadTok++; this.exitReplay(false); clearInterval(this.countdownTimer); this.chart?.remove() }
+  destroy() { cancelAnimationFrame(this.olLoop); clearTimeout(this.scriptTimer); this.unsub(); this.of?.reset(); this.cmp.forEach(c => c.unsub()); this.loadTok++; this.exitReplay(false); clearInterval(this.countdownTimer); this.chart?.remove() }
 
   // ---------- build ----------
   build() {
@@ -534,7 +543,7 @@ export class ChartPane {
     this.vol?.update(this.volBar(this.vb().at(-1)!));
     this.setInd();
     this.legend(this.crosshairTime ? this.disp.find(x => x.time === this.crosshairTime) : this.disp.at(-1));
-    this.quick();
+    this.quick(); this.posPnl();
   }
   private setInd() {
     for (const e of this.ind) {
@@ -547,19 +556,44 @@ export class ChartPane {
   /** Fills as markers; positions, working orders and alerts as price lines. */
   tradeOverlay() {
     if (!this.main) return;
+    if (this.dragging) { this.overlayPending = true; return }   // redraw when the drag ends, or the handle would vanish under the mouse
     for (const l of this.lines) this.main.removePriceLine(l);
-    this.lines = [];
-    const s = this.hooks.settings(), a = this.hooks.account(), sym = this.cfg.symbol, b = this.vb(), hidePos = this.hooks.hidden().positions;
-    const line = (price: number, color: string, title: string, style: LineStyle = LineStyle.Dashed) =>
-      this.lines.push(this.main.createPriceLine({ price, color, title, lineStyle: style, lineWidth: 1, axisLabelVisible: true }));
+    this.lines = []; this.olItems = []; this.olEl.innerHTML = ''; this.posInfo = null;
+    const s = this.hooks.settings(), br = this.hooks.broker(), bs = br?.state(), sym = this.cfg.symbol, b = this.vb(), hidePos = this.hooks.hidden().positions;
+    const line = (price: number, color: string, title: string, style: LineStyle = LineStyle.Dashed) => {
+      const l = this.main.createPriceLine({ price, color, title, lineStyle: style, lineWidth: 1, axisLabelVisible: true });
+      this.lines.push(l); return l;
+    };
     if (s.alertLines) for (const al of this.hooks.alerts()) if (al.sym === sym && (al.on || !s.onlyActiveAlerts) && al.drawingId == null) line(al.price, s.alertLineColor, '⏰');
     const m: SeriesMarker<Time>[] = [];
-    if (s.tradeLines && !hidePos) {
-      const p = a.pos[sym];
-      if (p) line(p.avg, p.qty > 0 ? s.upColor : s.downColor, `${p.qty > 0 ? 'Long' : 'Short'} ${Math.abs(p.qty)}`, LineStyle.Solid);
-      for (const o of a.orders) if (o.sym === sym) line(o.price!, o.side === 'buy' ? s.upColor : s.downColor, `${o.reduceOnly ? (o.type === 'limit' ? 'TP' : 'SL') : o.type.toUpperCase()} ${o.side} ${o.qty}`);
+    if (s.tradeLines && !hidePos && br && bs) {
+      const p = bs.positions.find(x => x.sym === sym && x.qty);
+      if (p) {
+        const label = `${p.qty > 0 ? 'Long' : 'Short'} ${Math.abs(p.qty)}`, color = p.qty > 0 ? s.upColor : s.downColor;
+        this.posInfo = { line: line(p.entry, color, label, LineStyle.Solid), qty: p.qty, entry: p.entry, label };
+        this.handle(br, p.entry, color, 'Close position', null, () => { if (confirm(`Close ${label} ${sym} at market (${br.account.label})?`)) return br.closePosition(sym) });
+        this.posPnl();
+      }
+      for (const o of bs.orders) if (o.sym === sym && o.status === 'open') {
+        const c = o.side === 'buy' ? s.upColor : s.downColor, exit = o.side === 'buy' ? 'sell' : 'buy';
+        const name = o.reduceOnly && o.kind !== 'market' ? (o.kind === 'limit' ? 'TP' : 'SL') : KIND_LABEL[o.kind];
+        const add = (price: number | undefined, title: string, patch: (px: number) => OrderPatch, cancel: () => Promise<unknown>, color = c, style?: LineStyle) => {
+          if (price == null) return;
+          line(price, color, title, style);
+          this.handle(br, price, color, 'Cancel', px => br.modify(o.id, patch(px)), cancel);
+        };
+        const cancel = () => br.cancel(o.id), qty = `${o.side} ${o.qty}`;
+        if (o.kind === 'stop_limit' && o.stopPrice != null) add(o.stopPrice, `${name} trigger ${qty}`, px => ({ stopPrice: px }), cancel);
+        if (o.kind === 'limit' || o.kind === 'stop_limit') add(o.price, `${name} ${qty}`, px => ({ price: px }), cancel);
+        if (o.kind === 'stop' || o.kind === 'trailing_stop') add(o.stopPrice, `${name} ${qty}`, px => ({ stopPrice: px }), cancel);
+        // A resting entry's bracket: dotted, until the entry fills and they become real exit orders.
+        add(o.tp, `TP ${exit} ${o.qty}`, px => ({ tp: px }), () => br.modify(o.id, { tp: null }), s.upColor, LineStyle.Dotted);
+        add(o.sl, `SL ${exit} ${o.qty}`, px => ({ sl: px }), () => br.modify(o.id, { sl: null }), s.downColor, LineStyle.Dotted);
+      }
     }
-    if (s.executions && !hidePos && b.length && !isPriceBased(this.cfg.type)) for (const f of a.fills) {
+    this.placeHandles();
+    if (s.executions && !hidePos && bs && b.length && !isPriceBased(this.cfg.type)) for (const x of bs.fills) {
+      const f = { ...x, ts: x.ts > 1e11 ? x.ts / 1000 : x.ts };   // brokers report ms; bars are in seconds
       if (f.sym !== sym || f.ts < b[0].time || f.ts > b.at(-1)!.time + tfSeconds(this.cfg.tf)) continue;
       let i = b.length - 1; while (i > 0 && b[i].time > f.ts) i--;
       const buy = f.side === 'buy';
@@ -567,6 +601,49 @@ export class ChartPane {
     }
     m.push(...this.scriptMarkers);
     this.markers.setMarkers(m.sort((x, y) => (x.time as number) - (y.time as number)));
+  }
+  /** A box on an order line: drag the grip to move it (one Broker.modify on release, reverted on error), × to cancel. */
+  private handle(br: Broker, price: number, color: string, xTitle: string, move: ((px: number) => Promise<unknown>) | null, x: () => Promise<unknown> | void) {
+    const el = document.createElement('div'), line = this.lines.at(-1)!, it = { el, price };
+    el.className = 'oline'; el.style.color = color;
+    el.innerHTML = `${move ? '<span class="grip" title="Drag to move">⋮⋮</span>' : ''}<button title="${esc(xTitle)}">×</button>`;
+    const fail = (e: unknown) => { toast(`${br.account.label}: ${(e as Error).message}`, 6000); this.tradeOverlay() };
+    const unlock = () => { this.dragging = false; if (this.overlayPending) { this.overlayPending = false; this.tradeOverlay() } };
+    el.querySelector('button')!.onclick = e => { e.stopPropagation(); Promise.resolve().then(x).catch(fail) };
+    if (move) el.querySelector<HTMLElement>('.grip')!.onmousedown = e => {
+      e.preventDefault(); e.stopPropagation();
+      this.dragging = true;
+      const top = this.chartEl.getBoundingClientRect().top;
+      let px = price;
+      const mv = (ev: MouseEvent) => { const p = this.main.coordinateToPrice(ev.clientY - top); if (p != null && p > 0) { px = +p.toFixed(this.prec); it.price = px; line.applyOptions({ price: px }) } };
+      const up = () => {
+        removeEventListener('mousemove', mv); removeEventListener('mouseup', up);
+        if (px === price) return unlock();
+        // Stay locked until the broker answers, so a redraw in between doesn't snap the line back.
+        move(px).then(unlock, err => { unlock(); fail(err) });
+      };
+      addEventListener('mousemove', mv); addEventListener('mouseup', up);
+    };
+    this.olEl.append(el); this.olItems.push(it);
+  }
+  /** Keep the handles on their lines while the chart scrolls, scales or resizes. */
+  private placeHandles = () => {
+    cancelAnimationFrame(this.olLoop); this.olLoop = 0;
+    if (!this.olItems.length || !this.main) return;
+    const h = this.chart.paneSize(0).height, right = `${this.chart.priceScale('right').width() + 110}px`;
+    for (const it of this.olItems) {
+      const y = this.main.priceToCoordinate(it.price);
+      it.el.hidden = y == null || y < 0 || y > h;
+      if (y != null) { it.el.style.top = `${y}px`; it.el.style.right = right }
+    }
+    this.olLoop = requestAnimationFrame(this.placeHandles);
+  };
+  /** Live P&L on the position line, from this chart's own last price. */
+  private posPnl() {
+    const p = this.posInfo, px = this.lastPrice();
+    if (!p || px == null) return;
+    const u = (px - p.entry) * p.qty;
+    p.line.applyOptions({ title: `${p.label}  ${u >= 0 ? '+' : ''}${u.toFixed(2)}` });
   }
   /** Previous day close, visible high/low and average close lines (Scales and lines settings). */
   scaleOverlay() {
