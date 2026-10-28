@@ -91,9 +91,28 @@ dialog h3{margin:0 0 12px;font-size:16px}
 .ctx-i .ci{width:16px;text-align:center}.ctx-i .ch{margin-left:auto;padding-left:16px;color:var(--muted)}.ctx-i:hover .ch{color:#fff}
 .star{color:var(--muted);padding:0 2px;margin-left:6px}.star.on{color:#ffb300}.ctx-i:hover .star:not(.on){color:#fff8}
 /* left toolbar groups */
+/* left toolbar, TradingView-style: line icons, tinted (not filled) active tool, chevron on hover opens the group */
+#tools{--hov:color-mix(in srgb,var(--text) 9%,transparent);--sel:color-mix(in srgb,var(--accent) 16%,transparent)}
+#tools button{display:grid;place-items:center;border-radius:4px;color:var(--text)}#tools button:hover{background:var(--hov)}
+#tools button.on{background:var(--sel);color:var(--accent)}#tools button.on:hover{background:var(--sel)}
+.ti{display:block;flex:none}
 .tg{display:flex;position:relative}.tg button:first-child{width:34px}
-#tools .tg .fly{position:absolute;right:-2px;bottom:0;width:10px;height:14px;font-size:10px;color:var(--muted);background:none;padding:0}
-#favBar{display:none;gap:2px;padding:2px 6px;border-bottom:1px solid var(--line)}#favBar button{border:0;background:none;font-size:15px;padding:2px 6px}#favBar button.on{background:var(--accent);color:#fff}
+#tools .tg .fly{position:absolute;right:-5px;top:50%;transform:translateY(-50%);width:11px;height:22px;color:var(--muted);background:none;opacity:0;border-radius:3px}
+#tools .tg:hover .fly,#tools .tg .fly:focus-visible{opacity:1}#tools .tg .fly:hover{color:var(--text);background:var(--hov)}
+/* tool flyouts: section titles, 28px icons, hotkey on the right, star on hover */
+.ctx.tfly{min-width:268px;padding:6px 0}
+.ctx-h{padding:10px 14px 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);cursor:default}.ctx-h:first-child{padding-top:4px}
+.tfly .ctx-i{height:34px;padding:0 10px 0 8px;gap:10px}.tfly .ctx-i .ci{width:28px;display:grid;place-items:center}
+.tfly .ctx-i:hover{background:color-mix(in srgb,var(--text) 9%,transparent);color:inherit}.tfly .ctx-i:hover .ch{color:var(--muted)}
+.tfly .ctx-i.sel{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.tfly .star{display:grid;place-items:center;width:24px;height:24px;margin:0 0 0 4px;padding:0;border-radius:3px;opacity:0}.tfly .star .ti{width:18px;height:18px}
+.tfly .ctx-i:hover .star,.tfly .star.on{opacity:1}.tfly .star:hover{background:color-mix(in srgb,var(--text) 12%,transparent)}
+.tfly .star.on .ti{fill:#ffb300;stroke:#ffb300}
+/* hover tooltip (src/tooltip.ts) */
+.ttip{position:fixed;z-index:100;display:none;padding:5px 8px;border-radius:4px;background:#131722;color:#fff;font-size:12px;line-height:1.3;white-space:nowrap;pointer-events:none;box-shadow:0 2px 8px #0005}
+:root[data-theme=dark] .ttip{background:#434651}
+.ttip kbd{margin-left:8px;font:inherit;color:#b2b5be}
+#favBar{display:none;gap:2px;padding:2px 6px;border-bottom:1px solid var(--line)}#favBar button{display:grid;place-items:center;border:0;background:none;padding:1px;border-radius:4px;color:var(--text)}#favBar button.on{background:var(--accent);color:#fff}
 /* floating drawing toolbar */
 .ftb{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:6;display:none;gap:2px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px;box-shadow:0 4px 14px #0003}
 .ftb button{border:0;background:none;padding:3px 7px}.ftb select{padding:2px 4px}

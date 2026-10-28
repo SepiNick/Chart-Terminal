@@ -1,6 +1,7 @@
 // Drawing UI: left toolbar with group flyouts & favorites, floating toolbar, properties dialog, templates, context menu.
-import { ALL_TOOLS, CURSORS, GROUPS, TOOL_MAP, type CursorMode } from './tools/index.ts';
-import type { Drawing, Style } from './tools/types.ts';
+import { ALL_TOOLS, CURSORS, GROUPS, TOOL_MAP, groupSections, type CursorMode } from './tools/index.ts';
+import type { Drawing, GroupId, Style, ToolDef } from './tools/types.ts';
+import { iconSvg } from './tools/icons.ts';
 import { styleFor, type DrawingLayer, type Magnet } from './drawings.ts';
 import { showMenu, type MenuItem } from './menu.ts';
 import { store, $, $$, esc, toast } from './store.ts';
@@ -30,6 +31,9 @@ const saveTpl = () => { store.set('drawTemplates', templates); store.set('drawDe
 const tplOf = (s: Style): Partial<Style> => { const { text: _t, ...rest } = structuredClone(s); return rest };
 
 // ---------- left toolbar ----------
+// data-tip / data-key: the hover tooltip (src/tooltip.ts) shows the name and the hotkey, like TradingView's toolbar.
+const tip = (name: string, key?: string) => `data-tip="${esc(name)}"${key ? ` data-key="${esc(key)}"` : ''}`;
+const CHEVRON = '<svg viewBox="0 0 6 10" width="6" height="10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 1.5L4.5 5 1.5 8.5"/></svg>';
 export function renderLeftToolbar(host: DrawUIHost) {
   const el = $('#tools'), l = host.layer();
   if (!l) return; // chart still loading
@@ -38,45 +42,47 @@ export function renderLeftToolbar(host: DrawUIHost) {
     const tools = ALL_TOOLS.filter(t => t.group === g.id);
     if (!tools.length) return '';
     const shown = TOOL_MAP.get(lastInGroup[g.id]) ?? tools[0];
-    return `<div class="tg"><button data-tool="${shown.id}" class="${l.tool === shown.id ? 'on' : ''}" title="${esc(shown.name)}">${esc(shown.icon)}</button><button class="fly" data-group="${g.id}" title="${esc(g.name)}">›</button></div>`;
+    return `<div class="tg"><button data-tool="${shown.id}" class="${l.tool === shown.id ? 'on' : ''}" ${tip(shown.name, shown.key)} aria-label="${esc(shown.name)}">${iconSvg(shown.id, shown.icon)}</button><button class="fly" data-group="${g.id}" ${tip(g.name)} aria-label="${esc(g.name)}">${CHEVRON}</button></div>`;
   };
+  const act = (id: string, name: string, on = false) => `<button data-act="${id}" class="${on ? 'on' : ''}" ${tip(name)} aria-label="${esc(name)}">${iconSvg(id)}</button>`;
   el.innerHTML =
-    `<div class="tg"><button data-cursor="${cur.id}" class="${l.tool === 'cursor' ? 'on' : ''}" title="${cur.name}">${cur.icon}</button><button class="fly" data-group="cursors" title="Cursors">›</button></div>` +
+    `<div class="tg"><button data-cursor="${cur.id}" class="${l.tool === 'cursor' ? 'on' : ''}" ${tip(cur.name)} aria-label="${esc(cur.name)}">${iconSvg(cur.id, cur.icon)}</button><button class="fly" data-group="cursors" ${tip('Cursors')} aria-label="Cursors">${CHEVRON}</button></div>` +
     GROUPS.slice(1).map(groupBtn).join('') +
+    `<hr>` +
+    act('measure', 'Measure (Shift+click)', l.tool === 'measure') + act('zoom', 'Zoom in (drag a box)', l.tool === 'zoom') + act('zoomout', 'Zoom out') +
+    `<hr>` +
+    act('magnet', `Magnet: ${host.magnet()}`, host.magnet() !== 'off') + act('keep', 'Stay in drawing mode', host.keepDrawing()) +
+    act('lock', 'Lock all drawings', !!l.drawings.length && l.drawings.every(d => d.locked)) + act('hide', 'Hide…', l.hideAll) + act('remove', 'Remove…') +
     `<hr>
-    <button data-act="measure" class="${l.tool === 'measure' ? 'on' : ''}" title="Measure (Shift+click)">📏</button>
-    <button data-act="zoom" class="${l.tool === 'zoom' ? 'on' : ''}" title="Zoom in (drag a box)">🔍</button>
-    <button data-act="zoomout" title="Zoom out">⊖</button>
-    <hr>
-    <button data-act="magnet" class="${host.magnet() !== 'off' ? 'on' : ''}" title="Magnet: ${host.magnet()}">🧲</button>
-    <button data-act="keep" class="${host.keepDrawing() ? 'on' : ''}" title="Stay in drawing mode">✏️</button>
-    <button data-act="lock" class="${l.drawings.length && l.drawings.every(d => d.locked) ? 'on' : ''}" title="Lock all drawings">🔒</button>
-    <button data-act="hide" class="${l.hideAll ? 'on' : ''}" title="Hide…">👁</button>
-    <button data-act="remove" title="Remove…">🗑</button>
-    <hr>
-    <input type="color" id="drawColor" value="${esc(l.color)}" title="Color for new drawings">
-    <button data-act="favbar" class="${store.get('favBar', false) ? 'on' : ''}" title="Favorites toolbar">★</button>`;
+    <input type="color" id="drawColor" value="${esc(l.color)}" ${tip('Color for new drawings')}>` +
+    act('favbar', 'Favorites toolbar', store.get('favBar', false));
   renderFavBar(host);
 }
 
+/** A group's tools in sections (TradingView-style): section titles, icon + name + hotkey, the current tool highlighted,
+ *  and a star that shows on hover (and stays when the tool is a favorite). */
 function flyout(host: DrawUIHost, group: string, anchor: HTMLElement) {
-  const r = anchor.getBoundingClientRect();
-  const items: MenuItem[] = group === 'cursors'
-    ? CURSORS.map(c => ({ label: c.name, icon: c.icon, checked: host.layer().tool === 'cursor' && host.layer().cursor === c.id, action: () => setCursor(host, c.id) }))
-    : ALL_TOOLS.filter(t => t.group === group).flatMap(t => [
-      { label: t.name, icon: t.icon, hint: t.key ?? '', checked: host.layer().tool === t.id, action: () => setTool(host, t.id) },
-    ]);
-  const m = showMenu(r.right + 2, r.top, items);
-  if (group !== 'cursors') {
-    // Star toggles favorites without picking the tool.
-    $$('.ctx-i', m).forEach((row, i) => {
-      const t = ALL_TOOLS.filter(x => x.group === group)[i];
-      const star = document.createElement('span');
-      star.className = 'star' + (fav.has(t.id) ? ' on' : ''); star.textContent = '★'; star.title = 'Favorite';
-      star.onclick = e => { e.stopPropagation(); fav.has(t.id) ? fav.delete(t.id) : fav.add(t.id); store.set('favTools', [...fav]); star.classList.toggle('on'); renderFavBar(host) };
-      row.append(star);
-    });
+  const r = anchor.closest('.tg')!.getBoundingClientRect(), l = host.layer();
+  if (group === 'cursors') {
+    const m = showMenu(r.right + 4, r.top, CURSORS.map(c => ({ label: c.name, iconHtml: iconSvg(c.id, c.icon), selected: l.tool === 'cursor' && l.cursor === c.id, action: () => setCursor(host, c.id) })));
+    m.classList.add('tfly');
+    return;
   }
+  const rows: ToolDef[] = [], items: MenuItem[] = [];
+  for (const s of groupSections(group as GroupId)) {
+    if (s.name) items.push({ head: s.name });
+    for (const t of s.tools) { rows.push(t); items.push({ label: t.name, iconHtml: iconSvg(t.id, t.icon), hint: t.key ?? '', selected: l.tool === t.id, action: () => setTool(host, t.id) }) }
+  }
+  const m = showMenu(r.right + 4, r.top, items);
+  m.classList.add('tfly');
+  // Star toggles favorites without picking the tool.
+  $$('.ctx-i', m).forEach((row, i) => {
+    const t = rows[i];
+    const star = document.createElement('span');
+    star.className = 'star' + (fav.has(t.id) ? ' on' : ''); star.innerHTML = iconSvg('favbar'); star.dataset.tip = fav.has(t.id) ? 'Remove from favorites' : 'Add to favorites';
+    star.onclick = e => { e.stopPropagation(); fav.has(t.id) ? fav.delete(t.id) : fav.add(t.id); store.set('favTools', [...fav]); star.classList.toggle('on'); renderFavBar(host) };
+    row.append(star);
+  });
 }
 export function setTool(host: DrawUIHost, id: string) {
   const t = TOOL_MAP.get(id);
@@ -92,7 +98,7 @@ function renderFavBar(host: DrawUIHost) {
   const bar = $('#favBar'), on = store.get('favBar', false) && fav.size > 0;
   bar.style.display = on ? 'flex' : 'none';
   bar.innerHTML = [...fav].map(id => TOOL_MAP.get(id)).filter(Boolean).map(t =>
-    `<button data-tool="${t!.id}" class="${host.layer().tool === t!.id ? 'on' : ''}" title="${esc(t!.name)}">${esc(t!.icon)}</button>`).join('');
+    `<button data-tool="${t!.id}" class="${host.layer().tool === t!.id ? 'on' : ''}" ${tip(t!.name, t!.key)} aria-label="${esc(t!.name)}">${iconSvg(t!.id, t!.icon)}</button>`).join('');
 }
 
 export function wireLeftToolbar(host: DrawUIHost) {

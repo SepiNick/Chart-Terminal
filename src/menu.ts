@@ -1,7 +1,8 @@
 // Small popup menu used for context menus and toolbar flyouts.
 import { esc } from './store.ts';
 
-export interface MenuItem { label?: string; icon?: string; hint?: string; checked?: boolean; disabled?: boolean; sep?: boolean; action?: () => void; sub?: MenuItem[] }
+/** head: a section title row. iconHtml: trusted markup from our own icon set (never data). selected: highlighted row (tool flyouts). */
+export interface MenuItem { label?: string; icon?: string; iconHtml?: string; hint?: string; checked?: boolean; selected?: boolean; disabled?: boolean; sep?: boolean; head?: string; action?: () => void; sub?: MenuItem[] }
 
 let open: HTMLElement[] = [];
 export function closeMenus() { open.forEach(m => m.remove()); open = [] }
@@ -13,8 +14,8 @@ export function showMenu(x: number, y: number, items: MenuItem[], level = 0): HT
   else open.splice(level).forEach(m => m.remove());
   const m = document.createElement('div');
   m.className = 'ctx';
-  m.innerHTML = items.map((it, i) => it.sep ? '<hr>' :
-    `<div class="ctx-i${it.disabled ? ' dis' : ''}" data-i="${i}"><span class="ci">${it.checked ? '✓' : esc(it.icon ?? '')}</span><span>${esc(it.label ?? '')}</span><span class="ch">${it.sub ? '▸' : esc(it.hint ?? '')}</span></div>`).join('');
+  m.innerHTML = items.map((it, i) => it.sep ? '<hr>' : it.head !== undefined ? `<div class="ctx-h">${esc(it.head)}</div>` :
+    `<div class="ctx-i${it.disabled ? ' dis' : ''}${it.selected ? ' sel' : ''}" data-i="${i}"><span class="ci">${it.iconHtml ?? (it.checked ? '✓' : esc(it.icon ?? ''))}</span><span>${esc(it.label ?? '')}</span><span class="ch">${it.sub ? '▸' : esc(it.hint ?? '')}</span></div>`).join('');
   document.body.append(m);
   const r = m.getBoundingClientRect();
   m.style.left = Math.min(x, innerWidth - r.width - 4) + 'px';
