@@ -35,9 +35,10 @@ export function reduces(o: Pick<OrderReq, 'side' | 'qty' | 'reduceOnly'>, c: Pic
 }
 
 export function checkOrder(o: Pick<OrderReq, 'side' | 'qty' | 'reduceOnly' | 'sl'>, c: OrderCtx): Verdict {
-  if (c.status === 'pending') return { ok: false, reason: 'Account is pending: run the guardian check first' };
   if (c.status === 'disabled') return { ok: false, reason: 'Account is disabled' };
+  // Reducing / closing is always allowed (also on a demoted pending account), like on a tripped one.
   if (reduces(o, c)) return { ok: true, reducing: true };
+  if (c.status === 'pending') return { ok: false, reason: 'Account is pending: run the guardian check first' };
   if (c.status === 'tripped') return { ok: false, reason: 'Circuit breaker tripped: only orders that reduce or close a position until 00:00 UTC' };
   if (c.status === 'error') return { ok: false, reason: 'Account has a connection error: only orders that reduce or close a position are allowed' };
   if (breakerHit(c.guard, c.dayEquity, c.dayStart))

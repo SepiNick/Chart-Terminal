@@ -91,7 +91,10 @@ function setStatus(row: Row, status: BrokerAccount['status'], error?: string) {
 }
 /** Every open app (any device) gets the account list after a change. */
 function announce() { broadcast({ type: 'broker.accounts', accounts: listAccounts() }) }
-const polls = (a: BrokerAccount) => a.status === 'active' || a.status === 'tripped' || a.status === 'error';
+/** Passed a guardian check in this run and has an exchange state: it may hold positions that need watching. */
+const live = (id: string) => !!rts.get(id)?.state;
+// A demoted (pending) account that is live keeps polling, so its emulated stops still fire on open positions.
+const polls = (a: BrokerAccount) => a.status === 'active' || a.status === 'tripped' || a.status === 'error' || (a.status === 'pending' && live(a.id));
 
 /**
  * Equity in quote currency `q`: its balance, plus base assets of the symbols this account trades at their last price
@@ -324,7 +327,7 @@ export function updateAccount(id: string, x: unknown): BrokerAccount {
   if (p.guard) {
     row.acct.guard = validGuard(p.guard, row.acct.guard);
     // Loosening the guard below what the guardian requires takes the account out of trading until it is checked again.
-    if (row.acct.status !== 'pending' && guardItems(row.acct.guard, null).some(i => i.id !== 'withdraw' && !i.ok)) { setStatus(row, 'pending'); stop(id) }
+    if (row.acct.status !== 'pending' && guardItems(row.acct.guard, null).some(i => i.id !== 'withdraw' && !i.ok)) setStatus(row, 'pending');   // keeps polling: see polls()
   }
   saveRow(row); announce();
   return row.acct;
@@ -357,17 +360,18 @@ export async function check(id: string): Promise<GuardianReport> {
   items.push(...guardItems(row.acct.guard, canWithdraw));
   const ok = items.every(i => i.ok);
   if (ok) { if (row.acct.status === 'pending' || row.acct.status === 'error') setStatus(row, 'active'); start(id) }
-  else { setStatus(row, 'pending'); stop(id) }
+  else { setStatus(row, 'pending'); if (!live(id)) stop(id) }
   return { ok, items };
 }
 
-const activeRow = (id: string) => { const row = rowOf(id); if (row.acct.status === 'pending') throw bad('Account is pending: run the guardian check first'); return row };
+// A pending account that is live still reaches the guard, which lets only reducing / closing orders through.
+const activeRow = (id: string) => { const row = rowOf(id); if (row.acct.status === 'pending' && !live(id)) throw bad('Account is pending: run the guardian check first'); return row };
 async function fresh(id: string) { const r = rt(id); if (!r.state || deps.now() - r.state.updated > 10_000) await refresh(id); return r.state! }
 function track(row: Row, sym: string) { if (!row.meta.syms.includes(sym)) { row.meta.syms.push(sym); saveRow(row) } }
 
 export async function getState(id: string): Promise<BrokerState> {
   // A pending account has no verified testnet connection yet: an empty state, no exchange call.
-  if (rowOf(id).acct.status === 'pending') return { account: id, balances: [], positions: [], orders: [], fills: [], updated: deps.now() };
+  if (rowOf(id).acct.status === 'pending' && !live(id)) return { account: id, balances: [], positions: [], orders: [], fills: [], updated: deps.now() };
   return rt(id).state ?? refresh(id);
 }
 
@@ -506,7 +510,11 @@ function start(id: string) {
   if (!r.unwatch && !process.env.CT_NO_AUTOSTART) { try { r.unwatch = adapterOf(id).watch?.(() => schedule(id, 200)) } catch {} }
 }
 function stop(id: string) { const r = rt(id); if (r.timer) clearTimeout(r.timer); r.timer = undefined; r.unwatch?.(); r.unwatch = undefined }
-for (const r of rows.values()) if (polls(r.acct)) start(r.acct.id);
+for (const r of rows.values()) {
+  if (polls(r.acct)) start(r.acct.id);
+  // A demoted account with emulated stops waiting: one refresh makes it live again, then it polls like before the restart.
+  else if (r.acct.status === 'pending' && emusOf(r.acct.id).length && !process.env.CT_NO_AUTOSTART) refresh(r.acct.id).then(() => start(r.acct.id), () => {});
+}
 
 // ---------- routes (all need a login) ----------
 route('GET', '/api/broker/accounts', () => listAccounts());
