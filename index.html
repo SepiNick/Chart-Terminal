@@ -119,13 +119,20 @@
       <h3>Log <span class="grow"></span><button id="alertLogClear" class="x" title="Clear the alert log" hidden>Clear</button></h3><div id="alertLog" class="muted"></div>
     </div>
     <div class="side" id="s-trade">
-      <h3>Order · <span id="tSym"></span> <span class="muted">(paper)</span></h3>
+      <h3>Order · <span id="tSym"></span></h3>
+      <label class="field">Account <select id="tAcct"></select></label>
       <div class="seg" id="tSide"><button data-side="buy" class="on buyc">Buy</button><button data-side="sell" class="sellc">Sell</button></div>
-      <div class="seg" id="tType"><button data-type="market" class="on">Market</button><button data-type="limit">Limit</button><button data-type="stop">Stop</button></div>
-      <label class="field" id="tPriceRow">Price <input id="tPrice" type="number" step="any"></label>
-      <label class="field">Quantity <input id="tQty" type="number" step="any" min="0" value="0.01"></label>
+      <div class="seg" id="tType"><button data-type="market" class="on">Market</button><button data-type="limit">Limit</button><button data-type="stop">Stop</button><button data-type="stop_limit" title="Stop-limit: a limit order placed when the stop price trades">Stop‑limit</button><button data-type="trailing_stop" title="Trailing stop: follows the best price by a distance, fills at market">Trailing</button></div>
+      <label class="field" id="tStopRow">Stop price <input id="tStop" type="number" step="any"></label>
+      <label class="field" id="tPriceRow">Limit price <input id="tPrice" type="number" step="any"></label>
+      <label class="field" id="tTrailRow">Trail by <span><input id="tTrail" type="number" step="any" min="0" value="1"><select id="tTrailUnit"><option value="pct">% of price</option><option value="amount">price units</option></select></span></label>
+      <label class="field">Size <span><input id="tSize" type="number" step="any" min="0" value="1"><select id="tSizeMode" aria-label="Sizing mode"><option value="units">units (qty)</option><option value="quote">quote amount</option><option value="pct">% of available</option><option value="risk">% equity risked to SL</option></select></span></label>
+      <label class="field" id="tQtyRow">Quantity <input id="tQty" type="number" step="any" min="0" value="0.01"></label>
       <label class="field"><span><input type="checkbox" id="tTpOn"> Take profit</span><input id="tTp" type="number" step="any"></label>
       <label class="field"><span><input type="checkbox" id="tSlOn"> Stop loss</span><input id="tSl" type="number" step="any"></label>
+      <label class="tcheck"><input type="checkbox" id="tReduce"> Reduce-only</label>
+      <label class="tcheck"><input type="checkbox" id="tOcoOn"> OCO with a second order</label>
+      <label class="field" id="tOcoRow">Other leg (same side and size; one fill cancels the other) <span><select id="tOcoKind" aria-label="Other leg type"><option value="limit">Limit</option><option value="stop">Stop</option></select><input id="tOcoPx" type="number" step="any" placeholder="Price"></span></label>
       <div id="tInfo" class="muted"></div>
       <button id="tSubmit" class="buyc big-btn">Buy</button>
       <button id="resetAcct" class="x">Reset paper account</button>
