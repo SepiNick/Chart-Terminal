@@ -288,3 +288,19 @@ test('spot protective sells always count as reducing, so a tripped breaker never
   // buys are still blocked while tripped
   assert.equal(checkOrder({ side: 'buy', qty: 1, sl: 90 }, ctx).ok, false);
 });
+
+test('demoting an active account (stop-loss switched off) keeps protecting and showing its position', async () => {
+  const spot = fake(true, ['stop_limit']);   // every SL emulated, like Binance spot
+  const { id, f } = await activeAccount({ broker: 'binance', market: 'spot' }, spot);
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 5, sl: 90 });
+  await B.refresh(id); await B.refresh(id);   // fill, then the bracket SL is armed
+  B.updateAccount(id, { guard: { requireStop: false } });
+  assert.equal(B.listAccounts().find(x => x.id === id)!.status, 'pending');
+  const st = await B.getState(id);
+  assert.ok(st.balances.some(b => b.asset === 'BTC' && b.free === 5), 'the position stays visible');
+  await rejects(B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 1, sl: 80 }), /pending/);   // no new risk
+  const before = f.placed.length;
+  f.px = 89; await B.refresh(id);
+  assert.deepEqual(f.placed.slice(before).map(o => [o.side, o.qty]), [['sell', 5]], 'the emulated SL still fires');
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'market', qty: 0.1 }).catch(() => {});   // closing stays allowed (nothing left here)
+});
