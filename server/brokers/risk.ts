@@ -59,5 +59,7 @@ export function guardItems(g: Guard, canWithdraw: boolean | null | undefined): G
     { id: 'confirm', label: 'You confirmed the key cannot withdraw or transfer', ok: g.confirmedNoWithdraw },
     { id: 'dailyLoss', label: 'Daily loss limit (circuit breaker) set', ok: g.maxDailyLossPct > 0 && g.maxDailyLossPct <= 100, detail: `${g.maxDailyLossPct}% of start-of-day equity` },
     { id: 'positionCap', label: 'Position size capped', ok: g.maxPositionPct > 0 && g.maxPositionPct <= 100, detail: `${g.maxPositionPct}% of equity` },
+    // trade/docs/RISK_RULES.md #1: a stop-loss is non-negotiable, so switching it off sends the account back to pending.
+    { id: 'stop', label: 'Stop-loss required on every opening order', ok: g.requireStop },
   ];
 }

@@ -1127,6 +1127,7 @@ initDom({
   prec: () => active()?.prec ?? 2,
   last: () => pxOf(active().cfg.symbol), qty: () => +$<HTMLInputElement>('#tQty').value,   // accounts: DOM trades on the active broker
   confirm: msg => st.settings.instantOrders || confirm(msg),
+  place: r => send(r, active()),   // the ticket's path, so Replay orders go to the backtest account
   orders: sym => st.acct.orders.filter(o => o.sym === sym && o.price != null).map(o => ({ side: o.side, price: o.price!, qty: o.qty })),
   limit(side, price) {
     const p = active(), last = pxOf(p.cfg.symbol), qty = +$<HTMLInputElement>('#tQty').value;

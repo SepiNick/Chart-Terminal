@@ -4,6 +4,7 @@ import { streamBook, streamPrints, hasOrderFlow } from './feed.ts';
 import { aggregatePrints, autoRow, binOf, bigPrints, type BookSnap, type Print } from './model.ts';
 import { $, esc, store, toast } from '../store.ts';
 import { activeBroker, onBrokers } from '../broker/registry.ts';
+import type { OrderReq } from '../broker/types.ts';
 
 export interface DomHost {
   symbol(): string;
@@ -12,6 +13,8 @@ export interface DomHost {
   last(): number | undefined;
   qty(): number;
   confirm(msg: string): boolean;
+  /** Send an order the way the ticket does (Replay → backtest account, refusals → toasts). */
+  place(r: OrderReq): Promise<void>;
   /** Before a broker is registered: the old paper path (the host confirms and validates). */
   limit(side: 'buy' | 'sell', price: number): void;
   orders(sym: string): { side: 'buy' | 'sell'; price: number; qty: number }[];
@@ -52,7 +55,7 @@ function trade(side: 'buy' | 'sell', price: number) {
   if (!(qty > 0)) return toast('Set a quantity in the order ticket');
   const kind = ladderKind(side, price, last);
   if (!host.confirm(`${side.toUpperCase()} ${kind} ${qty} ${s} @ ${price} on ${b.account.label}?`)) return;
-  b.place({ sym: s, side, kind, qty, ...(kind === 'limit' ? { price } : { stopPrice: price }) }).then(() => draw(), e => toast((e as Error).message, 6000));
+  void host.place({ sym: s, side, kind, qty, ...(kind === 'limit' ? { price } : { stopPrice: price }) }).then(() => draw());
 }
 /** Resting orders of the active broker on this symbol (limit price or stop trigger). */
 function myOrders(s: string) {

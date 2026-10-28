@@ -125,10 +125,17 @@ test('guardian check: PASS/FAIL items, activation only when all pass, errors are
   fk.f.fail = '';
   r = await B.check(a.id);
   assert.equal(r.ok, true);
-  assert.deepEqual(r.items.map(i => i.id), ['testnet', 'key', 'withdraw', 'confirm', 'dailyLoss', 'positionCap']);
+  assert.deepEqual(r.items.map(i => i.id), ['testnet', 'key', 'withdraw', 'confirm', 'dailyLoss', 'positionCap', 'stop']);
   assert.equal(B.listAccounts().find(x => x.id === a.id)!.status, 'active');
   B.updateAccount(a.id, { guard: { maxPositionPct: 0 } });
   assert.equal(B.listAccounts().find(x => x.id === a.id)!.status, 'pending', 'loosening below the guardian bar deactivates');
+
+  // RISK_RULES #1: the stop-loss can't be switched off on an active account.
+  B.updateAccount(a.id, { guard: { maxPositionPct: 20 } });
+  assert.equal((await B.check(a.id)).ok, true);
+  B.updateAccount(a.id, { guard: { requireStop: false } });
+  assert.equal(B.listAccounts().find(x => x.id === a.id)!.status, 'pending', 'turning the stop-loss off deactivates');
+  assert.deepEqual((await B.check(a.id)).items.filter(i => !i.ok).map(i => i.id), ['stop']);
 });
 
 test('guard: requireStop, position cap, reduce-only always allowed', async () => {
