@@ -7,9 +7,9 @@ import { ccxtAdapter, lockToTestnet, make, type Cx } from './ccxtx.ts';
 test('testnet allow-list: testnet hosts pass, mainnet and look-alikes are refused', () => {
   for (const u of ['https://testnet.binance.vision/api/v3/account', 'wss://stream.testnet.binance.vision/ws', 'https://testnet.binancefuture.com/fapi/v1/order',
     'wss://fstream.binancefuture.com/ws', 'https://api-testnet.bybit.com/v5/order/create', 'wss://stream-testnet.bybit.com/v5/private',
-    'wss://wspap.okx.com:443/ws/v5', 'https://testnetapiv2.nobitex.ir/market/orders/add']) assert.doesNotThrow(() => assertTestnetUrl(u), u);
+    'wss://wspap.okx.com:443/ws/v5', 'https://testnetapiv2.nobitex.ir/market/orders/add', 'https://demo-fapi.binance.com/fapi/v2/account']) assert.doesNotThrow(() => assertTestnetUrl(u), u);
   for (const u of ['https://api.binance.com/api/v3/account', 'https://fapi.binance.com/fapi/v1/order', 'https://api.bybit.com/v5/order/create',
-    'https://api.nobitex.ir/market/orders/add', 'https://testnet.binance.vision.evil.com/x', 'https://evilbinancefuture.com/x',
+    'https://api.nobitex.ir/market/orders/add', 'https://testnet.binance.vision.evil.com/x', 'https://evilbinancefuture.com/x', 'https://demo-fapi.binance.com.evil.io/x',
     'http://testnet.binance.vision/api', 'https://www.okx.com/api/v5/trade/order', 'not a url']) assert.throws(() => assertTestnetUrl(u), MainnetRefused, u);
   assert.doesNotThrow(() => assertTestnetUrl('https://www.okx.com/api/v5/trade/order', true), 'OKX REST only with the demo header');
 });
@@ -18,8 +18,9 @@ test('a CCXT client that stays on mainnet is refused at creation, and every requ
   // Real CCXT instances, no network: sandbox mode is switched off by the stub so the URLs stay on mainnet.
   const orig = make.exchange;
   try {
-    make.exchange = (id, o) => { const x = orig(id, o); x.setSandboxMode = () => {}; return x };
+    make.exchange = (id, o) => { const x = orig(id, o); x.setSandboxMode = () => {}; x.enableDemoTrading = () => {}; return x };
     assert.throws(() => ccxtAdapter('binance', 'spot', { apiKey: 'k', secret: 's' }), MainnetRefused);
+    assert.throws(() => ccxtAdapter('binanceusdm', 'futures', { apiKey: 'k', secret: 's' }), MainnetRefused);
     assert.throws(() => ccxtAdapter('bybit', 'futures', { apiKey: 'k', secret: 's' }), MainnetRefused);
     make.exchange = (id, o) => { const x = orig(id, o); x.setSandboxMode = () => {}; delete x.headers!['x-simulated-trading']; return x };
     assert.throws(() => ccxtAdapter('okx', 'futures', { apiKey: 'k', secret: 's', passphrase: 'p' }), MainnetRefused, 'OKX without the demo header is mainnet');
@@ -31,6 +32,10 @@ test('a CCXT client that stays on mainnet is refused at creation, and every requ
     await assert.rejects(x.fetch('https://api.binance.com/api/v3/account'), MainnetRefused, 'the request guard refuses before any I/O');
     assert.throws(() => x.client?.('wss://stream.binance.com:9443/ws'), MainnetRefused, 'WebSocket guard');
     a.close();
+    // Binance USDⓈ-M signs against demo trading (CCXT refuses the retired futures testnet).
+    make.exchange = (id, o) => (x = orig(id, o));
+    ccxtAdapter('binanceusdm', 'futures', { apiKey: 'k', secret: 's' });
+    assert.match((x.sign as (...a: unknown[]) => { url: string })('account', 'fapiPrivateV2', 'GET', {}).url, /^https:\/\/demo-fapi\.binance\.com\//);
     // Even if something later rewrites the URLs, the per-request guard still holds.
     make.exchange = (id, o) => (x = orig(id, o));
     ccxtAdapter('okx', 'futures', { apiKey: 'k', secret: 's', passphrase: 'p' });

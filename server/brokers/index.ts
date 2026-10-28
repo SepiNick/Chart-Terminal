@@ -96,7 +96,7 @@ const polls = (a: BrokerAccount) => a.status === 'active' || a.status === 'tripp
 function equityIn(q: string, row: Row, st: Pick<BrokerState, 'balances' | 'positions'>, prices: Map<string, number>) {
   const bal = (a: string) => { const b = st.balances.find(x => x.asset === a); return b ? b.free + b.locked : 0 };
   let e = bal(q);
-  if (row.acct.market === 'futures') return e + st.positions.filter(p => keyOf(p.sym).endsWith(`/${q}`)).reduce((s, p) => s + (p.upnl ?? 0), 0);
+  if (row.acct.market === 'futures') return rt(row.acct.id).ad?.upnlInBalance ? e : e + st.positions.filter(p => keyOf(p.sym).endsWith(`/${q}`)).reduce((s, p) => s + (p.upnl ?? 0), 0);
   const seen = new Set<string>();
   for (const sym of row.meta.syms) {
     const p = parseSym(sym), px = prices.get(sym);
@@ -117,7 +117,7 @@ function annotate(id: string, orders: BrokerOrder[]): BrokerOrder[] {
   const es = emusOf(id);
   return orders.map(o => {
     const b = es.find(e => e.kind === 'bracket' && e.parent === o.id), p = es.find(e => e.peer?.id === o.id);
-    return { ...o, ...(b?.order.tp ? { tp: b.order.tp } : {}), ...(b?.order.sl ? { sl: b.order.sl } : {}), ...(p?.oco ? { ocoGroup: p.oco } : {}) };
+    return { ...o, ...(b?.order.tp ? { tp: b.order.tp } : {}), ...(b?.order.sl ? { sl: b.order.sl } : {}), ...(p?.oco ? { ocoGroup: p.oco } : {}), ...(b?.order.error ? { error: b.order.error } : {}) };
   });
 }
 function emuView(id: string): BrokerOrder[] {
@@ -224,7 +224,13 @@ async function tickEmus(account: string, ad: Adapter, open: BrokerOrder[], price
       if (e.parent!.startsWith('emu:')) { if (!emus.has(e.parent!)) dropEmu(e.id); continue }
       if (isOpen(e.parent!)) continue;
       let p: BrokerOrder;
-      try { p = await ad.order(e.parent!, e.parentSym!) } catch { continue }   // retried next pass
+      try { p = await ad.order(e.parent!, e.parentSym!) }
+      catch (err) {
+        // Retried every pass; after 5 failures the entry shows why its TP/SL are not out yet (never silently unprotected).
+        e.tries = (e.tries ?? 0) + 1;
+        if (e.tries >= 5) { e.order.error = `TP/SL not placed yet: cannot read the entry order (${scrub(err, secretsOf(account))}) — still retrying`; saveEmu(e) }
+        continue;
+      }
       if (p.status === 'open') continue;
       dropEmu(e.id);
       if (p.filled > 0) await placeLegs(account, ad, e, p.filled);
@@ -234,7 +240,7 @@ async function tickEmus(account: string, ad: Adapter, open: BrokerOrder[], price
     if (e.order.status !== 'open') continue;
     if (e.peer && !isOpen(e.peer.id)) {
       // The exchange-side partner is gone: filled → this leg is void; canceled by the user → this leg stays on its own.
-      const p = await ad.order(e.peer.id, e.peer.sym).catch(() => null);
+      const p = await ad.order(e.peer.id, e.peer.sym, true).catch(() => null);
       if (p?.status === 'filled' || (p && p.filled > 0)) { dropEmu(e.id); continue }
       if (p) { delete e.peer; saveEmu(e) }
     }

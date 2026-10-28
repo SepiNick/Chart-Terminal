@@ -14,7 +14,7 @@ type Fn = (...a: unknown[]) => Promise<unknown>;
 export interface Cx {
   id: string; urls: { api: unknown }; headers?: Record<string, string>; has: Record<string, unknown>;
   markets?: Record<string, { symbol: string; base: string; quote: string; type?: string; settle?: string; contractSize?: number }>;
-  setSandboxMode(on: boolean): void; implodeHostname(url: string): string;
+  setSandboxMode(on: boolean): void; enableDemoTrading?(on: boolean): void; implodeHostname(url: string): string;
   fetch: (url: string, method?: string, headers?: unknown, body?: unknown) => Promise<unknown>;
   client?: (url: string) => unknown;
   loadMarkets: Fn; fetchBalance: Fn; fetchPositions: Fn; fetchOpenOrders: Fn; fetchOrder: Fn; fetchMyTrades: Fn; fetchTicker: Fn;
@@ -27,10 +27,19 @@ export interface Keys { apiKey: string; secret: string; passphrase?: string }
 /** How an account's CCXT instance is made (tests swap in a fake). */
 export const make = { exchange: (id: string, opts: object): Cx => new (ccxt.pro as unknown as Record<string, new (o: object) => Cx>)[id](opts) };
 
-/** Sandbox mode + allow-list on every base URL, every REST request and every WebSocket. Returns the hosts. */
+/**
+ * Sandbox mode + allow-list on every base URL, every REST request and every WebSocket. Returns the hosts.
+ * Binance USDⓈ-M: CCXT 4.5 refuses signed calls to the old futures testnet and points to Binance demo trading instead.
+ */
 export function lockToTestnet(x: Cx): string[] {
-  if (!('test' in (x.urls as object)) || !(x.urls as { test?: unknown }).test) throw Error(`${x.id}: CCXT has no sandbox for this exchange`);
-  x.setSandboxMode(true);
+  const urls = x.urls as { test?: unknown; demo?: unknown };
+  if (x.id === 'binanceusdm') {
+    if (!urls.demo || !x.enableDemoTrading) throw Error(`${x.id}: CCXT has no demo trading for this exchange`);
+    x.enableDemoTrading(true);
+  } else {
+    if (!urls.test) throw Error(`${x.id}: CCXT has no sandbox for this exchange`);
+    x.setSandboxMode(true);
+  }
   const demo = () => x.id === 'okx' && x.headers?.['x-simulated-trading'] === '1';
   const hosts = new Set(urlLeaves(x.urls.api).map(u => assertTestnetUrl(x.implodeHostname(u), demo())));
   const f = x.fetch.bind(x);
@@ -107,9 +116,11 @@ export function ccxtAdapter(broker: CcxtBroker, market: Market, keys: Keys): Ada
     hosts,
     native: new Set(broker === 'binance' ? ['stop_limit'] as const : ['stop', 'stop_limit'] as const),
     canEdit: x.has.editOrder === true,
+    upnlInBalance: broker !== 'bybit',
     async balances() {
       const b = await x.fetchBalance() as { total?: Record<string, number>; free?: Record<string, number>; used?: Record<string, number> };
-      return Object.entries(b.total ?? {}).filter(([, t]) => t > 0).map(([asset]) => ({ asset, free: b.free?.[asset] ?? 0, locked: b.used?.[asset] ?? 0 }));
+      // locked = total − free, so free + locked is the exchange's own total (margin balance on futures).
+      return Object.entries(b.total ?? {}).filter(([, t]) => t > 0).map(([asset, t]) => { const free = b.free?.[asset] ?? 0; return { asset, free, locked: Math.max(0, t - free) } });
     },
     async positions() {
       if (!futures) return [];
@@ -130,7 +141,12 @@ export function ccxtAdapter(broker: CcxtBroker, market: Market, keys: Keys): Ada
       const seen = new Set<string>();
       return [...plain, ...trig].filter(o => !seen.has(o.id) && seen.add(o.id)).map(toOrder);
     },
-    async order(id, sym) { const m = await mkt(sym); return toOrder(await x.fetchOrder(id, m.symbol) as CcxtOrder) },
+    async order(id, sym, trigger) {
+      const m = await mkt(sym);
+      // Bybit's fetchOrder only sees its last 500 orders and refuses without this flag; trigger orders need `trigger`.
+      const params = { ...(broker === 'bybit' ? { acknowledged: true } : {}), ...(trigger ? { trigger: true } : {}) };
+      return toOrder(await x.fetchOrder(id, m.symbol, params) as CcxtOrder);
+    },
     async fills(syms) {
       const out: BrokerFill[] = [];
       for (const sym of syms) {

@@ -5,6 +5,7 @@
 const TESTNET_HOSTS = [
   /^(?:[a-z0-9-]+\.)*testnet\.binance\.vision$/,   // Binance spot testnet (REST, streams, ws-api)
   /^(?:[a-z0-9-]+\.)*binancefuture\.com$/,          // Binance futures testnet (the mainnet lives on binance.com)
+  /^demo-[a-z-]+\.binance\.com$/,                    // Binance demo trading (CCXT's replacement for the futures testnet)
   /^(?:api|stream)-testnet\.bybit\.com$/,
   /^wspap\.okx\.com$/,                              // OKX demo-trading WebSocket
   /^testnetapiv2\.nobitex\.ir$/,
