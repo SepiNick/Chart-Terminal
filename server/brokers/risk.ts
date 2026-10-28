@@ -26,7 +26,9 @@ export type Verdict = { ok: true; reducing: boolean } | { ok: false; reason: str
 
 /** Does this order only reduce / close the current position? */
 export function reduces(o: Pick<OrderReq, 'side' | 'qty' | 'reduceOnly'>, c: Pick<OrderCtx, 'spot' | 'pos' | 'spotFree'>): boolean {
-  if (c.spot) return o.side === 'sell' && o.qty <= (c.spotFree ?? c.pos) + 1e-12;
+  // Spot can't open a short: every sell reduces. (Comparing with the free balance wrongly blocked protective stops whose
+  // coins are locked by the stop itself or shrunk by a fee, exactly when the breaker is tripped.)
+  if (c.spot) return o.side === 'sell';
   if (o.reduceOnly) return true;
   const d = o.side === 'buy' ? o.qty : -o.qty;
   return c.pos !== 0 && Math.sign(d) !== Math.sign(c.pos) && Math.abs(d) <= Math.abs(c.pos) + 1e-12;

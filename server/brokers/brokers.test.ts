@@ -277,3 +277,14 @@ test('guardian fixes: SL can\'t be removed, resting orders count toward the cap,
   const o = st.orders.find(x => x.id === stop.id)!;
   assert.equal(o.status, 'rejected'); assert.match(o.error!, /Position cap/);
 });
+
+test('spot protective sells always count as reducing, so a tripped breaker never blocks a stop', async () => {
+  const { checkOrder } = await import('./risk.ts');
+  const ctx = { status: 'tripped' as const, guard: { maxDailyLossPct: 3, maxPositionPct: 20, requireStop: true, confirmedNoWithdraw: true }, spot: true, pos: 5, spotFree: 3, price: 100, equity: 10_000, dayEquity: 9_600, dayStart: 10_000, hasStop: false, skipStop: true };
+  // bracket SL sized at the filled qty while part of the coins is locked or went to a fee
+  assert.deepEqual(checkOrder({ side: 'sell', qty: 5 }, ctx), { ok: true, reducing: true });
+  // a native stop whose own coins are locked (free 0) being moved
+  assert.deepEqual(checkOrder({ side: 'sell', qty: 5 }, { ...ctx, spotFree: 0 }), { ok: true, reducing: true });
+  // buys are still blocked while tripped
+  assert.equal(checkOrder({ side: 'buy', qty: 1, sl: 90 }, ctx).ok, false);
+});
