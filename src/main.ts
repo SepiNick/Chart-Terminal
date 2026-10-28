@@ -11,7 +11,11 @@ import { styleFor } from './drawings.ts';
 import { sizeOf } from './tools/basic.ts';
 import { isExpr, parse } from './symmath.ts';
 import { showMenu, type MenuItem } from './menu.ts';
-import { newAccount, placeOrder, cancelOrder, closePosition, onPrice, equity, type Account, type OrderType, type Side } from './trading.ts';
+import { newAccount, onPrice, type Account, type Order, type OrderType, type Side } from './trading.ts';
+import { PaperBroker, fromOrder, toOrder } from './broker/paper.ts';
+import { registerBroker, activeBroker, allBrokers, setActiveBroker, onBrokers } from './broker/registry.ts';
+import type { Broker, OrderReq } from './broker/types.ts';
+import { sizeQty, quoteBalance, type SizeMode } from './sizing.ts';
 import { store, $, $$, esc, toast, calcPrec, fmtVol } from './store.ts';
 import { initTesterUI } from './testerui.ts';
 import { defaultOF, type OFCfg } from './orderflow/layer.ts';
@@ -69,12 +73,15 @@ const lastPx: Record<string, number> = {}, tick24: Record<string, Ticker> = {}, 
 const active = () => panes[st.layout.active] ?? panes[0];
 const pxOf = (sym: string) => lastPx[sym] ?? panes.find(p => p.cfg.symbol === sym)?.lastPrice();
 const saveAcct = () => { store.set('acct', st.acct); journalSync(st.acct) };
+// The paper account as a Broker (phase 6): the ticket, chart lines and panels trade the active broker.
+const paper = new PaperBroker({ acct: () => st.acct, save: saveAcct, px: pxOf, now: () => active()?.vb().at(-1)?.time ?? Date.now() / 1000 });
+registerBroker(paper);
 // The server (forward-test fills) or another device changed the paper account: use it now, so the next local
 // order doesn't overwrite those fills with this tab's older copy.
 onServer('state', m => {
   if (m.key !== 'acct' || !m.value) return;
   st.acct = m.value as Account;
-  journalSync(st.acct); panes.forEach(p => p.tradeOverlay()); later(renderTrading);
+  journalSync(st.acct); paper.emit();
 });
 const saveLayout = () => {
   st.layout.panes = panes.map((p, i) => ({ ...p.cfg, link: st.layout.panes[i]?.link }));
@@ -109,7 +116,7 @@ const hooks: Hooks = {
   settings: () => st.settings,
   drawings: sym => (st.drawings[sym] ??= []),
   alerts: () => (serverMode ? serverLines() : st.alerts),
-  account: () => st.acct,
+  broker: () => activeBroker(),
   hidden: () => st.hidden,
   onPrice: handlePrice,
   onCrosshair(src, time, prm) {
@@ -157,7 +164,7 @@ const hooks: Hooks = {
   quickOrder(p, side) {
     const px = pxOf(p.cfg.symbol); if (!px) return;
     const qty = +$<HTMLInputElement>('#tQty').value;
-    if (!st.settings.instantOrders && !confirm(`${side.toUpperCase()} ${qty} ${p.cfg.symbol} at market (~${px})? (paper)`)) return;
+    if (!st.settings.instantOrders && !confirm(`${side.toUpperCase()} ${qty} ${p.cfg.symbol} at market (~${px})? (${brokerLabel()})`)) return;
     submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p);
   },
   chartMenu: (p, e, price) => chartMenu(p, e, price),
@@ -262,11 +269,15 @@ function handlePrice(sym: string, px: number, ts: number) {
     if (level == null) continue;
     if ((a.dir === 'up' && prev < level && px >= level) || (a.dir === 'down' && prev > level && px <= level)) fireAlert(a, px, level);
   }
-  const fills = onPrice(st.acct, sym, px, ts);
+  const levels = () => st.acct.orders.map(o => o.sym === sym ? `${o.price}${o.triggered ?? ''}` : '').join();
+  const before = levels(), fills = onPrice(st.acct, sym, px, ts);
   if (fills.length) {
     saveAcct();
     fills.forEach(f => toast(`Filled ${f.orderType} ${f.side} ${f.qty} ${f.sym} @ ${f.px.toFixed(calcPrec(f.px))}`, 5000));
-    panes.forEach(p => p.tradeOverlay());
+    paper.emit();
+  } else if (levels() !== before) {   // a trailing stop moved or a stop-limit triggered: redraw now, save at most every 2 s
+    paper.emit();
+    trailSave ||= window.setTimeout(() => { trailSave = 0; saveAcct() }, 2000);
   }
   if (fills.length || st.acct.pos[sym]) later(renderTrading);
 }
@@ -276,7 +287,7 @@ function drawingPrice(a: Alert): number | null {
   const d = (st.drawings[a.sym] ?? []).find(x => x.id === a.drawingId); if (!d) return null;
   return TOOL_MAP.get(d.type)?.priceAt?.(d, Date.now() / 1000, p.layer.geo()) ?? null;
 }
-let unsubTickers = () => {}, tickKey = '';
+let unsubTickers = () => {}, tickKey = '', trailSave = 0;
 function connectTickers() {
   const syms = [...new Set([...st.watch, ...panes.flatMap(p => isExpr(p.cfg.symbol) ? [] : [p.cfg.symbol]), ...(serverMode ? [] : st.alerts.filter(a => a.on).map(a => a.sym)), ...Object.keys(st.acct.pos), ...st.acct.orders.map(o => o.sym)])];
   const key = syms.filter(x => !isRemote(x)).join();   // remote symbols get prices from their candle feed
@@ -388,7 +399,7 @@ const drawHost: DrawUIHost = {
     const type: OrderType = Math.abs(entry - last) / last < 5e-4 ? 'market' : (long === entry < last) ? 'limit' : 'stop';
     const tp = +d.pts[1].p.toFixed(p.prec), sl = +d.pts[2].p.toFixed(p.prec);
     const lev = Number(d.style.leverage) > 1 ? ` · ${d.style.leverage}x margin ${z.margin.toFixed(2)}` : '';
-    if (!st.settings.instantOrders && !confirm(`${side.toUpperCase()} ${type} ${qty} ${sym}${type === 'market' ? '' : ' @ ' + entry} · TP ${tp} · SL ${sl}${lev} (paper)?`)) return;
+    if (!st.settings.instantOrders && !confirm(`${side.toUpperCase()} ${type} ${qty} ${sym}${type === 'market' ? '' : ' @ ' + entry} · TP ${tp} · SL ${sl}${lev} (${brokerLabel()})?`)) return;
     submit({ sym, side, type, qty, price: type === 'market' ? undefined : entry, tp, sl }, last, p);
   },
 };
@@ -867,60 +878,119 @@ $('#scrT').onclick = e => {
 
 // ---------- order ticket & trading panel ----------
 const ticket = { side: 'buy' as Side, type: 'market' as OrderType };
-function submit(o: Parameters<typeof placeOrder>[1], px: number, p: ChartPane) {
-  if (journalReplayOrder(p, o)) return;   // journal: a chart in Replay trades a simulated backtest account instead
-  const err = placeOrder(st.acct, o, px, p.vb().at(-1)?.time ?? Date.now() / 1000);
-  if (err) return toast(err, 5000);
-  saveAcct(); connectTickers(); panes.forEach(x => x.tradeOverlay()); renderTrading();
-  toast(o.type === 'market' ? 'Order filled (paper)' : 'Order placed (paper)');
+const brokerLabel = () => activeBroker()?.account.label ?? 'Paper';
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** Older call sites (quick buttons, chart menu, DOM, position tool, forward test) build engine orders; `px` is unused now. */
+function submit(o: Omit<Order, 'id'>, _px: number, p: ChartPane, b?: Broker) { void send(fromOrder(o), p, b) }
+/** Every order goes through a Broker (the active one unless given); refusals (e.g. the server's guard) become toasts. */
+async function send(r: OrderReq, p: ChartPane, b = activeBroker()) {
+  if (r.ocoWith && p.replay) return toast('OCO orders are not available in Replay');
+  if (journalReplayOrder(p, toOrder(r))) return;   // journal: a chart in Replay trades a simulated backtest account instead
+  if (!b) return toast('No trading account');
+  try {
+    const o = await b.place(r);
+    if (o.status === 'rejected') toast(`${b.account.label} rejected the order: ${o.error ?? 'no reason given'}`, 6000);
+    else toast(`${o.status === 'filled' ? 'Order filled' : 'Order placed'} (${b.account.label})${o.error ? ` · ${o.error}` : ''}`, o.error ? 6000 : 3000);
+  } catch (e) { toast(`${b.account.label}: ${errMsg(e)}`, 6000) }
+}
+const tval = (id: string) => +$<HTMLInputElement>(id).value;
+const tchk = (id: string) => $<HTMLInputElement>(id).checked;
+/** The ticket as an order request, its quantity from the sizing mode; `error` when it can't be built yet. */
+function ticketReq(): { req?: OrderReq; info: string; error?: string } {
+  const sym = active()?.cfg.symbol ?? '', last = pxOf(sym), k = ticket.type, bs = activeBroker()?.state();
+  const stopPrice = k === 'stop' || k === 'stop_limit' ? tval('#tStop') : undefined;
+  const price = k === 'limit' || k === 'stop_limit' ? tval('#tPrice') : undefined;
+  const entry = price ?? stopPrice ?? last ?? 0;
+  const tp = tchk('#tTpOn') ? tval('#tTp') : undefined, sl = tchk('#tSlOn') ? tval('#tSl') : undefined;
+  const mode = $<HTMLSelectElement>('#tSizeMode').value as SizeMode;
+  if (mode !== 'units') {
+    const bal = quoteBalance(sym, bs?.balances ?? []);
+    const z = sizeQty({ mode, value: tval('#tSize'), price: entry, available: bal?.free ?? 0, equity: bs?.equity ?? bal?.free ?? 0, sl });
+    $<HTMLInputElement>('#tQty').value = z.qty ? String(z.qty) : '';
+    if (z.error) return { info: z.error, error: z.error };
+  }
+  const qty = tval('#tQty');
+  const req: OrderReq = { sym, side: ticket.side, kind: k, qty, price, stopPrice, tp, sl, reduceOnly: tchk('#tReduce') || undefined };
+  if (k === 'trailing_stop') req.trail = $<HTMLSelectElement>('#tTrailUnit').value === 'pct' ? { pct: tval('#tTrail') } : { amount: tval('#tTrail') };
+  if (tchk('#tOcoOn')) {
+    const ok = $<HTMLSelectElement>('#tOcoKind').value as 'limit' | 'stop', opx = tval('#tOcoPx');
+    req.ocoWith = { sym, side: ticket.side, kind: ok, qty, ...(ok === 'limit' ? { price: opx } : { stopPrice: opx }), reduceOnly: req.reduceOnly };
+  }
+  const v = entry * qty, risk = sl != null && sl > 0 ? Math.abs(entry - sl) * qty : null, eq = bs?.equity;
+  const info = entry && qty ? `Qty ${qty} · value ≈ ${v.toFixed(2)} · fee ≈ ${(v * 0.001).toFixed(2)}${risk != null ? ` · risk ≈ ${risk.toFixed(2)}${eq ? ` (${((risk / eq) * 100).toFixed(2)}% of equity)` : ''}` : ''}` : '';
+  return { req, info };
 }
 function renderTicket() {
+  const k = ticket.type, units = $<HTMLSelectElement>('#tSizeMode').value === 'units';
+  const show = (id: string, on: boolean) => { $(id).style.display = on ? '' : 'none' };
   $$('#tSide button').forEach(b => b.classList.toggle('on', b.dataset.side === ticket.side));
-  $$('#tType button').forEach(b => b.classList.toggle('on', b.dataset.type === ticket.type));
-  $('#tPriceRow').style.display = ticket.type === 'market' ? 'none' : '';
+  $$('#tType button').forEach(b => b.classList.toggle('on', b.dataset.type === k));
+  show('#tPriceRow', k === 'limit' || k === 'stop_limit'); show('#tStopRow', k === 'stop' || k === 'stop_limit');
+  show('#tTrailRow', k === 'trailing_stop'); show('#tOcoRow', tchk('#tOcoOn')); show('#tSize', !units);
+  $<HTMLInputElement>('#tQty').readOnly = !units;
   const btn = $('#tSubmit');
   btn.className = (ticket.side === 'buy' ? 'buyc' : 'sellc') + ' big-btn';
-  btn.textContent = `${ticket.side === 'buy' ? 'Buy' : 'Sell'} ${ticket.type === 'market' ? 'market' : ticket.type}`;
-  const qty = +$<HTMLInputElement>('#tQty').value, px = ticket.type === 'market' ? pxOf(active()?.cfg.symbol ?? '') : +$<HTMLInputElement>('#tPrice').value;
-  $('#tInfo').textContent = px && qty ? `Value ≈ ${(px * qty).toFixed(2)} USDT · fee ≈ ${(px * qty * 0.001).toFixed(2)}` : '';
+  btn.textContent = `${ticket.side === 'buy' ? 'Buy' : 'Sell'} ${k === 'market' ? 'market' : k.replace('_', ' ')}`;
+  $('#tInfo').textContent = ticketReq().info;
 }
+function renderAcctSel() {
+  const cur = activeBroker()?.account.id;
+  $('#tAcct').innerHTML = allBrokers().map(({ account: a }) =>
+    `<option value="${esc(a.id)}"${a.id === cur ? ' selected' : ''}>${esc(a.label)}${a.id !== 'paper' ? ` · ${esc(a.broker)} testnet` : ''}${a.status !== 'active' ? ` (${esc(a.status)})` : ''}</option>`).join('');
+  $('#resetAcct').style.display = cur === 'paper' ? '' : 'none';
+}
+$('#tAcct').onchange = e => setActiveBroker((e.target as HTMLSelectElement).value);
 $('#tSide').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) { ticket.side = s as Side; renderTicket() } };
 $('#tType').onclick = e => {
   const t = (e.target as HTMLElement).dataset.type; if (!t) return;
   ticket.type = t as OrderType;
-  const px = pxOf(active().cfg.symbol);
-  if (t !== 'market' && px) $<HTMLInputElement>('#tPrice').value = px.toFixed(active().prec);
+  const px = pxOf(active().cfg.symbol), v = px?.toFixed(active().prec) ?? '';
+  if ((t === 'limit' || t === 'stop_limit') && px) $<HTMLInputElement>('#tPrice').value = v;
+  if ((t === 'stop' || t === 'stop_limit') && px) $<HTMLInputElement>('#tStop').value = v;
   renderTicket();
 };
 $('#s-trade').addEventListener('input', renderTicket);
 $('#tSubmit').onclick = () => {
-  const p = active(), sym = p.cfg.symbol, px = pxOf(sym);
-  if (!px) return toast('No price yet');
+  const p = active(), sym = p.cfg.symbol;
+  if (!pxOf(sym)) return toast('No price yet');
   if (isExpr(sym)) return toast('Spread symbols cannot be traded');
-  const num = (id: string) => +$<HTMLInputElement>(id).value;
-  submit({
-    sym, side: ticket.side, type: ticket.type, qty: num('#tQty'),
-    price: ticket.type === 'market' ? undefined : num('#tPrice'),
-    tp: $<HTMLInputElement>('#tTpOn').checked ? num('#tTp') : undefined,
-    sl: $<HTMLInputElement>('#tSlOn').checked ? num('#tSl') : undefined,
-  }, px, p);
+  const t = ticketReq();
+  if (!t.req) return toast(t.error ?? 'Check the order', 5000);
+  void send(t.req, p);
 };
-$('#resetAcct').onclick = () => { if (confirm('Reset paper account to 10,000 USDT?')) { st.acct = newAccount(); saveAcct(); panes.forEach(p => p.tradeOverlay()); renderTrading() } };
+$('#resetAcct').onclick = () => { if (confirm('Reset paper account to 10,000 USDT?')) { st.acct = newAccount(); saveAcct(); paper.emit() } };
+// Lines, panels and the ticket follow the active broker; re-subscribe when it (or the list of accounts) changes.
+let unwatch = () => {};
+function tradeChanged() { panes.forEach(p => p.tradeOverlay()); later(renderTrading); later(renderTicket); connectTickers() }
+function watchBroker() { unwatch(); unwatch = activeBroker()?.onChange(tradeChanged) ?? (() => {}); renderAcctSel(); tradeChanged() }
+onBrokers(watchBroker);
 function renderTrading() {
-  const a = st.acct, { equity: eq, unrealized } = equity(a, lastPx);
-  $('#acctLine').innerHTML = `Paper · Equity <b>${eq.toFixed(2)}</b> · Balance ${a.cash.toFixed(2)} · uPnL <span class="${unrealized >= 0 ? 'up' : 'dn'}">${unrealized.toFixed(2)}</span>`;
-  const f = (x: number) => x.toFixed(calcPrec(x));
-  $('#posT').innerHTML = '<tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg price</th><th>Last</th><th>Unrealized PnL</th><th></th></tr>' + (Object.entries(a.pos).map(([s, p]) => {
-    const px = lastPx[s], u = px ? (px - p.avg) * p.qty : 0;
-    return `<tr><td>${esc(s)}</td><td class="${p.qty > 0 ? 'up' : 'dn'}">${p.qty > 0 ? 'Long' : 'Short'}</td><td>${Math.abs(p.qty)}</td><td>${f(p.avg)}</td><td>${px ? f(px) : '–'}</td>
-      <td class="${u >= 0 ? 'up' : 'dn'}">${u.toFixed(2)} (${((u / Math.abs(p.avg * p.qty)) * 100).toFixed(2)}%)</td><td><button class="x" data-close="${esc(s)}">Close</button></td></tr>`;
-  }).join('') || '<tr><td class="muted" colspan="7">No open positions</td></tr>');
-  $('#ordT').innerHTML = '<tr><th>Symbol</th><th>Type</th><th>Side</th><th>Qty</th><th>Price</th><th></th></tr>' + (a.orders.map(o =>
-    `<tr><td>${esc(o.sym)}</td><td>${o.reduceOnly ? (o.type === 'limit' ? 'Take profit' : 'Stop loss') : o.type}</td><td class="${o.side === 'buy' ? 'up' : 'dn'}">${o.side}</td><td>${o.qty}</td><td>${f(o.price!)}</td>
-     <td><button class="x" data-cancel="${o.id}">Cancel</button></td></tr>`).join('') || '<tr><td class="muted" colspan="6">No working orders</td></tr>');
-  $('#histT').innerHTML = '<tr><th>Time</th><th>Symbol</th><th>Side</th><th>Type</th><th>Qty</th><th>Price</th><th>Fee</th><th>PnL</th></tr>' + (a.fills.slice(0, 100).map(x =>
-    `<tr><td>${new Date(x.ts * 1000).toLocaleString()}</td><td>${esc(x.sym)}</td><td class="${x.side === 'buy' ? 'up' : 'dn'}">${x.side}</td><td>${x.orderType}</td><td>${x.qty}</td><td>${f(x.px)}</td><td>${x.fee.toFixed(2)}</td>
-     <td class="${x.realized >= 0 ? 'up' : 'dn'}">${x.realized ? x.realized.toFixed(2) : ''}</td></tr>`).join('') || '<tr><td class="muted" colspan="8">No fills yet</td></tr>');
+  const b = activeBroker(), s = b?.state(), f = (x: number) => x.toFixed(calcPrec(x));
+  const empty = (n: number, msg: string) => `<tr><td class="muted" colspan="${n}">${msg}</td></tr>`;
+  if (!b || !s) {
+    $('#acctLine').textContent = b ? `${b.account.label} · loading…` : '';
+    $('#posT').innerHTML = empty(1, 'No account data yet'); $('#ordT').innerHTML = $('#histT').innerHTML = '';
+    return;
+  }
+  const a = b.account, mark = (p: { sym: string; mark?: number }) => p.mark ?? pxOf(p.sym);
+  const upnl = (p: (typeof s.positions)[number]) => p.upnl ?? (mark(p) ? (mark(p)! - p.entry) * p.qty : 0);
+  const u = s.positions.reduce((t, p) => t + upnl(p), 0), bal = quoteBalance(active()?.cfg.symbol ?? '', s.balances);
+  const status = a.status !== 'active' ? ` · <span class="dn">${esc(a.status)}${a.error ? ': ' + esc(a.error) : ''}</span>` : '';
+  $('#acctLine').innerHTML = `${esc(a.label)}${status}${s.equity != null ? ` · Equity <b>${s.equity.toFixed(2)}</b>` : ''}${bal ? ` · Balance ${bal.free.toFixed(2)}${bal.asset !== 'USDT' ? ' ' + esc(bal.asset) : ''}` : ''} · uPnL <span class="${u >= 0 ? 'up' : 'dn'}">${u.toFixed(2)}</span>`;
+  $('#posT').innerHTML = '<tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Avg price</th><th>Last</th><th>Unrealized PnL</th><th></th></tr>' + (s.positions.filter(p => p.qty).map(p => {
+    const px = mark(p), pl = upnl(p);
+    return `<tr><td>${esc(p.sym)}</td><td class="${p.qty > 0 ? 'up' : 'dn'}">${p.qty > 0 ? 'Long' : 'Short'}</td><td>${Math.abs(p.qty)}</td><td>${f(p.entry)}</td><td>${px ? f(px) : '–'}</td>
+      <td class="${pl >= 0 ? 'up' : 'dn'}">${pl.toFixed(2)} (${((pl / Math.abs(p.entry * p.qty)) * 100).toFixed(2)}%)</td><td><button class="x" data-close="${esc(p.sym)}">Close</button></td></tr>`;
+  }).join('') || empty(7, 'No open positions'));
+  const kind = (o: (typeof s.orders)[number]) => (o.reduceOnly && o.kind !== 'market' ? (o.kind === 'limit' ? 'Take profit' : 'Stop loss') : o.kind.replace('_', ' '))
+    + (o.trail ? ` (${o.trail.pct ? o.trail.pct + '%' : o.trail.amount})` : '') + (o.ocoGroup && !o.reduceOnly ? ' · OCO' : '');
+  $('#ordT').innerHTML = '<tr><th>Symbol</th><th>Type</th><th>Side</th><th>Qty</th><th>Price</th><th>Stop</th><th>TP / SL</th><th>Note</th><th></th></tr>' + (s.orders.filter(o => o.status === 'open').map(o =>
+    `<tr><td>${esc(o.sym)}</td><td>${esc(kind(o))}</td><td class="${o.side === 'buy' ? 'up' : 'dn'}">${o.side}</td><td>${o.qty}</td><td>${o.price != null ? f(o.price) : '–'}</td><td>${o.stopPrice != null ? f(o.stopPrice) : '–'}</td>
+     <td>${o.tp != null || o.sl != null ? `${o.tp != null ? f(o.tp) : '–'} / ${o.sl != null ? f(o.sl) : '–'}` : ''}</td><td class="muted">${esc(o.error ?? '')}</td>
+     <td><button class="x" data-cancel="${esc(o.id)}">Cancel</button></td></tr>`).join('') || empty(9, 'No working orders'));
+  $('#histT').innerHTML = '<tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Price</th><th>Fee</th><th>PnL</th></tr>' + (s.fills.slice(0, 100).map(x =>
+    `<tr><td>${new Date(x.ts > 1e11 ? x.ts : x.ts * 1000).toLocaleString()}</td><td>${esc(x.sym)}</td><td class="${x.side === 'buy' ? 'up' : 'dn'}">${x.side}</td><td>${x.qty}</td><td>${f(x.price)}</td><td>${x.fee.toFixed(2)}</td>
+     <td class="${(x.realized ?? 0) >= 0 ? 'up' : 'dn'}">${x.realized ? x.realized.toFixed(2) : ''}</td></tr>`).join('') || empty(7, 'No fills yet'));
 }
 function showBottom(tab: string) {
   $$('#bTabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
@@ -942,10 +1012,10 @@ $('#bottom').onclick = e => {
   const el = e.target as HTMLElement;
   if (el.dataset.tab) showBottom(el.dataset.tab);
   if (el.id === 'bToggle') { $('#bottom').classList.toggle('collapsed'); el.textContent = $('#bottom').classList.contains('collapsed') ? '▴' : '▾' }
-  const s = el.dataset.close;
-  if (s) { const px = pxOf(s); if (px) closePosition(st.acct, s, px, Date.now() / 1000) }
-  if (el.dataset.cancel) cancelOrder(st.acct, +el.dataset.cancel);
-  if (s || el.dataset.cancel) { saveAcct(); panes.forEach(p => p.tradeOverlay()); renderTrading() }
+  const s = el.dataset.close, oid = el.dataset.cancel, b = activeBroker();
+  const fail = (e: unknown) => toast(`${b?.account.label}: ${errMsg(e)}`, 6000);
+  if (b && s) b.closePosition(s).catch(fail);
+  if (b && oid) b.cancel(oid).catch(fail);
 };
 
 // ---------- chart settings dialog ----------
@@ -1027,7 +1097,7 @@ document.addEventListener('keydown', e => {
 });
 
 initPineUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
-initTesterUI({ paper: (p, side, qty) => { const px = pxOf(p.cfg.symbol); if (px) { journalSource('Forward test'); submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p); journalSource('') } }, watchlist: () => st.watch });
+initTesterUI({ paper: (p, side, qty) => { const px = pxOf(p.cfg.symbol); if (px) { journalSource('Forward test'); submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p, paper); journalSource('') } }, watchlist: () => st.watch });
 initJournal({
   tfOf: sym => panes.find(p => p.cfg.symbol === sym)?.cfg.tf,
   bracketOf: sym => {
