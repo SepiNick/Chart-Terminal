@@ -263,10 +263,10 @@ async function tickEmus(account: string, ad: Adapter, open: BrokerOrder[], price
 
 async function fire(account: string, ad: Adapter, e: Emu, px: number): Promise<boolean> {
   const row = rowOf(account);
-  if (!e.send!.reduceOnly) {
-    const v = checkOrder(e.send!, ctxFor(row, e.send!.sym, e.send!.side, e.send!.price ?? px, true));
-    if (!v.ok) { reject(e, `Not sent: ${v.reason}`); if (v.trip) trip(row); return false }
-  }
+  // Always checked: a genuinely reducing order passes inside checkOrder (decided from the position, not the flag,
+  // so a spot "reduce-only" buy can't skip the cap or a tripped breaker). Its OCO siblings aren't counted as pending.
+  const v = checkOrder(e.send!, ctxFor(row, e.send!.sym, e.send!.side, e.send!.price ?? px, true, o => o.id === e.id || (!!e.oco && emus.get(o.id)?.oco === e.oco)));
+  if (!v.ok) { reject(e, `Not sent: ${v.reason}`); if (v.trip) trip(row); return false }
   try {
     const o = await ad.place(e.send!);
     if (e.oco) for (const s of emusOf(account)) if (s.oco === e.oco && s.id !== e.id) dropEmu(s.id);
@@ -286,7 +286,7 @@ async function fire(account: string, ad: Adapter, e: Emu, px: number): Promise<b
 function reject(e: Emu, why: string) { e.order.status = 'rejected'; e.order.error = `${e.what}: ${why}`; e.order.updated = deps.now(); saveEmu(e) }
 
 // ---------- guard ----------
-function ctxFor(row: Row, sym: string, side: 'buy' | 'sell', price: number, skipStop = false): OrderCtx {
+function ctxFor(row: Row, sym: string, side: 'buy' | 'sell', price: number, skipStop = false, exclude: (o: BrokerOrder) => boolean = () => false): OrderCtx {
   const r = rt(row.acct.id), st = r.state, p = parseSym(sym);
   const balances = st?.balances ?? [], positions = st?.positions ?? [];
   const b = balances.find(x => x.asset === p.base);
@@ -299,6 +299,7 @@ function ctxFor(row: Row, sym: string, side: 'buy' | 'sell', price: number, skip
     equity: equityIn(p.quote, { ...row, meta: { ...row.meta, syms: [...new Set([...row.meta.syms, sym])] } }, { balances, positions }, prices),
     dayEquity: st?.equity ?? 0, dayStart: st?.dayStartEquity, skipStop,
     hasStop: stops.length > 0,
+    pending: [...(st?.orders ?? []), ...emuView(row.acct.id)].filter(o => same(o.sym, sym) && o.status === 'open' && o.side === side && !o.reduceOnly && !exclude(o)).reduce((s, o) => s + o.qty - o.filled, 0),
   };
 }
 
@@ -425,6 +426,7 @@ function setBracket(id: string, parent: BrokerOrder, p: OrderPatch) {
 
 export async function modifyOrder(id: string, oid: string, x: unknown): Promise<BrokerOrder> {
   const row = activeRow(id), p = validPatch(x), ad = adapterOf(id);
+  if (p.sl === null && row.acct.guard.requireStop) throw bad('A stop-loss is required on this account: move the SL instead of removing it');
   const e = emus.get(oid);
   if (e && e.account === id && e.kind === 'trigger') {
     if (e.order.status !== 'open') throw bad('This order is no longer open');
@@ -450,10 +452,9 @@ export async function modifyOrder(id: string, oid: string, x: unknown): Promise<
   if (p.stopPrice !== undefined && o.kind !== 'stop' && o.kind !== 'stop_limit') throw bad('This order has no stop price');
   if (o.kind === 'market' || o.kind === 'trailing_stop') throw bad('This order cannot be modified');
   const n: Native = { sym: o.sym, side: o.side, kind: o.kind, qty: p.qty ?? o.qty - o.filled, ...(o.kind === 'limit' || o.kind === 'stop_limit' ? { price: p.price ?? o.price } : {}), ...(o.stopPrice !== undefined || p.stopPrice !== undefined ? { stopPrice: p.stopPrice ?? o.stopPrice } : {}), ...(o.reduceOnly ? { reduceOnly: true } : {}) };
-  if (p.qty !== undefined && p.qty > o.qty - o.filled) {
-    const v = checkOrder({ side: o.side, qty: p.qty - (o.qty - o.filled), reduceOnly: o.reduceOnly }, ctxFor(row, o.sym, o.side, n.price ?? n.stopPrice ?? rt(id).prices.get(o.sym) ?? 0, true));
-    if (!v.ok) { if (v.trip) trip(row); throw bad(v.reason) }
-  }
+  // Re-check the whole order: a bigger qty or a price moved toward the market both change its notional.
+  const v = checkOrder({ side: o.side, qty: n.qty, reduceOnly: o.reduceOnly }, ctxFor(row, o.sym, o.side, n.price ?? n.stopPrice ?? rt(id).prices.get(o.sym) ?? 0, true, z => z.id === o.id));
+  if (!v.ok) { if (v.trip) trip(row); throw bad(v.reason) }
   let out: BrokerOrder;
   if (ad.canEdit && ad.edit && o.kind === 'limit') {
     try { out = await ad.edit(oid, n) } catch (err) { throw fail(id, err) }

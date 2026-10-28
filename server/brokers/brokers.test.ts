@@ -245,3 +245,35 @@ test('stop kinds the exchange lacks are emulated; modify = cancel+replace with a
   await B.cancelOrder(id, s.id);
   assert.ok(!(await B.refresh(id)).orders.some(o => o.id === s.id));
 });
+
+// trade-guardian review fixes (RISK_RULES #1, #3, #4)
+test('guardian fixes: SL can\'t be removed, resting orders count toward the cap, price patches re-check, spot "reduce-only" buys are still guarded', async () => {
+  // #1: a stop-loss can't be patched away while requireStop is on.
+  const a = await activeAccount();
+  const entry = await B.placeOrder(a.id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 15, sl: 90 });
+  await rejects(B.modifyOrder(a.id, entry.id, { sl: null }), /stop-loss is required/);
+
+  // #3: the resting 15 @ 99 counts, so another 10 would exceed 20% of 10 000.
+  await rejects(B.placeOrder(a.id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10, sl: 90 }), /Position cap/);
+
+  // #3: moving a far limit toward the market raises its notional, so the cap is checked again.
+  const b = await activeAccount();
+  const far = await B.placeOrder(b.id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 50, qty: 35, sl: 40 });   // 1750 notional: fits
+  await B.refresh(b.id);
+  await rejects(B.modifyOrder(b.id, far.id, { price: 99 }), /Position cap/);   // 35 × 99 = 3465 > 2000
+
+  // #3/#4: an emulated spot buy flagged reduce-only, grown after placement, is checked when it fires.
+  const spot = fake(true, ['stop_limit']);
+  spot.f.balances.push({ asset: 'BTC', free: 5, locked: 0 });
+  const c = await activeAccount({ broker: 'binance', market: 'spot' }, spot);
+  await B.placeOrder(c.id, { sym: 'BTCUSDT', side: 'sell', kind: 'stop', stopPrice: 90, qty: 5 });   // protects the 5 BTC held
+  const stop = await B.placeOrder(c.id, { sym: 'BTCUSDT', side: 'buy', kind: 'stop', stopPrice: 105, qty: 10, reduceOnly: true });
+  assert.ok(stop.id.startsWith('emu:'));
+  await B.modifyOrder(c.id, stop.id, { qty: 100 });
+  const sent = c.f.placed.length;
+  c.f.px = 106;
+  const st = await B.refresh(c.id);
+  assert.equal(c.f.placed.length, sent, 'nothing reached the exchange');
+  const o = st.orders.find(x => x.id === stop.id)!;
+  assert.equal(o.status, 'rejected'); assert.match(o.error!, /Position cap/);
+});
