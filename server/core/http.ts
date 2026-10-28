@@ -48,7 +48,8 @@ function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
   });
 }
 
-const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist');
+// CT_DIST_DIR: the desktop app bundles the server, so the built client isn't at ../../dist there.
+const DIST = process.env.CT_DIST_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist');
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.crt': 'application/x-x509-ca-cert', '.mobileconfig': 'application/x-apple-aspen-config' };
 const SECURITY_HEADERS = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY' };
 
