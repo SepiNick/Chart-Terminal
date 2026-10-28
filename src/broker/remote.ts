@@ -53,7 +53,11 @@ let wired = false;
 
 /** Make the registry match the server's list: new accounts registered, deleted ones unregistered, the rest updated. */
 export function syncAccounts(list: BrokerAccount[], call: Api = api) {
-  if (!wired) { wired = true; onServer('broker', m => remotes.get(String(m.account))?.push(m.state as BrokerState)) }
+  if (!wired) {
+    wired = true;
+    onServer('broker', m => remotes.get(String(m.account))?.push(m.state as BrokerState));
+    onServer('broker.accounts', m => syncAccounts(m.accounts as BrokerAccount[], call));   // status changes (tripped, error)
+  }
   for (const id of [...remotes.keys()]) if (!list.some(a => a.id === id)) { remotes.delete(id); unregisterBroker(id) }
   for (const a of list) {
     let b = remotes.get(a.id);

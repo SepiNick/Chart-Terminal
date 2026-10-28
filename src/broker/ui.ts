@@ -10,10 +10,10 @@ import { $, esc, toast } from '../store.ts';
 
 const EXCHANGES: { id: Exclude<BrokerId, 'paper'>; name: string; markets: Market[]; pass?: boolean; keys: string }[] = [
   { id: 'binance', name: 'Binance spot testnet', markets: ['spot'], keys: 'testnet.binance.vision — log in with GitHub, “Generate HMAC_SHA256 Key”' },
-  { id: 'binanceusdm', name: 'Binance USDⓈ-M futures testnet', markets: ['futures'], keys: 'testnet.binancefuture.com — register, then API Key tab under the order panel' },
+  { id: 'binanceusdm', name: 'Binance USDⓈ-M futures demo trading', markets: ['futures'], keys: 'binance.com → Demo Trading → API Management (the old testnet.binancefuture.com keys no longer work with the server)' },
   { id: 'bybit', name: 'Bybit testnet', markets: ['spot', 'futures'], keys: 'testnet.bybit.com — a separate testnet account; API under your profile' },
   { id: 'okx', name: 'OKX demo trading', markets: ['spot', 'futures'], pass: true, keys: 'okx.com → Trade → Demo trading → Personal center → Demo trading API' },
-  { id: 'kucoin', name: 'KuCoin sandbox', markets: ['spot', 'futures'], pass: true, keys: 'sandbox.kucoin.com — API Management (may be retired; the server says so)' },
+  // KuCoin left out: CCXT 4.5 has no sandbox for it, and the server refuses it.
   { id: 'nobitex', name: 'Nobitex testnet', markets: ['spot'], keys: 'testnet.nobitex.ir — sign up, then API token in the profile' },
 ];
 const exName = (b: BrokerId) => (b === 'paper' ? 'Paper' : EXCHANGES.find(e => e.id === b)?.name ?? b);
@@ -114,7 +114,7 @@ function addDialog() {
       el('market').innerHTML = x.markets.map(m => `<option>${m}</option>`).join('');
       f.querySelectorAll<HTMLElement>('.bk-pass').forEach(n => n.hidden = !x.pass);
       $('#bkWhere', f).textContent = `Keys: ${x.keys}.`;
-      if (!el('label').dataset.typed) el('label').value = x.name.replace(/ (testnet|sandbox|demo trading)$/, '') + ' test';
+      if (!el('label').dataset.typed) el('label').value = x.name.replace(/ (testnet|sandbox|demo trading|futures demo trading)$/, '') + ' test';
     };
     el('broker').onchange = pick; el('label').oninput = () => { el('label').dataset.typed = '1' }; pick();
     f.querySelector<HTMLButtonElement>('[data-x]')!.onclick = () => { wipe(); close() };

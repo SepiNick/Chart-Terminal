@@ -82,10 +82,15 @@ const keyOf = (sym: string) => { try { const p = parseSym(sym); return `${p.base
 const same = (a: string, b: string) => keyOf(a) === keyOf(b);
 
 function setStatus(row: Row, status: BrokerAccount['status'], error?: string) {
+  const was = row.acct.status;
   row.acct.status = status;
   if (error) row.acct.error = error; else delete row.acct.error;
   saveRow(row);
+  // The breaker trips (and errors happen) inside the poll loop: tell open apps, not only the next GET.
+  if (was !== status) announce();
 }
+/** Every open app (any device) gets the account list after a change. */
+function announce() { broadcast({ type: 'broker.accounts', accounts: listAccounts() }) }
 const polls = (a: BrokerAccount) => a.status === 'active' || a.status === 'tripped' || a.status === 'error';
 
 /**
@@ -308,7 +313,7 @@ export function createAccount(x: unknown): BrokerAccount {
   if (a.passphrase) secretSet(secretName(id, 'passphrase'), a.passphrase);
   const acct: BrokerAccount = { id, broker: a.broker, label: a.label, market: a.market, testnet: true, status: 'pending', guard: a.guard, hasPassphrase: secretHas(secretName(id, 'passphrase')) };
   const row = { acct, meta: { syms: [] } };
-  rows.set(id, row); saveRow(row);
+  rows.set(id, row); saveRow(row); announce();
   return acct;
 }
 
@@ -320,7 +325,7 @@ export function updateAccount(id: string, x: unknown): BrokerAccount {
     // Loosening the guard below what the guardian requires takes the account out of trading until it is checked again.
     if (row.acct.status !== 'pending' && guardItems(row.acct.guard, null).some(i => i.id !== 'withdraw' && !i.ok)) { setStatus(row, 'pending'); stop(id) }
   }
-  saveRow(row);
+  saveRow(row); announce();
   return row.acct;
 }
 
@@ -331,7 +336,7 @@ export function deleteAccount(id: string) {
   for (const e of emusOf(id)) dropEmu(e.id);
   db.prepare('DELETE FROM broker_day WHERE account = ?').run(id);
   db.prepare('DELETE FROM broker_accounts WHERE id = ?').run(id);
-  rows.delete(id);
+  rows.delete(id); announce();
 }
 
 export async function check(id: string): Promise<GuardianReport> {
