@@ -10,10 +10,12 @@ export interface Adapter {
   /** Trigger kinds the exchange holds natively; the rest are emulated by the server. */
   readonly native: ReadonlySet<'stop' | 'stop_limit'>;
   readonly canEdit: boolean;
+  /** Futures: the balance total already includes unrealised PnL (Binance marginBalance, OKX eq; Bybit walletBalance does not). */
+  readonly upnlInBalance?: boolean;
   balances(): Promise<Balance[]>;
   positions(): Promise<BrokerPosition[]>;
   openOrders(): Promise<BrokerOrder[]>;
-  order(id: string, sym: string): Promise<BrokerOrder>;
+  order(id: string, sym: string, trigger?: boolean): Promise<BrokerOrder>;
   fills(syms: string[]): Promise<BrokerFill[]>;
   price(sym: string): Promise<number>;
   place(o: Native): Promise<BrokerOrder>;
