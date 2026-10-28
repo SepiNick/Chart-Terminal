@@ -30,6 +30,7 @@ import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, r
 import { serverMode, onServer, api } from './sync.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
+import './tooltip.ts';
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 
 // ---------- layouts (grid arrangements) ----------
