@@ -965,7 +965,7 @@ $('#resetAcct').onclick = () => { if (confirm('Reset paper account to 10,000 USD
 let unwatch = () => {};
 function tradeChanged() { panes.forEach(p => p.tradeOverlay()); later(renderTrading); later(renderTicket); connectTickers() }
 function watchBroker() { unwatch(); unwatch = activeBroker()?.onChange(tradeChanged) ?? (() => {}); renderAcctSel(); tradeChanged() }
-onBrokers(watchBroker);
+onBrokers(watchBroker); watchBroker();
 function renderTrading() {
   const b = activeBroker(), s = b?.state(), f = (x: number) => x.toFixed(calcPrec(x));
   const empty = (n: number, msg: string) => `<tr><td class="muted" colspan="${n}">${msg}</td></tr>`;
