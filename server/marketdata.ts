@@ -1,0 +1,88 @@
+// Keyless market data for phase 9: crypto news from public RSS feeds, DEX pairs (DexScreener), coin market caps and
+// global dominance (CoinGecko). Fixed upstream hosts only, cached, and a stale copy is served when an upstream fails.
+import { HttpError, bad, route } from './core/http.ts';
+
+/** Swappable for tests. */
+export const deps = { fetch: (url: string) => fetch(url, { signal: AbortSignal.timeout(15_000), headers: { 'user-agent': 'ChartTerminal/0.1', accept: 'application/json, application/rss+xml, application/xml, text/xml' } }), now: () => Date.now() };
+
+const cache = new Map<string, { at: number; data: unknown }>();
+async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const c = cache.get(key);
+  if (c && deps.now() - c.at < ttlMs) return c.data as T;
+  try {
+    const data = await load();
+    cache.set(key, { at: deps.now(), data });
+    if (cache.size > 200) cache.delete(cache.keys().next().value!);
+    return data;
+  } catch (e) {
+    if (c) return c.data as T;   // stale beats nothing
+    throw e instanceof HttpError ? e : new HttpError(502, `Upstream failed: ${(e as Error).message}`);
+  }
+}
+async function getJson(url: string): Promise<unknown> {
+  const r = await deps.fetch(url);
+  if (!r.ok) throw new HttpError(502, `${new URL(url).host} returned ${r.status}`);
+  return r.json();
+}
+
+// ---------- news (RSS) ----------
+export const FEEDS = [
+  { source: 'CoinDesk', url: 'https://www.coindesk.com/arc/outboundfeeds/rss/' },
+  { source: 'Cointelegraph', url: 'https://cointelegraph.com/rss' },
+  { source: 'Decrypt', url: 'https://decrypt.co/feed' },
+  { source: 'The Block', url: 'https://www.theblock.co/rss.xml' },
+];
+export interface NewsItem { title: string; link: string; source: string; t: number }
+const decode = (s: string) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).trim();
+/** Items of an RSS 2.0 (or Atom) document: title, http(s) link, time. Anything else is dropped. */
+export function parseRss(xml: string, source: string): NewsItem[] {
+  const out: NewsItem[] = [];
+  for (const m of xml.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/g)) {
+    const it = m[0], tag = (n: string) => it.match(new RegExp(`<${n}\\b[^>]*>([\\s\\S]*?)</${n}>`))?.[1];
+    const title = decode(tag('title') ?? ''), link = decode(tag('link') ?? it.match(/<link\b[^>]*href="([^"]+)"/)?.[1] ?? '');
+    const t = Date.parse(decode(tag('pubDate') ?? tag('published') ?? tag('updated') ?? tag('dc:date') ?? ''));
+    if (title && /^https?:\/\//.test(link)) out.push({ title: title.slice(0, 300), link, source, t: Number.isFinite(t) ? t : 0 });
+  }
+  return out;
+}
+export async function news(q?: string): Promise<NewsItem[]> {
+  const all = await cached('news', 10 * 60_000, async () => {
+    const lists = await Promise.all(FEEDS.map(f => deps.fetch(f.url).then(r => (r.ok ? r.text() : '')).then(x => parseRss(x, f.source)).catch(() => [] as NewsItem[])));
+    const items = lists.flat().sort((a, b) => b.t - a.t);
+    if (!items.length) throw new HttpError(502, 'No news feed could be read');
+    return items.slice(0, 300);
+  });
+  if (!q) return all.slice(0, 100);
+  // A symbol's news: its ticker as a word (BTC) or a known name (Bitcoin).
+  const words = q.split(',').map(w => w.trim()).filter(w => /^[\w .-]{2,30}$/.test(w));
+  const re = words.length ? new RegExp(`\\b(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i') : null;
+  return re ? all.filter(n => re.test(n.title)).slice(0, 50) : [];
+}
+
+// ---------- DEX pairs ----------
+interface DexPair { chainId: string; dexId: string; url: string; pairAddress: string; baseToken: { symbol: string; name: string }; quoteToken: { symbol: string }; priceUsd?: string; volume?: { h24?: number }; priceChange?: { h24?: number }; liquidity?: { usd?: number }; fdv?: number; pairCreatedAt?: number }
+export async function dex(q: string) {
+  if (!/^[\w .-]{1,40}$/.test(q)) throw bad('Search for a token symbol, name or address');
+  const j = await cached(`dex|${q.toLowerCase()}`, 60_000, () => getJson(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`)) as { pairs?: DexPair[] };
+  return (j.pairs ?? []).slice(0, 100).map(p => ({
+    chain: p.chainId, dex: p.dexId, url: p.url?.startsWith('https://') ? p.url : 'https://dexscreener.com', pair: `${p.baseToken.symbol}/${p.quoteToken.symbol}`, name: p.baseToken.name,
+    price: Number(p.priceUsd ?? NaN), ch: p.priceChange?.h24 ?? null, vol: p.volume?.h24 ?? 0, liq: p.liquidity?.usd ?? 0, fdv: p.fdv ?? null, created: p.pairCreatedAt ?? null,
+  }));
+}
+
+// ---------- CoinGecko: market caps and dominance ----------
+interface CgCoin { id: string; symbol: string; name: string; current_price: number; market_cap: number; price_change_percentage_24h: number | null; total_volume: number }
+export const coins = () => cached('cg|markets', 5 * 60_000, async () => (await getJson('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1') as CgCoin[])
+  .map(c => ({ id: c.id, sym: c.symbol.toUpperCase(), name: c.name, price: c.current_price, cap: c.market_cap, ch: c.price_change_percentage_24h, vol: c.total_volume })));
+export const globalStats = () => cached('cg|global', 5 * 60_000, async () => {
+  const d = (await getJson('https://api.coingecko.com/api/v3/global') as { data: { total_market_cap: Record<string, number>; total_volume: Record<string, number>; market_cap_percentage: Record<string, number>; market_cap_change_percentage_24h_usd: number } }).data;
+  const pct = d.market_cap_percentage;
+  // TradingView-style names: TOTAL (all), TOTAL2 (without BTC), TOTAL3 (without BTC and ETH), BTC.D, ETH.D, USDT.D
+  const total = d.total_market_cap.usd;
+  return { TOTAL: total, TOTAL2: total * (1 - (pct.btc ?? 0) / 100), TOTAL3: total * (1 - ((pct.btc ?? 0) + (pct.eth ?? 0)) / 100), 'BTC.D': pct.btc ?? null, 'ETH.D': pct.eth ?? null, 'USDT.D': pct.usdt ?? null, volume24h: d.total_volume.usd, change24h: d.market_cap_change_percentage_24h_usd };
+});
+
+route('GET', '/api/news', c => news(c.url.searchParams.get('q') ?? undefined));
+route('GET', '/api/dex', c => dex(c.url.searchParams.get('q') ?? ''));
+route('GET', '/api/coins', () => coins());
+route('GET', '/api/global', () => globalStats());

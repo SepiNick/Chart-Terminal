@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessions, tpo, volumeProfile, TPO_LETTERS } from './profile.ts';
+import { sessionStart, sessions, tpo, volumeProfile, TPO_LETTERS } from './profile.ts';
 import { Footprint } from './model.ts';
 import type { Bar } from '../data.ts';
 
@@ -40,4 +40,12 @@ test('volume profile: footprint where it covers a bar, candle volume spread else
   assert.equal(vp.rows.get(101), 5 + 1);
   assert.equal(vp.rows.get(102), undefined);   // the candle range of the covered bar is ignored
   assert.equal(vp.total, 15); assert.equal(vp.poc, 100);
+});
+
+test('sessions can start at any time of day (minutes after 00:00 UTC)', () => {
+  const day = 86400, t0 = 1_700_006_400;   // 2023-11-15 00:00 UTC
+  assert.equal(sessionStart(t0 + 10 * 3600, day, 13.5 * 3600), t0 - day + 13.5 * 3600, '10:00 belongs to the session that began yesterday 13:30');
+  assert.equal(sessionStart(t0 + 14 * 3600, day, 13.5 * 3600), t0 + 13.5 * 3600);
+  const bars = [0, 12, 14, 20].map(h => ({ time: t0 + h * 3600 }));
+  assert.deepEqual(sessions(bars, day, 13.5 * 3600).map(s => s.bars.length), [2, 2]);
 });

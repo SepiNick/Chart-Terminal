@@ -42,10 +42,15 @@ export function tvSymbol(s: string): string {
 }
 
 // ---------- watchlist: "###Section,EXCH:SYM,EXCH:SYM,###Other,…" ----------
-/** Symbols of an exported watchlist, in order, without duplicates (section titles are dropped: the watchlist has none yet). */
+/** Entries of an exported watchlist, in order: '###Name' section rows kept, symbols without duplicates. */
 export function parseTvWatchlist(text: string): string[] {
-  const syms = text.split(/[,\n\r]+/).map(x => x.trim()).filter(x => x && !x.startsWith('###')).map(tvSymbol);
-  return [...new Set(syms)];
+  const out: string[] = [], seen = new Set<string>();
+  for (const x of text.split(/[,\n\r]+/).map(v => v.trim()).filter(Boolean)) {
+    if (x.startsWith('###')) { out.push(x); continue }
+    const s = tvSymbol(x);
+    if (!seen.has(s)) { seen.add(s); out.push(s) }
+  }
+  return out;
 }
 
 // ---------- alerts log: Alert ID, Ticker, Name, Description, Time ----------

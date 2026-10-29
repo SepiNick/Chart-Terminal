@@ -1,5 +1,5 @@
 import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from './chart.ts';
-import { TFS, anyTf, streamTickers, fetch24h, fetchSymbols, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type Ticker24, type RemoteMarket } from './data.ts';
+import { TFS, anyTf, streamTickers, fetchSymbols, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type RemoteMarket } from './data.ts';
 import { INDICATORS } from './indicators.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { TOOL_MAP } from './tools/index.ts';
@@ -16,7 +16,7 @@ import { PaperBroker, fromOrder, toOrder } from './broker/paper.ts';
 import { registerBroker, activeBroker, allBrokers, setActiveBroker, onBrokers } from './broker/registry.ts';
 import type { Broker, OrderReq } from './broker/types.ts';
 import { sizeQty, quoteBalance, type SizeMode } from './sizing.ts';
-import { store, $, $$, esc, toast, calcPrec, fmtVol } from './store.ts';
+import { store, $, $$, esc, toast, calcPrec } from './store.ts';
 import { initTesterUI } from './testerui.ts';
 import { defaultOF, type OFCfg } from './orderflow/layer.ts';
 import { hasOrderFlow } from './orderflow/feed.ts';
@@ -33,6 +33,7 @@ import { initSettingsUI } from './settingsui.ts';
 import './tooltip.ts';
 import { parseTvWatchlist } from './tvimport.ts';
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
+import { chartEvents, initMarket, renderDetails, renderMarket } from './market/ui.ts';
 
 // ---------- layouts (grid arrangements) ----------
 interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
@@ -121,6 +122,7 @@ const hooks: Hooks = {
   alerts: () => (serverMode ? serverLines() : st.alerts),
   broker: () => activeBroker(),
   hidden: () => st.hidden,
+  events: chartEvents,
   onPrice: handlePrice,
   onCrosshair(src, time, prm) {
     crossPx = prm.point ? src.main.coordinateToPrice(prm.point.y) : null;
@@ -292,7 +294,7 @@ function drawingPrice(a: Alert): number | null {
 }
 let unsubTickers = () => {}, tickKey = '', trailSave = 0;
 function connectTickers() {
-  const syms = [...new Set([...st.watch, ...panes.flatMap(p => isExpr(p.cfg.symbol) ? [] : [p.cfg.symbol]), ...(serverMode ? [] : st.alerts.filter(a => a.on).map(a => a.sym)), ...Object.keys(st.acct.pos), ...st.acct.orders.map(o => o.sym)])];
+  const syms = [...new Set([...watchSyms(), ...panes.flatMap(p => isExpr(p.cfg.symbol) ? [] : [p.cfg.symbol]), ...(serverMode ? [] : st.alerts.filter(a => a.on).map(a => a.sym)), ...Object.keys(st.acct.pos), ...st.acct.orders.map(o => o.sym)])];
   const key = syms.filter(x => !isRemote(x)).join();   // remote symbols get prices from their candle feed
   if (key === tickKey) return;
   tickKey = key; unsubTickers();
@@ -563,7 +565,7 @@ $('#rpSelect').onclick = () => { active().startReplay(); syncUI() };
 $('#rpDate').onchange = e => { const v = (e.target as HTMLInputElement).value; if (v) active().startReplayAt(new Date(v).getTime() / 1000) };
 $('#rpRandom').onclick = () => active().replayRandom();
 $('#rpFirst').onclick = () => active().replayFirst();
-$('#rpBack').onclick = () => active().stepBack();
+$('#rpBack').onclick = () => { if (!replayButton(active(), 'back', panes)) active().stepBack() };
 $('#rpStep').onclick = () => { if (!replayButton(active(), 'step', panes)) active().stepReplay() };
 const togglePlay = () => { const p = active(); if (replayButton(p, 'play', panes)) return syncUI(); if (p.replay?.timer) p.pauseReplay(); else p.playReplay(+$<HTMLSelectElement>('#rpSpeed').value); syncUI() };
 $('#rpPlay').onclick = togglePlay;
@@ -767,7 +769,7 @@ function showSide(name: string) {
   $$('#rail [data-side]').forEach(b => b.classList.toggle('on', b.dataset.side === st.side));
   $$('.side').forEach(s => s.classList.toggle('on', s.id === 's-' + st.side));
   $('#body').classList.toggle('no-panel', !st.side);
-  if (st.side === 'screener') renderScreener();
+  if (st.side === 'screener') renderMarket();
   if (st.side === 'journal') renderJournal();
   if (st.side === 'accts') renderAccounts();   // accounts
   domSync();
@@ -777,24 +779,62 @@ $('#keysBtn').onclick = () => openKeys();
 
 $<HTMLInputElement>('#watchImport').onchange = async e => {
   const inp = e.target as HTMLInputElement, f = inp.files?.[0]; inp.value = ''; if (!f) return;
-  const add = parseTvWatchlist(await f.text()).filter(s => !st.watch.includes(s) && !isExpr(s));
-  if (!add.length) return toast('No new symbols in that file');
-  st.watch.push(...add); store.set('watch', st.watch); connectTickers(); renderWatch(); toast(`${add.length} symbols imported from TradingView`);
+  const add = parseTvWatchlist(await f.text()).filter(s => s.startsWith('###') ? !st.watch.includes(s) : !st.watch.includes(s) && !isExpr(s));
+  if (!add.some(s => !s.startsWith('###'))) return toast('No new symbols in that file');
+  st.watch.push(...add); saveWatch(); toast(`${add.filter(s => !s.startsWith('###')).length} symbols imported from TradingView`);
 };
-function addWatch(s: string) { if (!st.watch.includes(s) && !isExpr(s)) { st.watch.push(s); store.set('watch', st.watch); connectTickers(); renderWatch(); toast(`${s} added to watchlist`) } }
+// Watchlist: symbols plus '###Name' section rows (TradingView's export format), colour flags, optional columns, details.
+const watchSyms = () => st.watch.filter(s => !s.startsWith('###'));
+const FLAGS = ['#f23645', '#ff9800', '#ffeb3b', '#4caf50', '#2196f3', '#9c27b0', '#00bcd4'], FLAG_NAMES = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Cyan'];
+const watchFlags = store.get<Record<string, string>>('watchFlags', {});
+const watchCols = store.get('watchCols', { chg: false, flag: true });
+let watchDetail = store.get<string | null>('watchDetail', null);
+function saveWatch() { store.set('watch', st.watch); connectTickers(); renderWatch() }
+function addWatch(s: string) { if (!st.watch.includes(s) && !isExpr(s)) { st.watch.push(s); saveWatch(); toast(`${s} added to watchlist`) } }
 function renderWatch() {
-  $('#watchT').innerHTML = '<tr><th>Symbol</th><th>Last</th><th>Chg%</th><th></th></tr>' + st.watch.map(s => {
+  const cols = 3 + (watchCols.chg ? 1 : 0);
+  $('#watchT').innerHTML = `<tr><th>Symbol</th><th>Last</th>${watchCols.chg ? '<th>Chg</th>' : ''}<th>Chg%</th><th></th></tr>` + st.watch.map((s, i) => {
+    if (s.startsWith('###')) return `<tr class="wsec" data-i="${i}"><td colspan="${cols}"><b>${esc(s.slice(3))}</b></td><td><button class="x" data-ren="${i}" title="Rename section">✎</button><button class="x" data-rm="${esc(s)}" title="Remove section (symbols stay)">×</button></td></tr>`;
     const t = tick24[s] ?? (lastPx[s] ? { c: lastPx[s], o: NaN } : undefined), ch = t && Number.isFinite(t.o) ? ((t.c - t.o) / t.o) * 100 : null;
-    const [ex, name] = s.includes(':') ? s.split(':') : ['', s];
-    return `<tr class="click${s === active()?.cfg.symbol ? ' sel' : ''}" data-sym="${esc(s)}"><td><b>${esc(name.replace(/_?USDT(\.P)?$/, '$1').replace(/_/g, '/'))}</b><span class="muted">${/_?USDT/.test(name) ? 'USDT' : ''}${ex ? ' · ' + esc(ex) : ''}</span></td>
-      <td>${t ? t.c.toFixed(calcPrec(t.c)) : '–'}</td><td class="${(ch ?? 0) >= 0 ? 'up' : 'dn'}">${ch == null ? '–' : ch.toFixed(2) + '%'}</td>
-      <td><button class="x" data-rm="${esc(s)}" title="Remove">×</button></td></tr>`;
+    const [ex, name] = s.includes(':') ? s.split(':') : ['', s], flag = watchFlags[s];
+    return `<tr class="click${s === active()?.cfg.symbol ? ' sel' : ''}" data-sym="${esc(s)}"><td>${watchCols.flag ? `<span class="wflag" data-flag="${esc(s)}" title="Flag colour" style="${flag ? `background:${esc(flag)}` : ''}"></span>` : ''}<b>${esc(name.replace(/_?USDT(\.P)?$/, '$1').replace(/_/g, '/'))}</b><span class="muted">${/_?USDT/.test(name) ? 'USDT' : ''}${ex ? ' · ' + esc(ex) : ''}</span></td>
+      <td>${t ? t.c.toFixed(calcPrec(t.c)) : '–'}</td>${watchCols.chg ? `<td class="${(ch ?? 0) >= 0 ? 'up' : 'dn'}">${t && ch != null ? (t.c - t.o).toFixed(calcPrec(t.c)) : '–'}</td>` : ''}<td class="${(ch ?? 0) >= 0 ? 'up' : 'dn'}">${ch == null ? '–' : ch.toFixed(2) + '%'}</td>
+      <td><button class="x" data-det="${esc(s)}" title="Details: technical rating, seasonals, news">ⓘ</button><button class="x" data-rm="${esc(s)}" title="Remove">×</button></td></tr>`;
   }).join('');
+  const d = $('#watchDet');
+  if (!watchDetail || !st.watch.includes(watchDetail)) { d.hidden = true; d.dataset.sym = ''; return }
+  d.hidden = false;
+  if (d.dataset.sym !== watchDetail) { d.dataset.sym = watchDetail; void renderDetails(d, watchDetail) }
 }
 $('#watchAdd').onclick = () => addWatch(active().cfg.symbol);
+$('#watchMenu').onclick = e => {
+  const r = (e.target as HTMLElement).getBoundingClientRect();
+  showMenu(r.left, r.bottom, [
+    { label: 'Add section…', action: () => { const n = prompt('Section name')?.trim(); if (n) { st.watch.push('###' + n); saveWatch() } } },
+    { label: 'Change column', checked: watchCols.chg, action: () => { watchCols.chg = !watchCols.chg; store.set('watchCols', watchCols); renderWatch() } },
+    { label: 'Flag column', checked: watchCols.flag, action: () => { watchCols.flag = !watchCols.flag; store.set('watchCols', watchCols); renderWatch() } },
+    { label: 'Sort by flag colour', action: () => { st.watch = sortByFlag(st.watch); saveWatch() } },
+  ]);
+};
+/** Sorts symbols by flag inside each section; sections keep their place. */
+function sortByFlag(list: string[]) {
+  const out: string[] = [], rank = (s: string) => (watchFlags[s] ? FLAGS.indexOf(watchFlags[s]) : FLAGS.length);
+  let run: string[] = [];
+  const flush = () => { out.push(...run.sort((a, b) => rank(a) - rank(b))); run = [] };
+  for (const s of list) { if (s.startsWith('###')) { flush(); out.push(s) } else run.push(s) }
+  flush();
+  return out;
+}
 $('#watchT').onclick = e => {
   const el = e.target as HTMLElement, rm = el.dataset.rm;
-  if (rm) { st.watch = st.watch.filter(s => s !== rm); store.set('watch', st.watch); connectTickers(); renderWatch(); return }
+  if (rm) { st.watch = st.watch.filter(s => s !== rm); saveWatch(); return }
+  if (el.dataset.ren) { const i = +el.dataset.ren, n = prompt('Section name', st.watch[i].slice(3))?.trim(); if (n) { st.watch[i] = '###' + n; saveWatch() } return }
+  if (el.dataset.det) { watchDetail = watchDetail === el.dataset.det ? null : el.dataset.det; store.set('watchDetail', watchDetail); renderWatch(); return }
+  if (el.dataset.flag) {
+    const s = el.dataset.flag, r = el.getBoundingClientRect();
+    showMenu(r.left, r.bottom, [...FLAGS.map((c, k) => ({ label: FLAG_NAMES[k], iconHtml: `<span class="wflag" style="background:${c}"></span>`, checked: watchFlags[s] === c, action: () => { watchFlags[s] = c; store.set('watchFlags', watchFlags); renderWatch() } })), { label: 'No flag', action: () => { delete watchFlags[s]; store.set('watchFlags', watchFlags); renderWatch() } }]);
+    return;
+  }
   const s = el.closest<HTMLElement>('[data-sym]')?.dataset.sym; if (s) setSymbol(s);
 };
 
@@ -869,22 +909,7 @@ function renderDataWindow() {
   $('#dataT').innerHTML = `<tr><th colspan="2">${esc(p.cfg.symbol)} · ${esc(p.cfg.tf)}</th></tr>` + p.dataWindow().map(r => `<tr><td class="muted">${esc(r.name)}</td><td>${esc(r.value)}</td></tr>`).join('');
 }
 
-let screener: Ticker24[] | null = null, scrSort: keyof Ticker24 = 'qv';
-async function renderScreener() {
-  if (!screener) {
-    $('#scrT').innerHTML = '<tr><td class="muted">Loading…</td></tr>';
-    try { screener = (await fetch24h()).sort((a, b) => b.qv - a.qv).slice(0, 100) }
-    catch (e) { $('#scrT').innerHTML = `<tr><td class="dn">${esc((e as Error).message)}</td></tr>`; return }
-  }
-  const rows = [...screener].sort((a, b) => (scrSort === 's' ? a.s.localeCompare(b.s) : (b[scrSort] as number) - (a[scrSort] as number)));
-  $('#scrT').innerHTML = '<tr><th data-sort="s">Symbol</th><th data-sort="c">Price</th><th data-sort="ch">Chg%</th><th data-sort="qv">Vol $</th></tr>' +
-    rows.map(r => `<tr class="click" data-sym="${esc(r.s)}"><td>${esc(r.s)}</td><td>${r.c.toFixed(calcPrec(r.c))}</td><td class="${r.ch >= 0 ? 'up' : 'dn'}">${r.ch.toFixed(2)}%</td><td>${fmtVol(r.qv)}</td></tr>`).join('');
-}
-$('#scrT').onclick = e => {
-  const el = e.target as HTMLElement;
-  if (el.dataset.sort) { scrSort = el.dataset.sort as keyof Ticker24; renderScreener(); return }
-  const s = el.closest<HTMLElement>('[data-sym]')?.dataset.sym; if (s) setSymbol(s);
-};
+initMarket({ setSymbol: s => setSymbol(s), addWatch, symbol: () => active().cfg.symbol, refreshCharts: () => panes.forEach(p => p.tradeOverlay()) });
 
 // ---------- order ticket & trading panel ----------
 const ticket = { side: 'buy' as Side, type: 'market' as OrderType };
@@ -1107,7 +1132,7 @@ document.addEventListener('keydown', e => {
 });
 
 initPineUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
-initTesterUI({ paper: (p, side, qty) => { const px = pxOf(p.cfg.symbol); if (px) { journalSource('Forward test'); submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p, paper); journalSource('') } }, watchlist: () => st.watch });
+initTesterUI({ paper: (p, side, qty) => { const px = pxOf(p.cfg.symbol); if (px) { journalSource('Forward test'); submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p, paper); journalSource('') } }, watchlist: () => watchSyms() });
 initJournal({
   tfOf: sym => panes.find(p => p.cfg.symbol === sym)?.cfg.tf,
   bracketOf: sym => {
@@ -1127,7 +1152,7 @@ initJournal({
     for (let i = 0; i < 100 && !(active().cfg.symbol === sym && active().cfg.tf === tf && active().bars.length); i++) await new Promise(r => setTimeout(r, 100));
     return active();
   },
-  portfolio: () => ({ acct: st.acct, price: pxOf, watch: st.watch }),
+  portfolio: () => ({ acct: st.acct, price: pxOf, watch: watchSyms() }),
 });
 journalSync(st.acct);
 initDom({

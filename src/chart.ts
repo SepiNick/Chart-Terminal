@@ -11,8 +11,8 @@ import { isExpr, parse, symbols, combine } from './symmath.ts';
 import type { Settings } from './settings.ts';
 import type { Side } from './trading.ts';
 import type { Broker, BrokerOrder, OrderPatch } from './broker/types.ts';
-import { $, esc, calcPrec, fmtVol, toast } from './store.ts';
-import { runScript, type ScriptError } from './pine/engine.ts';
+import { $, esc, calcPrec, fmtVol, store, toast } from './store.ts';
+import { installedLibraries, runScript, type ScriptError } from './pine/engine.ts';
 import { runMql } from './mql/engine.ts';
 import { mqlTester, type Job } from './tester/runner.ts';
 import { OrderFlow, defaultOF, ofActive, type OFCfg } from './orderflow/layer.ts';
@@ -52,6 +52,7 @@ export interface Hooks {
   compileNinja: () => NtCompileResult;
   onScripts: (pane: ChartPane) => void;
   scriptSettings: (pane: ChartPane, id: string) => void;
+  events?: () => { t: number; text: string; color: string }[];   // economic calendar markers (src/market/ui.ts)
   onReplay?: (pane: ChartPane) => void;   // replay started, stepped or ended on this chart (by the user, not by following)
 }
 const KIND_LABEL: Record<BrokerOrder['kind'], string> = { market: 'MARKET', limit: 'LIMIT', stop: 'STOP', stop_limit: 'STOP LIMIT', trailing_stop: 'TRAIL' };
@@ -99,6 +100,7 @@ export class ChartPane {
   private lastScriptRun = 0;
   private scriptTimer = 0;
   private secBars = new Map<string, Bar[] | null>();   // pine request.security: other symbol/tf bars, fetched on demand (null = failed)
+  private secSubs: (() => void)[] = [];                 // …and kept live: the scripts' own live re-runs pick the new bars up
   ind: { key: string; name: string; calc: (b: Bar[]) => Record<string, Series>; plots: Record<string, ISeriesApi<SeriesType>>; hidden?: boolean }[] = [];
   private vol: ISeriesApi<'Histogram'> | null = null;
   private cmp: { sym: string; unsub: () => void }[] = [];
@@ -185,7 +187,7 @@ export class ChartPane {
   // ---------- data ----------
   async load() {
     const tok = ++this.loadTok;
-    this.unsub(); this.exitReplay(false); this.of?.reset(); this.secBars.clear();
+    this.unsub(); this.exitReplay(false); this.of?.reset(); this.secBars.clear(); this.dropSec();
     this.bars = []; this.noMore = false;
     try {
       const b = await this.fetch();
@@ -230,7 +232,8 @@ export class ChartPane {
     this.hooks.onCfgChange();
     if (reload) this.load(); else this.build();
   }
-  destroy() { cancelAnimationFrame(this.olLoop); clearTimeout(this.scriptTimer); this.unsub(); this.of?.reset(); this.cmp.forEach(c => c.unsub()); this.loadTok++; this.exitReplay(false); clearInterval(this.countdownTimer); this.chart?.remove() }
+  private dropSec() { this.secSubs.forEach(u => u()); this.secSubs = [] }
+  destroy() { this.dropSec(); cancelAnimationFrame(this.olLoop); clearTimeout(this.scriptTimer); this.unsub(); this.of?.reset(); this.cmp.forEach(c => c.unsub()); this.loadTok++; this.exitReplay(false); clearInterval(this.countdownTimer); this.chart?.remove() }
 
   // ---------- build ----------
   build() {
@@ -332,6 +335,7 @@ export class ChartPane {
       if (r && r.from < 20) this.loadMore();
       this.rtBtn.style.display = r && r.to < this.disp.length - 2 ? 'block' : 'none';
       this.scaleOverlay();
+      this.ntRerender();
       this.hooks.onRange(this);
     });
     this.legendEl.style.display = s.legend ? '' : 'none';
@@ -477,7 +481,12 @@ export class ChartPane {
             const k = `${q.symbol}|${q.tf}`;
             if (this.secBars.has(k)) continue;
             this.secBars.set(k, null);
-            fetchBars(q.symbol, q.tf).then(b => { this.secBars.set(k, b); if (this.chart) this.renderScripts() }).catch(e => toast(`${q.symbol} ${q.tf}: ${(e as Error).message}`));
+            fetchBars(q.symbol, q.tf).then(b => {
+              if (!this.secBars.has(k)) return;   // the chart switched symbol meanwhile
+              this.secBars.set(k, b);
+              this.secSubs.push(streamBars(q.symbol, q.tf, nb => { const a = this.secBars.get(k); if (!a) return; if (a.at(-1)?.time === nb.time) a[a.length - 1] = nb; else if (!a.length || nb.time > a.at(-1)!.time) a.push(nb) }));
+              if (this.chart) this.renderScripts();
+            }).catch(e => toast(`${q.symbol} ${q.tf}: ${(e as Error).message}`));
           }
           return { id: ref.id, name: res.out?.meta.shorttitle || res.out?.meta.title || sc.name, ...res };
         })();
@@ -501,7 +510,8 @@ export class ChartPane {
     const fail = (e?: { file: string; line: number; col: number; msg: string }): ScriptError => ({ line: e?.line ?? 1, col: e?.col ?? 1, msg: e ? `${e.file}: ${e.msg}` : 'Compilation failed', kind: 'syntax' });
     if (sc.lang === 'mql4' || sc.lang === 'mql5') {
       const cr = this.hooks.compileMql(id);
-      return cr.ok && cr.js ? { kind: 'mql', js: cr.js, opts: { dialect: cr.dialect, symbol: symbol.replace(/^[A-Z0-9]+:/, ''), tfSec, digits: this.prec, spreadPoints: 0 } } : fail(cr.errors[0]);
+      const swap = store.get<Record<string, { swapLong?: number; swapShort?: number; swap3Day?: number }>>('mqlSwap', {})[id];   // Strategy Tester → Properties
+      return cr.ok && cr.js ? { kind: 'mql', js: cr.js, opts: { dialect: cr.dialect, symbol: symbol.replace(/^[A-Z0-9]+:/, ''), tfSec, digits: this.prec, spreadPoints: 0, ...(swap ? { account: swap } : {}) } } : fail(cr.errors[0]);
     }
     if (sc.lang === 'ninja') {
       const cr = this.hooks.compileNinja();
@@ -510,7 +520,8 @@ export class ChartPane {
       if (!cls) return { line: 1, col: 1, msg: 'No Indicator or Strategy class in this file', kind: 'syntax' };
       return { kind: 'ninja', cr, cls, opts: { symbol, tfSec, tickSize: 10 ** -this.prec, pointValue: 1, initialCapital: 10000, commissionPerContract: 0 } };
     }
-    return { kind: 'pine', src: sc.src, opts: { symbol, tf: this.cfg.tf, tfSec, mintick: 10 ** -this.prec } };
+    const sec = Object.fromEntries([...this.secBars].filter((e): e is [string, Bar[]] => !!e[1]));
+    return { kind: 'pine', src: sc.src, opts: { symbol, tf: this.cfg.tf, tfSec, mintick: 10 ** -this.prec }, libs: installedLibraries(), sec };
   }
   /** Run a compiled MQL program on this chart's bars. Experts are backtested over the loaded history. */
   private runMqlJob(id: string, name: string, job: Extract<Job, { kind: 'mql' }>, inputs: Record<string, unknown>): ScriptRun {
@@ -521,9 +532,25 @@ export class ChartPane {
   /** Run the first Indicator/Strategy class of a .cs file (every installed .cs file is compiled together). */
   private runNinjaJob(id: string, job: Extract<Job, { kind: 'ninja' }>, inputs: Record<string, unknown>): ScriptRun {
     try {
-      const r = runNinjaScript(job.cr, job.cls, this.vb(), { ...job.opts, inputs });
+      const r = runNinjaScript(job.cr, job.cls, this.vb(), { ...job.opts, inputs, ...(this.ntView() ? { view: this.ntView()! } : {}) });
+      if (r.result.rendered) this.ntRendered = true;
       return { id, name: r.result.name || job.cls, out: r.out, ms: r.ms, tester: r.tester, error: r.result.error ? { line: 0, col: 0, msg: r.result.error, kind: 'runtime' } : undefined };
     } catch (e) { return { id, name: job.cls, ms: 0, error: { line: 0, col: 0, msg: (e as Error).message, kind: 'runtime' } } }
+  }
+  /** NinjaScript OnRender draws in pixels of the visible bars: it runs again after a scroll/zoom settles. */
+  private ntRendered = false;
+  private ntTimer = 0;
+  private ntView() {
+    const r = this.chart?.timeScale().getVisibleLogicalRange();
+    if (!r || !this.chart) return null;
+    let height = 0;
+    try { height = this.chart.panes()[0].getHeight() } catch { /* older layout: virtual height */ }
+    return { from: r.from, to: r.to, width: this.chart.timeScale().width(), height };
+  }
+  private ntRerender() {
+    if (!this.ntRendered) return;
+    clearTimeout(this.ntTimer);
+    this.ntTimer = window.setTimeout(() => { if (this.chart) { this.ntRendered = false; this.renderScripts(); this.layer.update() } }, 250);
   }
   /** Re-run scripts on live ticks, at most every 2s (full recompute is cheap for chart-sized data). */
   private rerunScripts() {
@@ -600,6 +627,11 @@ export class ChartPane {
       m.push({ time: b[i].time as UTCTimestamp, position: buy ? 'belowBar' : 'aboveBar', color: buy ? s.upColor : s.downColor, shape: buy ? 'arrowUp' : 'arrowDown', text: `${f.side} ${f.qty}` });
     }
     m.push(...this.scriptMarkers);
+    if (b.length && !isPriceBased(this.cfg.type)) for (const ev of this.hooks.events?.() ?? []) {
+      if (ev.t < b[0].time || ev.t > b.at(-1)!.time + tfSeconds(this.cfg.tf)) continue;
+      let i = b.length - 1; while (i > 0 && b[i].time > ev.t) i--;
+      m.push({ time: b[i].time as UTCTimestamp, position: 'aboveBar', color: ev.color, shape: 'square', text: ev.text.slice(0, 40) });
+    }
     this.markers.setMarkers(m.sort((x, y) => (x.time as number) - (y.time as number)));
   }
   /** A box on an order line: drag the grip to move it (one Broker.modify on release, reverted on error), × to cancel. */

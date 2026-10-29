@@ -7,7 +7,7 @@ import { parseSym } from './adapter.ts';
 import { assertTestnetUrl } from './safety.ts';
 
 export const NOBITEX_TESTNET = 'https://testnetapiv2.nobitex.ir';
-type FetchFn = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ status: number; json(): Promise<unknown> }>;
+type FetchFn = (url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{ status: number; json(): Promise<unknown> }>;
 
 const cur = (c: string) => (c === 'IRT' ? 'rls' : c.toLowerCase());
 const app = (c: string) => (c === 'rls' ? 'IRT' : c.toUpperCase());
@@ -28,6 +28,7 @@ export function nobitexAdapter(token: string, fetchFn: FetchFn = fetch as unknow
       method,
       headers: { authorization: `Token ${token}`, 'content-type': 'application/json', 'user-agent': 'TraderBot/ChartTerminal' },
       ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(15_000),   // a stalled call would hold the account lock (polls, cancel, close)
     });
     const j = await r.json().catch(() => ({})) as { status?: string; message?: string; code?: string };
     if (r.status >= 400 || j.status !== 'ok') throw Error(`Nobitex: ${j.message ?? j.code ?? `HTTP ${r.status}`}`);

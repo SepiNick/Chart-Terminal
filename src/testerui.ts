@@ -7,7 +7,7 @@ import { monteCarlo, values } from './tester/optimize.ts';
 import { forSymbol, makeEvaluate, paramSpecs, type Job } from './tester/runner.ts';
 import { combine, type Leg, type Portfolio } from './tester/portfolio.ts';
 import { monthlyReturns, rangeBounds, returnDistribution, sliceReport, streaks, type RangeSel } from './tester/analysis.ts';
-import { fetchBars } from './data.ts';
+import { fetchBars, type Bar } from './data.ts';
 import type { WorkerMsg } from './tester/worker.ts';
 import type { Metrics, OptResult, ParamSpec, TesterData, Trade, WalkForwardResult } from './tester/types.ts';
 import type { PineValue } from './pine/types.ts';
@@ -42,6 +42,12 @@ function view() {
   const { p, data } = cur!, bars = p.vb();
   return sliceReport(data, bars, rangeBounds(rangeSel(), bars.at(-1)?.time ?? 0));
 }
+/** Bar indexes of the chosen date range, for the optimiser, walk-forward and portfolio (bars before it are not run). */
+function barRange(bars: Bar[]) {
+  const b = rangeBounds(rangeSel(), cur?.p.vb().at(-1)?.time ?? bars.at(-1)?.time ?? 0);
+  const at = (ok: (t: number) => boolean) => { const i = bars.findIndex(x => ok(x.time)); return i < 0 ? bars.length : i };
+  return { from: b.from == null ? 0 : at(t => t >= b.from!), to: b.to == null ? bars.length : at(t => t > b.to!) };
+}
 function syncRange() {
   const box = document.getElementById('tsRange');
   if (!box) return;
@@ -60,7 +66,7 @@ export function initTesterUI(h: TesterHost) {
   const props = $('#tsTabs [data-ts="props"]');
   props.insertAdjacentHTML('beforebegin', '<button data-ts="monthly">Monthly returns</button><button data-ts="dist">Distribution</button><button data-ts="streaks">Streaks</button>');
   $('#ts-props').insertAdjacentHTML('beforebegin', '<div class="tspane" id="ts-monthly"></div><div class="tspane" id="ts-dist"></div><div class="tspane" id="ts-streaks"></div>');
-  $('#tsNoCode').insertAdjacentHTML('beforebegin', `<span id="tsRange" class="row" style="gap:4px" title="Report date range: trades opened in it (overview, performance, trades, analysis, CSV)">
+  $('#tsNoCode').insertAdjacentHTML('beforebegin', `<span id="tsRange" class="row" style="gap:4px" title="Date range: trades opened in it (report, analysis, CSV, Monte Carlo); optimise, walk-forward and portfolio run on its bars only">
     <select id="tsRangeP">${Object.entries(PRESETS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
     <input type="date" id="tsRangeF"><input type="date" id="tsRangeT"></span>`);
   $('#tsTitle').parentElement!.style.flexWrap = 'wrap';   // the custom dates need room in a narrow panel
@@ -148,8 +154,20 @@ function props() {
     ...(sp ? [['Order size', `${sp.qtyValue} ${sp.qtyType}`], ['Pyramiding', sp.pyramiding], ['Commission', `${sp.commissionValue} ${sp.commissionType}`], ['Slippage (ticks)', sp.slippageTicks], ['Fill on bar close', sp.processOnClose]] as [string, unknown][] : []),
     ...(run.out?.inputs ?? []).map(i => [`Input · ${i.title}`, i.value] as [string, unknown]),
   ];
-  $('#tsProps').innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(String(v))}</td></tr>`).join('');
+  const job = p.testerJob(run.id), swap = job && 'kind' in job && job.kind === 'mql' ? swaps()[run.id] ?? {} : null;
+  $('#tsProps').innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(String(v))}</td></tr>`).join('')
+    + (swap ? `<tr><td>Swap long / short (points per lot per day)</td><td><input type="number" step="any" data-sw="swapLong" value="${esc(+(swap.swapLong ?? 0))}" style="width:70px"> / <input type="number" step="any" data-sw="swapShort" value="${esc(+(swap.swapShort ?? 0))}" style="width:70px"></td></tr>
+      <tr><td>Triple swap day</td><td><select data-sw="swap3Day">${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => `<option value="${i}" ${(swap.swap3Day ?? 3) === i ? 'selected' : ''}>${d}</option>`).join('')}</select></td></tr>` : '');
+  $('#tsProps').onchange = e => {
+    const el = e.target as HTMLInputElement, k = el.dataset.sw as keyof Swap | undefined;
+    if (!k || !cur) return;
+    const all = swaps(), s = all[cur.run.id] ??= {};
+    s[k] = +el.value || 0;
+    store.set('mqlSwap', all); cur.p.refresh();
+  };
 }
+type Swap = { swapLong?: number; swapShort?: number; swap3Day?: number };
+const swaps = () => store.get<Record<string, Swap>>('mqlSwap', {});
 
 // ---------- analysis: monthly returns, return distribution, streaks ----------
 /** Green/red background whose strength follows |v| / max. */
@@ -276,7 +294,7 @@ function runOpt() {
   if (!job) return;
   if (!params.length) return toast('Tick at least one input to optimise');
   const bars = cur!.p.vb(), objective = optCfg.objective;
-  startWorker<OptResult[]>({ type: 'optimize', job, bars, params, base: baseInputs(), opts: { ...optCfg, range: { from: 0, to: bars.length }, seed: 1 } }, $('#tsOptOut'), results => {
+  startWorker<OptResult[]>({ type: 'optimize', job, bars, params, base: baseInputs(), opts: { ...optCfg, range: barRange(bars), seed: 1 } }, $('#tsOptOut'), results => {
     lastOpt = { results, params, objective }; showOpt();
   });
 }
@@ -321,7 +339,7 @@ function wfaForm() {
     if (!job) return;
     if (!params.length) return toast('Tick inputs to optimise in the Optimize tab');
     const bars = cur!.p.vb();
-    startWorker<WalkForwardResult>({ type: 'wfa', job, bars, params, base: baseInputs(), opts: { windows: wfaCfg.windows, isPct: wfaCfg.isPct / 100, anchored: wfaCfg.anchored, range: { from: 0, to: bars.length }, optimize: { method: optCfg.method, objective: optCfg.objective, maximize: optCfg.maximize, maxRuns: optCfg.maxRuns, minTrades: optCfg.minTrades, seed: 1 } } },
+    startWorker<WalkForwardResult>({ type: 'wfa', job, bars, params, base: baseInputs(), opts: { windows: wfaCfg.windows, isPct: wfaCfg.isPct / 100, anchored: wfaCfg.anchored, range: barRange(bars), optimize: { method: optCfg.method, objective: optCfg.objective, maximize: optCfg.maximize, maxRuns: optCfg.maxRuns, minTrades: optCfg.minTrades, seed: 1 } } },
       $('#tsWfaOut'), r => { lastWfa = { r, params }; showWfa() });
   };
   $('#wfaStop').onclick = () => stop($('#tsWfaOut'));
@@ -359,7 +377,7 @@ function mcForm() {
   showMc();
 }
 function showMc() {
-  const { data } = cur!, out = $('#tsMcOut');
+  const { data } = view(), out = $('#tsMcOut');
   if (data.trades.length < 2) { out.innerHTML = '<span class="muted">Needs at least 2 closed trades.</span>'; return }
   const r = monteCarlo(data.trades, data.initialCapital, { ...mcCfg, seed: 1 }), q = ['p5', 'p25', 'p50', 'p75', 'p95'] as const;
   out.innerHTML = `<div class="row wrap kpis"><div><span>Risk of ruin</span><b class="${r.riskOfRuin > 0.05 ? 'dn' : 'up'}">${(r.riskOfRuin * 100).toFixed(1)}%</b></div>
@@ -520,7 +538,7 @@ async function runPortfolio() {
       const bars = await fetchBars(sym, tf);
       if (bars.length < 2) throw new Error('no data');
       await new Promise(r => setTimeout(r));   // let the page breathe between runs
-      const data = makeEvaluate(forSymbol(job, sym, calcPrec(bars.at(-1)!.close)), bars)(inputs, { from: 0, to: bars.length });
+      const data = makeEvaluate(forSymbol(job, sym, calcPrec(bars.at(-1)!.close)), bars)(inputs, barRange(bars));
       legs.push({ symbol: sym, bars, data });
     } catch (e) { errors.push(`${sym}: ${(e as Error).message}`) }
   }));

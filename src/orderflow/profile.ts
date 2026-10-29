@@ -3,13 +3,16 @@
 import type { Bar } from '../data.ts';
 import { binOf, valueArea, type FBar } from './model.ts';
 
-/** Session start for time `t`; sessions of a whole number of weeks start on Monday 00:00 UTC, others at UTC midnight. */
-export const sessionStart = (t: number, len: number) => { const a = len % 604800 === 0 ? 345600 : 0; return Math.floor((t - a) / len) * len + a };
+/**
+ * Session start for time `t`; sessions of a whole number of weeks start on Monday, others every day, at `off` seconds
+ * after 00:00 UTC (e.g. 13.5 h for the New York cash open, 20.5 h for midnight in Tehran).
+ */
+export const sessionStart = (t: number, len: number, off = 0) => { const a = (len % 604800 === 0 ? 345600 : 0) + off; return Math.floor((t - a) / len) * len + a };
 /** Split time-sorted bars into sessions of `len` seconds. */
-export function sessions<T extends { time: number }>(bars: T[], len: number): { start: number; bars: T[] }[] {
+export function sessions<T extends { time: number }>(bars: T[], len: number, off = 0): { start: number; bars: T[] }[] {
   const out: { start: number; bars: T[] }[] = [];
   for (const b of bars) {
-    const s = sessionStart(b.time, len), last = out.at(-1);
+    const s = sessionStart(b.time, len, off), last = out.at(-1);
     if (last?.start === s) last.bars.push(b); else out.push({ start: s, bars: [b] });
   }
   return out;

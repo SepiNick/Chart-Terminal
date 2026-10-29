@@ -3,12 +3,13 @@
 import type { MenuItem } from '../menu.ts';
 import type { ChartPane } from '../chart.ts';
 import type { OFCfg } from './layer.ts';
-import { replayActive, replayControl, replayOn, replayPaused, startReplay, stopReplay } from './source.ts';
+import { replayActive, replayBack, replayControl, replayOn, replayPaused, startReplay, stopReplay } from './source.ts';
 import { serverMode } from '../sync.ts';
 import { toast } from '../store.ts';
 import { tfSeconds } from '../data.ts';
 
 const SPEEDS = [1, 2, 5, 10, 30, 60, 300];
+const hhmm = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 const METRICS = ['off', 'volume', 'delta', 'bid', 'ask', 'trades'] as const;
 const reload = (panes: ChartPane[], sym: string, tf: string) => panes.filter(x => x.cfg.symbol === sym && x.cfg.tf === tf).forEach(x => x.load());
 
@@ -18,6 +19,13 @@ export function ofMenu(p: ChartPane, of: OFCfg, set: (patch: Partial<OFCfg>) => 
     { sep: true },
     { label: 'TPO (market profile) per session', checked: !!of.tpo, action: () => set({ tpo: !of.tpo }) },
     { label: 'Volume profile per session', checked: !!of.vprofile, action: () => set({ vprofile: !of.vprofile }) },
+    { label: 'Session start…', hint: `${hhmm(of.sessionStart ?? 0)} UTC`, action: () => {
+      const v = prompt('Daily sessions start at (UTC, HH:MM). 13:30 = New York cash open, 20:30 = midnight in Tehran, 00:00 = UTC day', hhmm(of.sessionStart ?? 0));
+      const m = v?.trim().match(/^(\d{1,2}):(\d{2})$/);
+      if (v == null) return;
+      if (!m || +m[1] > 23 || +m[2] > 59) return toast('Use HH:MM, for example 13:30');
+      set({ sessionStart: +m[1] * 60 + +m[2] });
+    } },
     { label: 'Cluster Search', hint: cl, sub: [
       ...METRICS.map(m => ({ label: m === 'off' ? 'Off' : `By ${m}`, checked: cl === m, action: () => set({ cluster: m }) })),
       { sep: true },
@@ -31,6 +39,8 @@ export function ofMenu(p: ChartPane, of: OFCfg, set: (patch: Partial<OFCfg>) => 
     rp ? { label: `Market replay: ${rp.sym} ${rp.tf}`, sub: [
       { label: replayPaused() ? 'Resume' : 'Pause', action: () => replayControl({ paused: !replayPaused() }) },
       ...SPEEDS.map(s => ({ label: `${s}× speed`, action: () => replayControl({ speed: s }) })),
+      { label: 'Back 1 minute', action: () => void replayBack(60).then(() => reload(panes(), rp.sym, rp.tf), e => toast((e as Error).message, 6000)) },
+      { label: 'Back 15 minutes', action: () => void replayBack(900).then(() => reload(panes(), rp.sym, rp.tf), e => toast((e as Error).message, 6000)) },
       { label: 'Stop replay', action: () => endReplay(panes()) },
     ] } : { label: 'Market replay (recorded trades)…', action: () => void beginReplay(p, panes) },
   ];
@@ -57,12 +67,13 @@ function endReplay(panes: ChartPane[]) {
 }
 
 /** Bar Replay buttons while a Market Replay runs on `p`; returns false when they should do their usual thing. */
-export function replayButton(p: ChartPane, what: 'play' | 'speed' | 'step' | 'exit', panes: ChartPane[], msPerBar = 1000): boolean {
+export function replayButton(p: ChartPane, what: 'play' | 'speed' | 'step' | 'back' | 'exit', panes: ChartPane[], msPerBar = 1000): boolean {
   if (!replayOn(p.cfg.symbol, p.cfg.tf)) return false;
   const sec = tfSeconds(p.cfg.tf);
   if (what === 'play') replayControl({ paused: !replayPaused() });
   if (what === 'speed') replayControl({ speed: Math.max(1, Math.round((sec * 1000) / msPerBar)) });   // "one bar per X" as a clock multiplier
   if (what === 'step') replayControl({ skip: Math.max(sec, 10) });
+  if (what === 'back') replayBack(Math.max(sec, 10)).then(() => reload(panes, p.cfg.symbol, p.cfg.tf), e => toast((e as Error).message, 6000));
   if (what === 'exit') endReplay(panes);
   return true;
 }
