@@ -4,6 +4,7 @@ import type { Alert, AlertInput, AlertLog, AlertSource, Channel, Condition, Freq
 import type { Drawing, Pt } from './tools/types.ts';
 import { $, esc, store, toast } from './store.ts';
 import { api, onServer } from './sync.ts';
+import { parseTvAlertLog } from './tvimport.ts';
 
 // ---------- pure helpers ----------
 export interface OldAlert { id: number; sym: string; price: number; dir: 'up' | 'down'; on: boolean; drawingId?: number; note?: string }
@@ -184,8 +185,16 @@ export function initServerAlerts(h: AlertsHost) {
     // Visible tab: the toast is enough. Hidden: a desktop notification (the tag lets a push for the same event replace it).
     try { if (document.hidden && Notification.permission === 'granted') new Notification(title, { body, tag: String(m.id ?? title) }) } catch {}
   });
-  $('#alertNew').hidden = $('#alertLogClear').hidden = false; $('#alertPxRow').hidden = true;
+  $('#alertNew').hidden = $('#alertLogClear').hidden = $('#alertLogImport').hidden = false; $('#alertPxRow').hidden = true;
   $('#alertNew').onclick = () => openAlertDialog();
+  $<HTMLInputElement>('#alertLogImport input').onchange = async e => {
+    const inp = e.target as HTMLInputElement, f = inp.files?.[0]; inp.value = ''; if (!f) return;
+    try {
+      const rows = parseTvAlertLog(await f.text());
+      const r = await api<{ added: number }>('/api/alerts/log/import', { body: { rows } });
+      toast(`${r.added} TradingView alerts added to the log${rows.length - r.added ? ` (${rows.length - r.added} already there)` : ''}`); loadLog();
+    } catch (err) { toast(`Import failed: ${(err as Error).message}`, 6000) }
+  };
   $('#alertLogClear').onclick = async () => { if (!log.length || !confirm('Clear the alert log?')) return; try { await api('/api/alerts/log', { method: 'DELETE' }); log = []; renderAlertsPanel() } catch (e) { toast((e as Error).message) } };
   $('#alertT').onclick = e => panelClick(e);
   wireDialog();

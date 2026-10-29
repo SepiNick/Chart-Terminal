@@ -2,6 +2,7 @@
 // Other pages live in form.ts (the entry form) and pages.ts (checklists, discipline, analyses, tools, notes, settings).
 import { journal, commitJournal } from '../journalui.ts';
 import type { JTrade } from '../journal.ts';
+import { parseTvAccountHistory } from '../tvimport.ts';
 import { balance, closed, dashboard, dayScores, dayKeyOf, periodRange, scope, tradeTime, rOf, rrExpected, addImported, parseCsv, parseMtHtml, transfersOf, type Group, type Period } from './analytics.ts';
 import { renderForm } from './form.ts';
 import { renderPage } from './pages.ts';
@@ -190,7 +191,7 @@ function journalsPage() {
       <label>Group <select data-ws="group">${[['', 'None'], ['day', 'Day'], ['sym', 'Symbol'], ['setup', 'Setup'], ['account', 'Account']].map(([v, l]) => `<option value="${v}" ${ws.group === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <span class="grow"></span>
       <button data-act="cols">Columns</button>
-      <label class="btn" title="MetaTrader 4/5 HTML statement or a CSV export from an exchange">⤓ Import statement<input type="file" id="jwImport" accept=".htm,.html,.csv,.txt" hidden></label>
+      <label class="btn" title="MetaTrader 4/5 HTML statement, a CSV export from an exchange, or TradingView Paper Trading account history (CSV)">⤓ Import statement<input type="file" id="jwImport" accept=".htm,.html,.csv,.txt" hidden></label>
       <button data-act="csv">⤒ Export CSV</button>
       <button data-act="new" class="on">＋ New entry</button>
     </div>
@@ -224,7 +225,8 @@ async function onMainChange(e: Event) {
     const j = journal(), acc = j.account || (j.accounts ?? []).find(a => a.kind === 'manual')?.id;
     if (!acc) return toast('Choose or create a (non-paper) account first — Accounts & settings', 6000);
     try {
-      const text = await f.text(), rows = /<tr/i.test(text) ? parseMtHtml(text) : parseCsv(text);
+      // TradingView Paper Trading "Account History" is recognised by its Action column of "Close … position" rows.
+      const text = await f.text(), rows = /<tr/i.test(text) ? parseMtHtml(text) : /position for symbol/i.test(text) ? parseTvAccountHistory(text) : parseCsv(text);
       if (!rows.length) return toast('No closed trades found in that file', 6000);
       const n = addImported(j, rows, acc);
       j.trades.filter(t => t.source === 'Import').forEach(t => { t.points ??= {} });

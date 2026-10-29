@@ -109,14 +109,14 @@
   </section>
   <aside id="panel">
     <div class="side on" id="s-watch">
-      <h3>Watchlist <button id="watchAdd" class="x" title="Add current symbol (Alt+W)">＋</button></h3>
+      <h3>Watchlist <button id="watchAdd" class="x" title="Add current symbol (Alt+W)">＋</button><label class="x btn" title="Import a TradingView watchlist (Export list → .txt)">⤓<input type="file" id="watchImport" accept=".txt,.csv" hidden></label></h3>
       <table id="watchT"></table>
     </div>
     <div class="side" id="s-alerts">
       <h3>Alerts <span class="grow"></span><button id="alertNew" class="x" title="Create alert (Alt+A)" hidden>＋ Create</button></h3>
       <div class="row" id="alertPxRow"><input id="alertPx" type="number" step="any" placeholder="Price" aria-label="Alert price"><button id="alertAdd">Add</button></div>
       <table id="alertT"></table>
-      <h3>Log <span class="grow"></span><button id="alertLogClear" class="x" title="Clear the alert log" hidden>Clear</button></h3><div id="alertLog" class="muted"></div>
+      <h3>Log <span class="grow"></span><label class="x btn" id="alertLogImport" title="Import a TradingView alerts log (CSV)" hidden>Import<input type="file" accept=".csv" hidden></label><button id="alertLogClear" class="x" title="Clear the alert log" hidden>Clear</button></h3><div id="alertLog" class="muted"></div>
     </div>
     <div class="side" id="s-trade">
       <h3>Order · <span id="tSym"></span></h3>
