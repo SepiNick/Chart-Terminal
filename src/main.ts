@@ -31,6 +31,7 @@ import { serverMode, onServer, api } from './sync.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
 import './tooltip.ts';
+import { parseTvWatchlist } from './tvimport.ts';
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 
 // ---------- layouts (grid arrangements) ----------
@@ -774,6 +775,12 @@ function showSide(name: string) {
 $('#rail').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) showSide(s) };
 $('#keysBtn').onclick = () => openKeys();
 
+$<HTMLInputElement>('#watchImport').onchange = async e => {
+  const inp = e.target as HTMLInputElement, f = inp.files?.[0]; inp.value = ''; if (!f) return;
+  const add = parseTvWatchlist(await f.text()).filter(s => !st.watch.includes(s) && !isExpr(s));
+  if (!add.length) return toast('No new symbols in that file');
+  st.watch.push(...add); store.set('watch', st.watch); connectTickers(); renderWatch(); toast(`${add.length} symbols imported from TradingView`);
+};
 function addWatch(s: string) { if (!st.watch.includes(s) && !isExpr(s)) { st.watch.push(s); store.set('watch', st.watch); connectTickers(); renderWatch(); toast(`${s} added to watchlist`) } }
 function renderWatch() {
   $('#watchT').innerHTML = '<tr><th>Symbol</th><th>Last</th><th>Chg%</th><th></th></tr>' + st.watch.map(s => {

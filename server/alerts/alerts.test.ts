@@ -236,3 +236,12 @@ test('live wiring: script alerts run in the engine worker, once per closed bar, 
   assert.match(JSON.parse(listed.data).stoppedReason, /script error.*nope/);
   void a;
 });
+
+test('alerts log import: history only, re-import skips duplicates, bad rows ignored', async () => {
+  process.env.CT_DATA_DIR ??= mkdtempSync(join(tmpdir(), 'ct-alerts-'));
+  const I = await import('./index.ts');
+  const rows = [{ at: 1_790_000_000_000, message: 'BINANCE:BTCUSDT — BTC up: Crossing 65,000' }, { at: 1_790_000_060_000, message: 'ETH down' }];
+  assert.equal(I.importLog({ rows }), 2);
+  assert.equal(I.importLog({ rows: [...rows, { at: 'x', message: 'bad' }, { at: 1, message: '  ' }] }), 0, 'nothing new');
+  assert.throws(() => I.importLog({ rows: 'nope' }), /rows/);
+});

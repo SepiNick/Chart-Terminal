@@ -193,6 +193,24 @@ route('GET', '/api/alerts/log', c => {
   return rows.map((r): AlertLog => ({ id: r.id, alertId: r.alert_id, at: r.at, message: r.message, ...(r.price === null ? {} : { price: r.price }), deliveries: JSON.parse(r.deliveries) }));
 });
 route('DELETE', '/api/alerts/log', () => { db.exec('DELETE FROM alert_log') });
+/** Past fires from another app's export (TradingView's alerts log): history only, nothing is re-armed. Re-importing skips rows already there. */
+export function importLog(body: unknown): number {
+  const rows = (body as { rows?: unknown } | undefined)?.rows;
+  if (!Array.isArray(rows) || rows.length > 20_000) throw bad('rows: up to 20000 entries');
+  const ins = db.prepare("INSERT INTO alert_log (alert_id, at, message, price, deliveries) SELECT 'tradingview', ?, ?, NULL, '[]' WHERE NOT EXISTS (SELECT 1 FROM alert_log WHERE alert_id = 'tradingview' AND at = ? AND message = ?)");
+  let n = 0;
+  db.exec('BEGIN');
+  try {
+    for (const r of rows as { at?: unknown; message?: unknown }[]) {
+      if (typeof r?.at !== 'number' || !Number.isFinite(r.at) || typeof r.message !== 'string' || !r.message.trim()) continue;
+      const msg = r.message.slice(0, 1000);
+      n += Number(ins.run(r.at, msg, r.at, msg).changes);
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e }
+  return n;
+}
+route('POST', '/api/alerts/log/import', c => ({ added: importLog(c.body) }), { limit: 8 * 1024 * 1024 });
 route('PUT', '/api/alerts/:id', c => {
   const old = get(c.params.id);
   if (!c.body || typeof c.body !== 'object' || Array.isArray(c.body)) throw bad('Body must be an object');
