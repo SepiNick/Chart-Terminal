@@ -12,8 +12,8 @@ test('TradingView symbols map to the app\'s symbols', () => {
   assert.equal(tvSymbol('ETHBTC'), 'ETHBTC');
 });
 
-test('watchlist export: sections dropped, order kept, duplicates removed', () => {
-  assert.deepEqual(parseTvWatchlist('###Crypto,BINANCE:BTCUSDT,BYBIT:ETHUSDT.P,###Stocks,NASDAQ:AAPL,BINANCE:BTCUSDT\n'), ['BTCUSDT', 'BYBIT:ETH_USDT.P', 'FX:AAPL']);
+test('watchlist export: sections kept, order kept, duplicates removed', () => {
+  assert.deepEqual(parseTvWatchlist('###Crypto,BINANCE:BTCUSDT,BYBIT:ETHUSDT.P,###Stocks,NASDAQ:AAPL,BINANCE:BTCUSDT\n'), ['###Crypto', 'BTCUSDT', 'BYBIT:ETH_USDT.P', '###Stocks', 'FX:AAPL']);
 });
 
 test('CSV: quotes, escaped quotes, commas inside fields', () => {

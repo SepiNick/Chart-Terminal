@@ -5,7 +5,7 @@ import { barHooks, fetchBars, tfSeconds, type Bar } from '../data.ts';
 import { fetchPrints, hasOrderFlow, streamPrints } from './feed.ts';
 import { BarBuilder, parseOfTf, type OfTf } from './tfbars.ts';
 import type { Print } from './model.ts';
-import { api } from '../sync.ts';
+import { api, serverMode } from '../sync.ts';
 import { calcPrec } from '../store.ts';
 
 const CAP = 400_000;
@@ -50,7 +50,13 @@ function liveFeed(sym: string, tf: string, spec: OfTf): Feed {
   let pending: Print[] | null = [];
   const stopStream = streamPrints(sym, ps => { if (pending) pending.push(...ps); else feed.push(ps) });
   feed.stop = () => { stopStream(); if (live.get(k) === feed) live.delete(k) };
-  feed.ready = fetchPrints(sym, 20).then(({ prints }) => {
+  feed.ready = fetchPrints(sym, 20).then(async ({ prints }) => {
+    // Server mode: bars before the loaded trades come from the server's whole recording (empty when it doesn't record sym).
+    if (serverMode && prints.length) {
+      const t0 = prints[0].t, tick = 10 ** -calcPrec(prints[0].px);
+      const older = await api<Bar[]>(`/api/recorder/bars?${new URLSearchParams({ sym, tf, before: String(t0), days: '30', tick: String(tick) })}`).catch(() => []);
+      if (older.length) { feed.hist = older; feed.cut = t0 }
+    }
     const last = prints.at(-1)?.t ?? -Infinity;
     feed.push([...prints, ...pending!.filter(p => p.t > last)], false); pending = null;
   }, e => { feed.stop(); throw e });
@@ -128,6 +134,13 @@ export function replayControl(c: { paused?: boolean; speed?: number; skip?: numb
   rp.feed.onPrints.forEach(f => f([]));
 }
 export const replayPaused = () => !!rp?.paused;
+/** Step back `sec` seconds: the replay starts again from there (prints can't be un-pushed), keeping speed and pause. */
+export async function replayBack(sec: number) {
+  if (!rp) return;
+  const { sym, tf, clock, speed, paused } = rp;
+  await startReplay(sym, tf, clock - sec, speed);
+  if (rp) rp.paused = paused;
+}
 
 /** Prints for the order-flow layer when they come from a feed here (replay, activity interval); null = the normal live path. */
 export function ofFeed(sym: string, tf: string): Feed | null {
@@ -141,7 +154,7 @@ barHooks.push({
     if (replayOn(sym, tf)) { const f = rp!.feed; return end != null ? (f.cut > -Infinity ? null : Promise.resolve([])) : f.ready.then(() => f.bars()) }
     const spec = parseOfTf(tf);
     if (!spec) return null;
-    if (end != null) return Promise.resolve([]);   // ponytail: activity bars cover the loaded trades only; older ones would need paging by trade id
+    if (end != null) return Promise.resolve([]);   // shortcut: no paging further back than the first load (server recording, else the loaded trades)
     if (!hasOrderFlow(sym)) return Promise.reject(Error('Tick, range, reversal and delta intervals need a crypto symbol'));
     const f = liveFeed(sym, tf, spec);
     return f.ready.then(() => { f.release(30_000); return f.bars() });

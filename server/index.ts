@@ -13,6 +13,7 @@ import './recorder.ts';
 import './share.ts';
 import './derivs.ts';
 import './brokers/index.ts';
+import './marketdata.ts';
 import { startLan } from './lan.ts';
 import * as cx from './ccxt.ts';
 

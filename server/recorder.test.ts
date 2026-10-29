@@ -93,3 +93,12 @@ test('binanceSource backfills the gap after a reconnect without duplicates', asy
   assert.match(urls[0], /fromId=7/);
   assert.deepEqual(got, [5, 6, 7, 8, 9, 10, 11, 12, 13]);
 });
+
+test('recordedBars: activity bars from the whole recording before a time', () => {
+  R.add('XRPUSDT', Array.from({ length: 1000 }, (_, i) => ({ t: NOW - 3 * DAY + i * 60, px: 1 + (i % 7) / 100, qty: 1, buy: i % 2 === 0 })));
+  R.flush();
+  const bars = R.recordedBars('XRPUSDT', '100T', NOW - 3 * DAY + 500 * 60, 7, 0.01);
+  assert.equal(bars.length, 5, '500 prints before the cut = five 100-tick bars');
+  assert.ok(bars.every(b => b.volume === 100));
+  assert.throws(() => R.recordedBars('XRPUSDT', '1h', NOW, 7, 0), /activity interval/);
+});

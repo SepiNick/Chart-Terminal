@@ -15,7 +15,27 @@ function hash(s: string) {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-// Every file counts (#include / other classes). Installing an unrelated file of the same language changes it too;
-// the server then simply keeps running the test itself.
+// Every file the script uses counts (#include, iCustom, other classes: usedFiles below); an unrelated file does not.
 export const scriptSig = (s: Pick<ScriptSource, 'lang' | 'files' | 'main' | 'prec'>, inputs: Record<string, unknown> | undefined) =>
   hash([s.lang, s.main, stable(s.files), s.prec, stable(inputs ?? {})].join('\0'));
+
+/**
+ * The files a script really uses: #include, iCustom by a literal name, and (.cs) files declaring a class it names — so
+ * installing an unrelated file leaves a forward test's fingerprint alone. An iCustom with a computed name keeps them all.
+ */
+export function usedFiles<T extends { name: string; src: string }>(main: T, pool: T[], cs: boolean): T[] {
+  const base = (n: string) => n.split(/[\\/]/).pop()!.toLowerCase().replace(/\.(mq4|mq5|mqh|cs)$/, '');
+  const out = new Set([main]), todo = [main];
+  while (todo.length) {
+    const src = todo.pop()!.src;
+    const lit = [...src.matchAll(/\biCustom\s*\([^,()]*,[^,()]*,\s*"([^"]+)"/g)].map(m => m[1]);
+    if ((src.match(/\biCustom\s*\(/g)?.length ?? 0) > lit.length) return pool;
+    const refs = new Set([...[...src.matchAll(/#include\s*[<"]([^>"]+)[>"]/g)].map(m => m[1]), ...lit].map(base));
+    for (const x of pool) {
+      if (out.has(x)) continue;
+      const uses = refs.has(base(x.name)) || (cs && [...x.src.matchAll(/\bclass\s+(\w+)/g)].some(m => new RegExp(`\\b${m[1]}\\b`).test(src)));
+      if (uses) { out.add(x); todo.push(x) }
+    }
+  }
+  return [...out];
+}

@@ -120,9 +120,10 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts, record?: Map<stri
   const err = (n: { line: number; col: number }, msg: string): never => { throw new PineRuntimeError(msg, n.line, n.col) };
 
   // ---------- declarations pass (functions, types, enums, imported libraries) ----------
-  const declareAll = (body: Stmt[], lib: string) => {
+  // A library's own imports live under its alias ('a.b.f'): its code resolves its names first (see `scoped`).
+  const declareAll = (body: Stmt[], lib: string, chain: string[] = []) => {
     for (const s of body) {
-      if (s.kind === 'Import') { if (lib) err(s, 'Libraries importing other libraries are not supported yet'); else importLib(s) }
+      if (s.kind === 'Import') importLib(s, lib, chain);
       if (s.kind !== 'FuncDecl' && s.kind !== 'TypeDecl' && s.kind !== 'EnumDecl') continue;
       const q = lib ? `${lib}.${s.name}` : s.name;
       if (s.kind === 'TypeDecl') types.set(q, { decl: s, lib });
@@ -134,7 +135,8 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts, record?: Map<stri
       }
     }
   };
-  function importLib(s: Extract<Stmt, { kind: 'Import' }>) {
+  function importLib(s: Extract<Stmt, { kind: 'Import' }>, lib: string, chain: string[]) {
+    if (chain.includes(s.path) || chain.length >= 8) return err(s, `Library import cycle: ${[...chain, s.path].join(' → ')}`);
     const src = opts.library?.(s.path);
     if (src == null) return err(s, `Library '${s.path}' not found: add a script that declares library("${s.path.split('/')[1]}") in the Pine Editor`);
     let p = libCache.get(src);
@@ -143,7 +145,7 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts, record?: Map<stri
       if (libCache.size > 20) libCache.delete(libCache.keys().next().value!);
       libCache.set(src, p);
     }
-    declareAll(p.body, s.alias);
+    declareAll(p.body, lib ? `${lib}.${s.alias}` : s.alias, [...chain, s.path]);
   }
   const scoped = <T>(m: Map<string, T>, name: string): T | undefined => (curLib ? m.get(`${curLib}.${name}`) : undefined) ?? m.get(name);
   declareAll(prog.body, '');
@@ -627,6 +629,7 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts, record?: Map<stri
     'log.error': args => { out.logs.push({ bar, level: 'error', msg: str(args[0]) }); return NA },
     'runtime.error': (args, _n, e) => err(e, str(args[0], 'Runtime error')),
     'request.security': (args, n, e) => security(args, n, e),
+    'request.security_lower_tf': (args, n, e) => lowerTf(args, n, e),
     // inputs
     input: (args, n) => inputOf(typeof (n.defval ?? args[0]) === 'boolean' ? 'bool' : typeof (n.defval ?? args[0]) === 'string' ? 'string' : 'float', n.defval ?? args[0], n, args),
     'input.int': (args, n) => inputOf('int', n.defval ?? args[0], n, args),
@@ -783,6 +786,47 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts, record?: Map<stri
       off[i] = i === bars.length - 1 ? Math.max(j, k) : j; on[i] = k;
     }
     return { rec, off, on };
+  }
+  // request.security_lower_tf: the script runs over the lower timeframe's bars (record mode, like above) and each chart
+  // bar gets an array of the values of the lower bars that opened inside it (a tuple of arrays for a tuple expression).
+  const lowCtx = new Map<string, { rec: Map<string, PineValue[]>; lo: Int32Array; hi: Int32Array } | null>();
+  function lowerTf(args: PineValue[], n: Record<string, PineValue>, e: Extract<Expr, { kind: 'Call' }>): PineValue {
+    const expr = a(args, n, 2, 'expression'), sym = normSym(str(a(args, n, 0, 'symbol'))) || normSym(opts.symbol);
+    const tfIn = str(a(args, n, 1, 'timeframe')), tf = tfIn ? appTf(tfIn) : opts.tf;
+    const isTup = !!expr && typeof expr === 'object' && 'tuple' in expr;
+    const arr = (vs: PineValue[]): PineValue => (isTup ? { tuple: (expr as PineTuple).tuple.map((_, t) => vs.map(v => (v as PineTuple | undefined)?.tuple?.[t] ?? NA)) } : vs) as PineValue;
+    if (!tf) { warn(`request.security_lower_tf: unknown timeframe '${tfIn}' (line ${e.line})`); return arr([]) }
+    const sec = tfSeconds(tf);
+    if (sym === normSym(opts.symbol) && sec === opts.tfSec) {   // this context: one value per bar
+      if (record) { const k = `${callPath}|${e.id}`; let r = record.get(k); if (!r) record.set(k, r = []); r[bar] = expr }
+      return arr([expr]);
+    }
+    if (record) { warn('request.security_lower_tf inside another request.security context is not supported'); return arr([]) }
+    if (sec > opts.tfSec) { warn(`request.security_lower_tf: '${tfIn}' is not lower than the chart's timeframe (line ${e.line})`); return arr([]) }
+    const key = `${sym}|${tf}`;
+    let lc = lowCtx.get(key);
+    if (lc === undefined) {
+      lc = null;
+      const sb = opts.security?.(sym, tf);
+      if (!sb) { (out.securityMissing ??= []).push({ symbol: sym, tf }); warn(`request.security_lower_tf: no data for ${sym} ${tf} (line ${e.line}); returning empty arrays`) }
+      else {
+        const rec = new Map<string, PineValue[]>();
+        try {
+          run(prog, sb, { ...opts, symbol: sym, tf, tfSec: sec }, rec).warnings.forEach(warn);
+          const lo = new Int32Array(bars.length), hi = new Int32Array(bars.length);
+          for (let i = 0, j = 0; i < bars.length; i++) {
+            while (j < sb.length && sb[j].time < bars[i].time) j++;
+            let k = j;
+            while (k < sb.length && sb[k].time < bars[i].time + opts.tfSec) k++;
+            lo[i] = j; hi[i] = k;
+          }
+          lc = { rec, lo, hi };
+        } catch (x) { warn(`request.security_lower_tf(${sym}, ${tf}): ${(x as Error).message}`) }
+      }
+      lowCtx.set(key, lc);
+    }
+    const vals = lc?.rec.get(`${callPath}|${e.id}`);
+    return arr(lc && vals ? vals.slice(lc.lo[bar], lc.hi[bar]).map(v => v ?? NA) : []);
   }
   function setLimits(n: Record<string, PineValue>) {
     if (n.max_labels_count != null) labelLimit = num(n.max_labels_count);

@@ -18,7 +18,7 @@ const KEY = 'AKTESTKEY0123456789', SECRET = 'SECRETVALUE9876543210';
 function fake(spot = false, native: ('stop' | 'stop_limit')[] = ['stop', 'stop_limit']) {
   let n = 0;
   const f = {
-    px: 100, fail: '', withdraw: null as boolean | null, placeFail: '',
+    px: 100, fail: '', withdraw: null as boolean | null, placeFail: '', cancelFail: 0,
     balances: [{ asset: 'USDT', free: 10_000, locked: 0 }] as Balance[],
     positions: [] as BrokerPosition[], book: new Map<string, BrokerOrder>(), placed: [] as Native[], canceled: [] as string[],
   };
@@ -48,7 +48,7 @@ function fake(spot = false, native: ('stop' | 'stop_limit')[] = ['stop', 'stop_l
       if (mk) fill(o);
       return r;
     },
-    async cancel(id) { f.canceled.push(id); const o = f.book.get(id); if (o) o.status = 'canceled' },
+    async cancel(id) { if (f.cancelFail > 0) { f.cancelFail--; throw Error('timeout') } f.canceled.push(id); const o = f.book.get(id); if (o) o.status = 'canceled' },
     async canWithdraw() { return f.withdraw },
     close() {},
   };
@@ -242,8 +242,7 @@ test('stop kinds the exchange lacks are emulated; modify = cancel+replace with a
   f.placeFail = '';
   const m2 = await B.modifyOrder(id, s.id, { stopPrice: 97 });
   assert.equal(m2.stopPrice, 97);
-  await B.cancelOrder(id, s.id);
-  assert.ok(!(await B.refresh(id)).orders.some(o => o.id === s.id));
+  await rejects(B.cancelOrder(id, s.id), /protects the open position/);   // N2: 5 BTC held, the other stop covers 2
 });
 
 // trade-guardian review fixes (RISK_RULES #1, #3, #4)
@@ -266,7 +265,7 @@ test('guardian fixes: SL can\'t be removed, resting orders count toward the cap,
   const spot = fake(true, ['stop_limit']);
   spot.f.balances.push({ asset: 'BTC', free: 5, locked: 0 });
   const c = await activeAccount({ broker: 'binance', market: 'spot' }, spot);
-  await B.placeOrder(c.id, { sym: 'BTCUSDT', side: 'sell', kind: 'stop', stopPrice: 90, qty: 5 });   // protects the 5 BTC held
+  await B.placeOrder(c.id, { sym: 'BTCUSDT', side: 'sell', kind: 'stop', stopPrice: 90, qty: 15 });   // covers the 5 BTC held and the 10 the buy may add
   const stop = await B.placeOrder(c.id, { sym: 'BTCUSDT', side: 'buy', kind: 'stop', stopPrice: 105, qty: 10, reduceOnly: true });
   assert.ok(stop.id.startsWith('emu:'));
   await B.modifyOrder(c.id, stop.id, { qty: 100 });
@@ -280,7 +279,7 @@ test('guardian fixes: SL can\'t be removed, resting orders count toward the cap,
 
 test('spot protective sells always count as reducing, so a tripped breaker never blocks a stop', async () => {
   const { checkOrder } = await import('./risk.ts');
-  const ctx = { status: 'tripped' as const, guard: { maxDailyLossPct: 3, maxPositionPct: 20, requireStop: true, confirmedNoWithdraw: true }, spot: true, pos: 5, spotFree: 3, price: 100, equity: 10_000, dayEquity: 9_600, dayStart: 10_000, hasStop: false, skipStop: true };
+  const ctx = { status: 'tripped' as const, guard: { maxDailyLossPct: 3, maxPositionPct: 20, requireStop: true, confirmedNoWithdraw: true }, spot: true, pos: 5, spotFree: 3, price: 100, equity: 10_000, dayEquity: 9_600, dayStart: 10_000, stopQty: 0, skipStop: true };
   // bracket SL sized at the filled qty while part of the coins is locked or went to a fee
   assert.deepEqual(checkOrder({ side: 'sell', qty: 5 }, ctx), { ok: true, reducing: true });
   // a native stop whose own coins are locked (free 0) being moved
@@ -319,4 +318,181 @@ test('a demoted account stays pending through a connection error and can\'t drop
   await B.refresh(id);
   assert.equal(B.listAccounts().find(x => x.id === id)!.status, 'pending', 'back to pending, not active');
   await rejects(B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 1 }), /pending/);
+});
+
+// ROADMAP phase 6 known limitations, fixed
+test('a partial fill gets its SL right away, sized to what filled; the rest follows', async () => {
+  const { id, f } = await activeAccount();
+  const e = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10, sl: 90 });
+  await B.refresh(id);
+  const o = f.book.get(e.id)!;
+  o.filled = 4; f.positions.push({ sym: 'BTCUSDT', qty: 4, entry: 99 });
+  await B.refresh(id);
+  assert.deepEqual(f.placed.at(-1), { sym: 'BTCUSDT', side: 'sell', kind: 'stop', qty: 4, stopPrice: 90, reduceOnly: true });
+  await B.refresh(id);
+  assert.equal(f.placed.filter(x => x.kind === 'stop').length, 1, 'not placed twice');
+  o.filled = 10; o.status = 'filled'; f.positions[0].qty = 10;
+  await B.refresh(id);
+  assert.deepEqual(f.placed.at(-1), { sym: 'BTCUSDT', side: 'sell', kind: 'stop', qty: 6, stopPrice: 90, reduceOnly: true });
+});
+
+test('canceling a partly filled entry still protects what filled', async () => {
+  const { id, f } = await activeAccount();
+  const e = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10, sl: 90 });
+  await B.refresh(id);
+  f.book.get(e.id)!.filled = 3;
+  await B.cancelOrder(id, e.id);
+  await B.refresh(id);
+  assert.deepEqual(f.placed.at(-1), { sym: 'BTCUSDT', side: 'sell', kind: 'stop', qty: 3, stopPrice: 90, reduceOnly: true });
+});
+
+test('requireStop: an existing stop covers only its own quantity', async () => {
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 10, sl: 90 });
+  await B.refresh(id); await B.refresh(id);   // fill, then the native SL for 10
+  assert.ok(f.placed.some(x => x.kind === 'stop' && x.qty === 10));
+  await rejects(B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 5 }), /stops cover 10.00 of 15.00/);
+  const g = await activeAccount();
+  await B.placeOrder(g.id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 10, sl: 90 });
+  await B.refresh(g.id);
+  await B.placeOrder(g.id, { sym: 'BTCUSDT', side: 'sell', kind: 'stop', stopPrice: 85, qty: 0.1, reduceOnly: true });
+  await B.refresh(g.id);
+  await rejects(B.placeOrder(g.id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 1 }), /stop-loss is required/);
+});
+
+test('tripping the breaker cancels resting orders that would add risk, never the SL or exits', async () => {
+  clock = Date.parse('2026-10-25T08:00:00Z');
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 5, sl: 90 });
+  await B.refresh(id); await B.refresh(id);
+  const sl = [...f.book.values()].find(o => o.kind === 'stop')!;
+  const add = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 95, qty: 3, sl: 90 });
+  const tp = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'limit', price: 120, qty: 5, reduceOnly: true });
+  const emu = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'trailing_stop', qty: 1, trail: { pct: 2 }, sl: 80 });
+  await B.refresh(id);
+  f.balances[0].free = 9_600;   // −4% today
+  await B.refresh(id);
+  assert.equal(B.listAccounts().find(x => x.id === id)!.status, 'tripped');
+  assert.ok(f.canceled.includes(add.id), 'the opening limit is canceled');
+  assert.ok(!f.canceled.includes(sl.id) && !f.canceled.includes(tp.id), 'SL and reduce-only exit stay');
+  const e = (await B.refresh(id)).orders.find(o => o.id === emu.id);
+  assert.ok(!e || e.status === 'rejected', 'the emulated opening trigger is off');
+});
+
+test('spot equity counts every coin held, not only the traded symbols', async () => {
+  const spot = fake(true, ['stop_limit']);
+  spot.f.balances.push({ asset: 'ETH', free: 10, locked: 0 });
+  const { id } = await activeAccount({ broker: 'binance', market: 'spot' }, spot);
+  assert.equal((await B.refresh(id)).equity, 11_000);
+});
+
+// trade-guardian review of the limitation fixes (F1–F10)
+test('F1: a poll racing a cancel+replace modify leaves the replacement with its SL', async () => {
+  const { id, f } = await activeAccount();
+  const e = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10, sl: 90 });
+  await B.refresh(id);
+  const [m] = await Promise.all([B.modifyOrder(id, e.id, { price: 98 }), B.refresh(id), B.refresh(id)]);
+  assert.equal(m.sl, 90, 'the replacement shows its SL');
+  const n = f.book.get(m.id)!;
+  n.filled = 10; n.status = 'filled'; f.positions.push({ sym: 'BTCUSDT', qty: 10, entry: 98 });
+  await B.refresh(id);
+  assert.deepEqual(f.placed.filter(x => x.kind === 'stop'), [{ sym: 'BTCUSDT', side: 'sell', kind: 'stop', qty: 10, stopPrice: 90, reduceOnly: true }]);
+});
+
+test('F1: fills of the old order before a cancel+replace keep their own SL, the replacement gets its own', async () => {
+  const { id, f } = await activeAccount();
+  const e = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10, sl: 90 });
+  await B.refresh(id);
+  f.book.get(e.id)!.filled = 3; f.positions.push({ sym: 'BTCUSDT', qty: 3, entry: 99 });
+  const m = await B.modifyOrder(id, e.id, { price: 98 });
+  assert.equal(f.book.get(m.id)!.qty, 7, 'sized from what is really left');
+  await B.refresh(id);
+  const n = f.book.get(m.id)!; n.filled = 7; n.status = 'filled'; f.positions[0].qty = 10;
+  await B.refresh(id);
+  assert.deepEqual(f.placed.filter(x => x.kind === 'stop').map(x => x.qty).sort(), [3, 7]);
+});
+
+test('F3: resting entries without an SL count against the stop cover', async () => {
+  const { id } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'stop', stopPrice: 90, qty: 10, reduceOnly: true });
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10 });
+  await B.refresh(id);
+  await rejects(B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 98, qty: 10 }), /stops cover 10.00 of 20.00/);
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 98, qty: 5, sl: 90 });   // its own SL: fine
+});
+
+test('F4: a protective trigger larger than the shrunken position goes out cut to it, reduce-only', async () => {
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 10, sl: 80 });
+  await B.refresh(id); await B.refresh(id);
+  const t = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'trailing_stop', qty: 10, trail: { pct: 1 } });
+  f.positions[0].qty = 5;
+  await B.refresh(id);
+  const before = f.placed.length;
+  f.px = 95; await B.refresh(id);
+  assert.deepEqual(f.placed.slice(before), [{ sym: 'BTCUSDT', side: 'sell', kind: 'market', qty: 5, reduceOnly: true }]);
+  assert.ok(!(await B.refresh(id)).orders.some(o => o.id === t.id));
+});
+
+test('F5: a breaker cancel that failed is tried again on the next pass', async () => {
+  clock = Date.parse('2026-10-26T08:00:00Z');
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 5, sl: 90 });
+  await B.refresh(id); await B.refresh(id);
+  const add = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 95, qty: 3, sl: 90 });
+  await B.refresh(id);
+  f.balances[0].free = 9_600; f.cancelFail = 1;
+  await B.refresh(id);
+  assert.ok(!f.canceled.includes(add.id));
+  await B.refresh(id);
+  assert.ok(f.canceled.includes(add.id), 'canceled on the retry');
+});
+
+test('F6: closing what filled keeps the SL for what the resting entry fills later', async () => {
+  const { id, f } = await activeAccount();
+  const e = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10, sl: 90 });
+  await B.refresh(id);
+  const o = f.book.get(e.id)!;
+  o.filled = 4; f.positions.push({ sym: 'BTCUSDT', qty: 4, entry: 99 });
+  await B.refresh(id);
+  await B.closePosition(id, { sym: 'BTCUSDT' });
+  await B.refresh(id);
+  o.filled = 10; o.status = 'filled'; f.positions.push({ sym: 'BTCUSDT', qty: 6, entry: 99 });
+  await B.refresh(id);
+  assert.deepEqual(f.placed.at(-1), { sym: 'BTCUSDT', side: 'sell', kind: 'stop', qty: 6, stopPrice: 90, reduceOnly: true });
+});
+
+test('F10: a spot stop never sells more coins than are held', async () => {
+  const spot = fake(true, ['stop_limit']);
+  spot.f.balances.push({ asset: 'BTC', free: 5, locked: 0 });
+  const { id, f } = await activeAccount({ broker: 'binance', market: 'spot' }, spot);
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'stop', stopPrice: 90, qty: 15 });
+  const before = f.placed.length;
+  f.px = 89; await B.refresh(id);
+  assert.deepEqual(f.placed.slice(before).map(o => [o.side, o.qty]), [['sell', 5]]);
+});
+
+test('N2: a stop that is not needed for cover can be canceled; the last one cannot', async () => {
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 10, sl: 90 });
+  await B.refresh(id); await B.refresh(id);
+  const sl = [...f.book.values()].find(o => o.kind === 'stop')!;
+  const extra = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'stop', stopPrice: 85, qty: 10, reduceOnly: true });
+  await B.refresh(id);
+  await B.cancelOrder(id, extra.id);
+  await B.refresh(id);
+  await rejects(B.cancelOrder(id, sl.id), /protects the open position/);
+});
+
+test('N1: on a trip, a native limit against the position but bigger than it is canceled', async () => {
+  clock = Date.parse('2026-10-27T08:00:00Z');
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'market', qty: 1, sl: 110 });
+  await B.refresh(id); await B.refresh(id);
+  const flip = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 95, qty: 15, sl: 90 });
+  const exit = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 94, qty: 1 });
+  await B.refresh(id);
+  f.balances[0].free = 9_600;
+  await B.refresh(id);
+  assert.ok(f.canceled.includes(flip.id) && !f.canceled.includes(exit.id));
 });

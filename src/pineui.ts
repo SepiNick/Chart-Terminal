@@ -1,4 +1,5 @@
 // Script editor panel (Pine + MQL4/MQL5 + NinjaScript), script library/installation, inputs dialog and console.
+import { usedFiles } from './scriptsig.ts';
 import type { ChartPane, PaneCfg } from './chart.ts';
 import { createPineEditor, type PineEditor } from './pine/editor.ts';
 import { compile, isError, setInstalledScripts } from './pine/engine.ts';
@@ -46,7 +47,7 @@ const EXTRA_COMPLETIONS = ['indicator', 'strategy', 'library', 'plot', 'plotshap
   'open', 'high', 'low', 'close', 'volume', 'time', 'bar_index', 'hl2', 'hlc3', 'ohlc4', 'hlcc4', 'last_bar_index', 'barstate.islast', 'barstate.isfirst', 'barstate.isconfirmed',
   'syminfo.ticker', 'syminfo.tickerid', 'syminfo.mintick', 'timeframe.period', 'plot.style_line', 'plot.style_histogram', 'plot.style_columns', 'plot.style_circles', 'plot.style_area', 'plot.style_stepline',
   'shape.triangleup', 'shape.triangledown', 'shape.circle', 'shape.labelup', 'shape.labeldown', 'shape.arrowup', 'shape.arrowdown', 'location.abovebar', 'location.belowbar', 'location.top', 'location.bottom',
-  'size.tiny', 'size.small', 'size.normal', 'size.large', 'hline.style_dashed', 'hline.style_dotted', 'hline.style_solid', 'log.info', 'log.warning', 'log.error', 'request.security'];
+  'size.tiny', 'size.small', 'size.normal', 'size.large', 'hline.style_dashed', 'hline.style_dotted', 'hline.style_solid', 'log.info', 'log.warning', 'log.error', 'request.security', 'request.security_lower_tf'];
 
 function newScript(src: string, name?: string, lang?: Lang): Script {
   const l = lang ?? (name ? langFromName(name) : 'pine');
@@ -136,7 +137,7 @@ export function sourceFor(id: string, prec: number): ScriptSource | null {
   const lang = langOf(s), fam = (l: Lang) => (isMql(l) ? 'mql' : l);
   if (lang === 'mqh') return null;
   if (lang === 'pine') return { lang, files: { 'main.pine': s.src }, main: 'main.pine', prec };
-  return { lang, files: Object.fromEntries(Object.values(scripts).filter(x => fam(langOf(x)) === fam(lang)).map(x => [x.name, x.src])), main: s.name, prec };
+  return { lang, files: Object.fromEntries(usedFiles(s, Object.values(scripts).filter(x => fam(langOf(x)) === fam(lang)), lang === 'ninja').map(x => [x.name, x.src])), main: s.name, prec };
 }
 export const compileById = (id: string) => compileMqlScript(id);
 

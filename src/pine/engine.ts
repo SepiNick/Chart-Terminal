@@ -25,6 +25,8 @@ let installed: () => string[] = () => [];
 export function setInstalledScripts(f: () => string[]) { installed = f }
 export const libraryTitle = (src: string) => /^\s*library\s*\(\s*(?:title\s*=\s*)?["']([^"']+)["']/m.exec(src)?.[1];
 export const findLibrary = (path: string, srcs = installed()) => srcs.find(s => libraryTitle(s) === path.split('/')[1]);
+/** Installed library sources, as plain data for the tester worker (it has no editor to ask). */
+export const installedLibraries = () => installed().filter(s => libraryTitle(s));
 
 export function runScript(src: string, bars: Bar[], opts: RunOpts): { out?: Outputs; error?: ScriptError; ms: number } {
   const t0 = performance.now();

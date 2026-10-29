@@ -33,6 +33,7 @@ export interface Emu {
   peer?: { id: string; sym: string };        // native order of the same OCO group (a bracket's exchange-side stop)
   parent?: string; parentSym?: string;       // bracket: the entry order (native id, or an emu id until it fires)
   tries?: number;
+  legQty?: number;                           // bracket: entry qty whose TP/SL are already out (partial fills)
 }
 
 const rows = new Map<string, Row>();
@@ -63,9 +64,9 @@ function makeAdapter(a: BrokerAccount, k: ReturnType<typeof keysOf>): Adapter {
 export const deps = { adapter: makeAdapter, now: () => Date.now() };
 
 // ---------- runtime per account ----------
-interface Rt { ad: Adapter | null; state: BrokerState | null; json: string; errors: number; timer?: ReturnType<typeof setTimeout>; unwatch?: () => void; busy?: Promise<BrokerState>; next?: Promise<BrokerState>; prices: Map<string, number> }
+interface Rt { ad: Adapter | null; state: BrokerState | null; json: string; errors: number; timer?: ReturnType<typeof setTimeout>; unwatch?: () => void; busy?: Promise<BrokerState>; next?: Promise<BrokerState>; prices: Map<string, number>; pxAt: Map<string, number> }
 const rts = new Map<string, Rt>();
-const rt = (id: string) => { let r = rts.get(id); if (!r) rts.set(id, (r = { ad: null, state: null, json: '', errors: 0, prices: new Map() })); return r };
+const rt = (id: string) => { let r = rts.get(id); if (!r) rts.set(id, (r = { ad: null, state: null, json: '', errors: 0, prices: new Map(), pxAt: new Map() })); return r };
 
 function rowOf(id: string): Row { const r = rows.get(id); if (!r) throw new HttpError(404, 'Unknown account'); return r }
 const fail = (id: string, e: unknown) => (e instanceof HttpError ? e : new HttpError(502, scrub(e, secretsOf(id))));
@@ -97,26 +98,23 @@ const live = (id: string) => !!rts.get(id)?.state;
 const polls = (a: BrokerAccount) => a.status === 'active' || a.status === 'tripped' || a.status === 'error' || (a.status === 'pending' && live(a.id));
 
 /**
- * Equity in quote currency `q`: its balance, plus base assets of the symbols this account trades at their last price
- * (spot), plus unrealised PnL (futures). ponytail: other coins held on a spot testnet are not counted; price them all
- * (one fetchTickers) if equity must include them.
+ * Equity in quote currency `q`: its balance, plus every other asset held at its last price in `q` (spot), plus
+ * unrealised PnL (futures). Assets with no `q` market (never priced) are left out.
  */
 function equityIn(q: string, row: Row, st: Pick<BrokerState, 'balances' | 'positions'>, prices: Map<string, number>) {
   const bal = (a: string) => { const b = st.balances.find(x => x.asset === a); return b ? b.free + b.locked : 0 };
   let e = bal(q);
   if (row.acct.market === 'futures') return rt(row.acct.id).ad?.upnlInBalance ? e : e + st.positions.filter(p => keyOf(p.sym).endsWith(`/${q}`)).reduce((s, p) => s + (p.upnl ?? 0), 0);
-  const seen = new Set<string>();
-  for (const sym of row.meta.syms) {
-    const p = parseSym(sym), px = prices.get(sym);
-    if (p.quote !== q || seen.has(p.base) || !px) continue;
-    seen.add(p.base); e += bal(p.base) * px;
-  }
+  const px = new Map<string, number>();
+  for (const sym of row.meta.syms) { const p = parseSym(sym), v = prices.get(sym); if (p.quote === q && v) px.set(p.base, v) }
+  for (const b of st.balances) { if (b.asset === q) continue; const v = px.get(b.asset) ?? prices.get(`${b.asset}${q}`); if (v) e += (b.free + b.locked) * v }
   return e;
 }
-function dayStart(id: string, equity: number) {
+/** Today's start-of-day equity; recorded from `equity` when given and there is none yet (else only read). */
+function dayStart(id: string, equity?: number) {
   const day = utcDay(deps.now());
-  db.prepare('INSERT OR IGNORE INTO broker_day (account, day, equity) VALUES (?, ?, ?)').run(id, day, equity);
-  return (db.prepare('SELECT equity FROM broker_day WHERE account = ? AND day = ?').get(id, day) as { equity: number }).equity;
+  if (equity !== undefined) db.prepare('INSERT OR IGNORE INTO broker_day (account, day, equity) VALUES (?, ?, ?)').run(id, day, equity);
+  return (db.prepare('SELECT equity FROM broker_day WHERE account = ? AND day = ?').get(id, day) as { equity: number } | undefined)?.equity;
 }
 
 const isStopKind = (k: string) => k === 'stop' || k === 'stop_limit' || k === 'trailing_stop';
@@ -147,8 +145,19 @@ export function refresh(id: string): Promise<BrokerState> {
   const r = rt(id);
   // One poll at a time; callers arriving during a poll share one follow-up poll (they may need data newer than it).
   if (r.busy) return (r.next ??= r.busy.catch(() => {}).then(() => { r.next = undefined; return refresh(id) }));
-  r.busy = poll(id).finally(() => { r.busy = undefined });
+  r.busy = locked(id, () => poll(id)).finally(() => { r.busy = undefined });
   return r.busy;
+}
+/**
+ * Polls and order operations of one account run one at a time: an emulation pass never lands inside a cancel+replace
+ * or a close, so a bracket is never legged twice, re-parented under a running pass, or dropped while its entry rests.
+ * Inside the lock call poll(), never refresh() (it would wait for the lock it is in).
+ */
+const locks = new Map<string, Promise<unknown>>();
+function locked<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const p = (locks.get(id) ?? Promise.resolve()).then(fn);
+  locks.set(id, p.catch(() => {}));
+  return p;
 }
 async function poll(id: string): Promise<BrokerState> {
   const row = rowOf(id), r = rt(id), ad = adapterOf(id), now = deps.now();
@@ -159,16 +168,28 @@ async function poll(id: string): Promise<BrokerState> {
     const want = new Set<string>([...emusOf(id).filter(e => e.kind === 'trigger').map(e => e.order.sym), ...(row.acct.market === 'spot' ? row.meta.syms : [])]);
     for (const s of want) { try { r.prices.set(s, await ad.price(s)) } catch {} }
     for (const p of positions) if (p.mark) r.prices.set(p.sym, p.mark);
-    const equity = equityIn(mainQuote(row.acct), row, { balances, positions }, r.prices);
-    const start = dayStart(id, equity), today = utcDay(now);
+    const q = mainQuote(row.acct), traded = new Set(row.meta.syms.map(s => parseSym(s)).filter(p => p.quote === q).map(p => p.base));
+    const others = row.acct.market === 'spot' ? balances.filter(b => b.asset !== q && !traded.has(b.asset) && b.free + b.locked > 0).map(b => `${b.asset}${q}`) : [];
+    const equity = equityIn(q, row, { balances, positions }, r.prices);
+    // The day's start equity is taken only once every coin held has been priced (or failed once): a coin priced later
+    // would otherwise look like a gain and hide a loss of the same size.
+    const start = dayStart(id, others.every(s => r.prices.has(s)) ? equity : undefined), today = utcDay(now);
     let st: BrokerState = { account: id, balances, positions, orders: [], fills, equity, dayStartEquity: start, updated: now };
     r.state = { ...st, orders: open };
     const fired = await tickEmus(id, ad, open, r.prices);
-    st = { ...st, orders: [...annotate(id, open), ...emuView(id)] };
+    // Other coins held (spot) count toward equity: priced after the emulation pass (stops first), at most once a minute;
+    // a failed price keeps the last one.
+    for (const s of others) {
+      if (now - (r.pxAt.get(s) ?? -Infinity) < 60_000) continue;
+      r.pxAt.set(s, now);
+      try { r.prices.set(s, await ad.price(s)) } catch { if (!r.prices.has(s)) r.prices.set(s, NaN) }
+    }
 
     if (row.acct.status === 'error') setStatus(row, row.meta.okStatus ?? 'active');
     if (row.acct.status === 'tripped' && row.meta.trippedDay !== today) setStatus(row, 'active');
-    if (row.acct.status === 'active' && breakerHit(row.acct.guard, equity, start)) trip(row);
+    if (row.acct.status === 'active' && breakerHit(row.acct.guard, equity, start)) await trip(row);
+    else if (row.acct.status === 'tripped') await cancelOpening(row);   // every pass: a cancel that failed is tried again
+    st = { ...st, orders: [...annotate(id, (rt(id).state?.orders ?? open).filter(o => o.status === 'open')), ...emuView(id)] };
     r.errors = 0;
     publish(id, st);
     if (fired) schedule(id, 300);
@@ -182,7 +203,33 @@ async function poll(id: string): Promise<BrokerState> {
     throw new HttpError(502, msg);
   }
 }
-function trip(row: Row) { row.meta.trippedDay = utcDay(deps.now()); setStatus(row, 'tripped') }
+async function trip(row: Row) { row.meta.trippedDay = utcDay(deps.now()); setStatus(row, 'tripped'); await cancelOpening(row) }
+/**
+ * A tripped account takes no new risk: resting orders that would open or add are canceled. Exits stay: reduce-only
+ * orders, SL/TP legs and orders on the other side of the position — an emulated one of any size (fire() cuts it to the
+ * position), a native one only if it is a stop (dropping a stop is the worse failure) or no bigger than the position.
+ */
+async function cancelOpening(row: Row) {
+  const id = row.acct.id, ad = adapterOf(id);
+  const exit = (sym: string, side: 'buy' | 'sell', reduceOnly?: boolean, nativeQty?: number, kind?: string) => {
+    const c = ctxFor(row, sym, side, 0);
+    if (c.spot) return side === 'sell';
+    if (reduceOnly) return true;
+    const against = c.pos !== 0 && (side === 'buy') !== (c.pos > 0);
+    return against && (nativeQty === undefined || isStopKind(kind ?? '') || nativeQty <= Math.abs(c.pos) + 1e-12);
+  };
+  for (const e of emusOf(id)) {
+    if (e.kind !== 'trigger' || e.order.status !== 'open' || e.what?.startsWith('bracket') || exit(e.send!.sym, e.send!.side, e.send!.reduceOnly)) continue;
+    reject(e, 'Canceled: circuit breaker tripped');
+    for (const b of emusOf(id)) if (b.parent === e.id) dropEmu(b.id);
+  }
+  for (const o of rt(id).state?.orders ?? []) {
+    if (o.status !== 'open' || o.id.startsWith('emu:') || exit(o.sym, o.side, o.reduceOnly, o.qty - o.filled, o.kind)) continue;
+    // Its bracket stays: a fill that happened before the cancel still gets its SL on the next pass.
+    try { await ad.cancel(o.id, o.sym, isStopKind(o.kind)); o.status = 'canceled' }
+    catch (err) { console.error(`[brokers] ${id}: breaker cancel failed (retried next pass): ${scrub(err, secretsOf(id))}`) }
+  }
+}
 
 // ---------- emulation ----------
 const describe = (e: Pick<Emu, 'what' | 'trig'>) => `Emulated by the server (${e.what}): fires when price ${e.trig!.dir === 'up' ? 'rises to' : 'falls to'} ${+e.trig!.at.toPrecision(10)}`;
@@ -202,9 +249,9 @@ function addTrigger(account: string, o: Omit<OrderReq, 'tp' | 'sl' | 'ocoWith'>,
   saveEmu(e);
   return e;
 }
-function addBracket(account: string, parent: BrokerOrder, tp?: number, sl?: number) {
+function addBracket(account: string, parent: BrokerOrder, tp?: number, sl?: number, legQty?: number) {
   const id = `emu:${randomUUID()}`;
-  saveEmu({ id, account, kind: 'bracket', parent: parent.id, parentSym: parent.sym, order: { ...parent, id, ...(tp ? { tp } : {}), ...(sl ? { sl } : {}) } });
+  saveEmu({ id, account, kind: 'bracket', parent: parent.id, parentSym: parent.sym, ...(legQty ? { legQty } : {}), order: { ...parent, id, ...(tp ? { tp } : {}), ...(sl ? { sl } : {}) } });
 }
 
 /** Exit orders once the entry filled: SL on the exchange where it holds stops (survives a server restart), TP emulated; OCO-linked. */
@@ -231,18 +278,27 @@ async function tickEmus(account: string, ad: Adapter, open: BrokerOrder[], price
     if (!emus.has(e.id)) continue;   // canceled by an OCO sibling earlier in this pass
     if (e.kind === 'bracket') {
       if (e.parent!.startsWith('emu:')) { if (!emus.has(e.parent!)) dropEmu(e.id); continue }
-      if (isOpen(e.parent!)) continue;
-      let p: BrokerOrder;
-      try { p = await ad.order(e.parent!, e.parentSym!) }
+      let p = open.find(o => o.id === e.parent);
+      if (!p) try { p = await ad.order(e.parent!, e.parentSym!) }
       catch (err) {
         // Retried every pass; after 5 failures the entry shows why its TP/SL are not out yet (never silently unprotected).
         e.tries = (e.tries ?? 0) + 1;
         if (e.tries >= 5) { e.order.error = `TP/SL not placed yet: cannot read the entry order (${scrub(err, secretsOf(account))}) — still retrying`; saveEmu(e) }
         continue;
       }
-      if (p.status === 'open') continue;
+      // A partial fill gets its SL/TP now, for the part that filled; the rest follows as it fills.
+      const rest = p.filled - (e.legQty ?? 0);
+      if (p.status === 'open') {
+        if (rest > 1e-12) {
+          const was = e.legQty;
+          e.legQty = p.filled; saveEmu(e);
+          try { await placeLegs(account, ad, e, rest) } catch (err) { e.legQty = was; saveEmu(e); throw err }   // not legged: retried next pass
+          fired = true;
+        }
+        continue;
+      }
       dropEmu(e.id);
-      if (p.filled > 0) await placeLegs(account, ad, e, p.filled);
+      if (rest > 1e-12) await placeLegs(account, ad, e, rest);
       fired = true;
       continue;
     }
@@ -266,13 +322,24 @@ async function tickEmus(account: string, ad: Adapter, open: BrokerOrder[], price
 }
 
 async function fire(account: string, ad: Adapter, e: Emu, px: number): Promise<boolean> {
-  const row = rowOf(account);
+  const row = rowOf(account), send: Native = { ...e.send! };
   // Always checked: a genuinely reducing order passes inside checkOrder (decided from the position, not the flag,
   // so a spot "reduce-only" buy can't skip the cap or a tripped breaker). Its OCO siblings aren't counted as pending.
-  const v = checkOrder(e.send!, ctxFor(row, e.send!.sym, e.send!.side, e.send!.price ?? px, true, o => o.id === e.id || (!!e.oco && emus.get(o.id)?.oco === e.oco)));
-  if (!v.ok) { reject(e, `Not sent: ${v.reason}`); if (v.trip) trip(row); return false }
+  // Bracket legs were sized from the fill they protect; any other trigger needs stop cover when it fires (its qty may have grown).
+  const sl = emusOf(account).find(b => b.kind === 'bracket' && b.parent === e.id)?.order.sl;
+  const ctx = ctxFor(row, send.sym, send.side, send.price ?? px, !!e.what?.startsWith('bracket'), o => o.id === e.id || (!!e.oco && emus.get(o.id)?.oco === e.oco));
+  // Spot: never sell more than is held (fees, partial fills, a stop sized for coins that never came) — the exchange would refuse it.
+  // (Free coins only: coins locked by another resting sell can't be sold until it is canceled.)
+  if (ctx.spot && send.side === 'sell') { send.qty = Math.min(send.qty, ctx.spotFree ?? ctx.pos); if (!(send.qty > 0)) { reject(e, ctx.pos > 0 ? 'Not sent: the coins are locked by another resting sell order — cancel it to free them' : 'Not sent: nothing left to sell'); return false } }
+  let v = checkOrder({ ...send, ...(sl ? { sl } : {}) }, ctx);
+  // An exit against the position that would also flip it (and may not): it still goes out, cut to the position, reduce-only.
+  if (!v.ok && !ctx.spot && ctx.pos !== 0 && (send.side === 'buy') !== (ctx.pos > 0)) {
+    send.qty = Math.min(send.qty, Math.abs(ctx.pos)); send.reduceOnly = true;
+    v = checkOrder(send, ctx);
+  }
+  if (!v.ok) { reject(e, `Not sent: ${v.reason}`); if (v.trip) await trip(row); return false }
   try {
-    const o = await ad.place(e.send!);
+    const o = await ad.place(send);
     if (e.oco) for (const s of emusOf(account)) if (s.oco === e.oco && s.id !== e.id) dropEmu(s.id);
     if (e.peer) await ad.cancel(e.peer.id, e.peer.sym, true).catch(() => {});   // already filled/canceled is fine
     for (const b of emusOf(account)) if (b.kind === 'bracket' && b.parent === e.id) { b.parent = o.id; b.parentSym = o.sym; saveEmu(b) }
@@ -295,15 +362,20 @@ function ctxFor(row: Row, sym: string, side: 'buy' | 'sell', price: number, skip
   const balances = st?.balances ?? [], positions = st?.positions ?? [];
   const b = balances.find(x => x.asset === p.base);
   const pos = row.acct.market === 'futures' ? positions.filter(x => same(x.sym, sym)).reduce((s, x) => s + x.qty, 0) : b ? b.free + b.locked : 0;
-  // An existing stop protects what this order opens or adds to when it sits on the other side.
-  const stops = [...(st?.orders ?? []), ...emuView(row.acct.id)].filter(o => same(o.sym, sym) && o.status === 'open' && isStopKind(o.kind) && o.side !== side);
+  // An existing stop protects what this order opens or adds to when it sits on the other side (an OCO group counts once).
+  const all = [...(st?.orders ?? []), ...emuView(row.acct.id)].filter(o => same(o.sym, sym) && o.status === 'open');
+  const cover = new Map<string, number>();
+  for (const o of all) if (isStopKind(o.kind) && o.side !== side) { const k = o.ocoGroup ?? o.id; cover.set(k, Math.max(cover.get(k) ?? 0, o.qty - o.filled)) }
+  const adds = all.filter(o => o.side === side && !o.reduceOnly && !exclude(o)), es = emusOf(row.acct.id);
+  const ownSl = (o: BrokerOrder) => es.some(b => b.kind === 'bracket' && b.parent === o.id && b.order.sl);
   const prices = new Map(r.prices); prices.set(sym, price);
   return {
     status: row.acct.status, guard: row.acct.guard, spot: row.acct.market === 'spot', pos, spotFree: b?.free ?? 0, price,
     equity: equityIn(p.quote, { ...row, meta: { ...row.meta, syms: [...new Set([...row.meta.syms, sym])] } }, { balances, positions }, prices),
     dayEquity: st?.equity ?? 0, dayStart: st?.dayStartEquity, skipStop,
-    hasStop: stops.length > 0,
-    pending: [...(st?.orders ?? []), ...emuView(row.acct.id)].filter(o => same(o.sym, sym) && o.status === 'open' && o.side === side && !o.reduceOnly && !exclude(o)).reduce((s, o) => s + o.qty - o.filled, 0),
+    stopQty: [...cover.values()].reduce((s, q) => s + q, 0),
+    pending: adds.reduce((s, o) => s + o.qty - o.filled, 0),
+    pendingNoSl: adds.filter(o => !ownSl(o)).reduce((s, o) => s + o.qty - o.filled, 0),
   };
 }
 
@@ -367,7 +439,7 @@ export async function check(id: string): Promise<GuardianReport> {
 
 // A pending account that is live still reaches the guard, which lets only reducing / closing orders through.
 const activeRow = (id: string) => { const row = rowOf(id); if (row.acct.status === 'pending' && !live(id)) throw bad('Account is pending: run the guardian check first'); return row };
-async function fresh(id: string) { const r = rt(id); if (!r.state || deps.now() - r.state.updated > 10_000) await refresh(id); return r.state! }
+async function fresh(id: string) { const r = rt(id); if (!r.state || deps.now() - r.state.updated > 10_000) await poll(id); return r.state! }   // inside the lock
 function track(row: Row, sym: string) { if (!row.meta.syms.includes(sym)) { row.meta.syms.push(sym); saveRow(row) } }
 
 export async function getState(id: string): Promise<BrokerState> {
@@ -376,7 +448,8 @@ export async function getState(id: string): Promise<BrokerState> {
   return rt(id).state ?? refresh(id);
 }
 
-export async function placeOrder(id: string, x: unknown): Promise<BrokerOrder> {
+export const placeOrder = (id: string, x: unknown) => locked(id, () => place(id, x));
+async function place(id: string, x: unknown): Promise<BrokerOrder> {
   const row = activeRow(id), o = validOrder(x), ad = adapterOf(id);
   await fresh(id);
   let px: number;
@@ -386,7 +459,7 @@ export async function placeOrder(id: string, x: unknown): Promise<BrokerOrder> {
   checkBracket(o, entry);
   for (const leg of o.ocoWith ? [o, o.ocoWith] : [o]) {
     const v = checkOrder(leg, ctxFor(row, leg.sym, leg.side, leg.price ?? leg.stopPrice ?? px));
-    if (!v.ok) { if (v.trip) trip(row); throw bad(v.reason) }
+    if (!v.ok) { if (v.trip) await trip(row); throw bad(v.reason) }
   }
   track(row, o.sym);
   let placed: BrokerOrder;
@@ -405,31 +478,51 @@ export async function placeOrder(id: string, x: unknown): Promise<BrokerOrder> {
   return placed;
 }
 
-export async function cancelOrder(id: string, oid: string) {
+export const cancelOrder = (id: string, oid: string) => locked(id, () => cancel(id, oid));
+async function cancel(id: string, oid: string) {
   activeRow(id);
   const e = emus.get(oid);
   if (e && e.account === id) {
-    for (const s of emusOf(id)) if (s.id === oid || (e.oco && s.oco === e.oco) || s.parent === oid) dropEmu(s.id);
+    const gone = emusOf(id).filter(s => s.id === oid || (e.oco && s.oco === e.oco) || s.parent === oid);
+    keepsStop(id, gone.filter(s => s.kind === 'trigger' && s.order.status === 'open').map(s => s.order));
+    for (const s of gone) dropEmu(s.id);
     refresh(id).catch(() => {});
     return;
   }
   const st = await fresh(id), o = st.orders.find(x => x.id === oid);
   if (!o) throw new HttpError(404, 'Unknown or already closed order');
-  try { await adapterOf(id).cancel(oid, o.sym, isStopKind(o.kind)) } catch (err) { throw fail(id, err) }
-  for (const b of emusOf(id)) if (b.parent === oid) dropEmu(b.id);
+  keepsStop(id, [o]);
+  const ad = adapterOf(id);
+  try { await ad.cancel(oid, o.sym, isStopKind(o.kind)) } catch (err) { throw fail(id, err) }
+  // Whatever filled before the cancel gets its SL/TP now; if the order can't be read, its bracket stays for the next pass.
+  const fin = await ad.order(oid, o.sym, isStopKind(o.kind)).catch(() => null);
+  if (fin && fin.status !== 'open') for (const b of emusOf(id)) if (b.kind === 'bracket' && b.parent === oid) { const rest = fin.filled - (b.legQty ?? 0); dropEmu(b.id); if (rest > 1e-12) await placeLegs(id, ad, b, rest) }
   for (const t of emusOf(id)) if (t.peer?.id === oid) { delete t.peer; saveEmu(t) }
   refresh(id).catch(() => {});
 }
 
+/** requireStop: a cancel may not leave the position less covered by stops than its size (move the stop or close instead). */
+function keepsStop(id: string, gone: BrokerOrder[]) {
+  const row = rowOf(id);
+  if (!row.acct.guard.requireStop) return;
+  for (const o of gone) {
+    if (!isStopKind(o.kind)) continue;
+    const c = ctxFor(row, o.sym, o.side === 'buy' ? 'sell' : 'buy', 0);   // the stops on o's side, the position they protect
+    const left = c.stopQty - gone.filter(g => same(g.sym, o.sym) && g.side === o.side && isStopKind(g.kind)).reduce((s, g) => s + g.qty - g.filled, 0);
+    const against = c.spot ? o.side === 'sell' && c.pos > 0 : c.pos !== 0 && (o.side === 'buy') !== (c.pos > 0);
+    if (against && left < Math.abs(c.pos) * (1 - 1e-9)) throw bad('This stop protects the open position and a stop-loss is required: move it, or close the position, instead of canceling it');
+  }
+}
 function setBracket(id: string, parent: BrokerOrder, p: OrderPatch) {
   const b = emusOf(id).find(e => e.kind === 'bracket' && e.parent === parent.id);
   const tp = p.tp === undefined ? b?.order.tp : p.tp ?? undefined, sl = p.sl === undefined ? b?.order.sl : p.sl ?? undefined;
   checkBracket({ side: parent.side, tp, sl }, parent.price ?? parent.stopPrice ?? rt(id).prices.get(parent.sym) ?? (tp && sl ? (tp + sl) / 2 : tp ?? sl ?? 0));
   if (b) dropEmu(b.id);
-  if (tp || sl) addBracket(id, parent, tp, sl);
+  if (tp || sl) addBracket(id, parent, tp, sl, b?.legQty);
 }
 
-export async function modifyOrder(id: string, oid: string, x: unknown): Promise<BrokerOrder> {
+export const modifyOrder = (id: string, oid: string, x: unknown) => locked(id, () => modify(id, oid, x));
+async function modify(id: string, oid: string, x: unknown): Promise<BrokerOrder> {
   const row = activeRow(id), p = validPatch(x), ad = adapterOf(id);
   // Only an active account that doesn't require stops may drop an SL (demoting is exactly how requireStop gets turned off).
   if (p.sl === null && (row.acct.guard.requireStop || row.acct.status !== 'active')) throw bad('A stop-loss is required on this account: move the SL instead of removing it');
@@ -459,34 +552,49 @@ export async function modifyOrder(id: string, oid: string, x: unknown): Promise<
   if (o.kind === 'market' || o.kind === 'trailing_stop') throw bad('This order cannot be modified');
   const n: Native = { sym: o.sym, side: o.side, kind: o.kind, qty: p.qty ?? o.qty - o.filled, ...(o.kind === 'limit' || o.kind === 'stop_limit' ? { price: p.price ?? o.price } : {}), ...(o.stopPrice !== undefined || p.stopPrice !== undefined ? { stopPrice: p.stopPrice ?? o.stopPrice } : {}), ...(o.reduceOnly ? { reduceOnly: true } : {}) };
   // Re-check the whole order: a bigger qty or a price moved toward the market both change its notional.
-  const v = checkOrder({ side: o.side, qty: n.qty, reduceOnly: o.reduceOnly }, ctxFor(row, o.sym, o.side, n.price ?? n.stopPrice ?? rt(id).prices.get(o.sym) ?? 0, true, z => z.id === o.id));
-  if (!v.ok) { if (v.trip) trip(row); throw bad(v.reason) }
+  const bsl = emusOf(id).find(b => b.kind === 'bracket' && b.parent === oid)?.order.sl;
+  const v = checkOrder({ side: o.side, qty: n.qty, reduceOnly: o.reduceOnly, ...(bsl ? { sl: bsl } : {}) }, ctxFor(row, o.sym, o.side, n.price ?? n.stopPrice ?? rt(id).prices.get(o.sym) ?? 0, false, z => z.id === o.id));
+  if (!v.ok) { if (v.trip) await trip(row); throw bad(v.reason) }
   let out: BrokerOrder;
+  const brackets = emusOf(id).filter(b => b.kind === 'bracket' && b.parent === oid);
   if (ad.canEdit && ad.edit && o.kind === 'limit') {
     try { out = await ad.edit(oid, n) } catch (err) { throw fail(id, err) }
   } else {
-    // Cancel + replace. If the replacement fails the user must know nothing rests any more.
+    // Cancel + replace, sized from what is really left. If the replacement fails the user must know nothing rests any more.
     try { await ad.cancel(oid, o.sym, isStopKind(o.kind)) } catch (err) { throw fail(id, err) }
+    let old: BrokerOrder;
+    try { old = await ad.order(oid, o.sym, isStopKind(o.kind)) }
+    catch (err) { refresh(id).catch(() => {}); throw new HttpError(502, `The old order was canceled, but its fills could not be read, so no replacement was placed: ${scrub(err, secretsOf(id))}`) }
+    if (p.qty === undefined) n.qty = o.qty - old.filled;
+    if (!(n.qty > 0)) { refresh(id).catch(() => {}); throw bad('The order filled completely before it could be modified') }
     try { out = await ad.place(n) }
-    catch (err) { throw new HttpError(502, `The old order was canceled but its replacement failed, so nothing rests now: ${scrub(err, secretsOf(id))}`) }
+    catch (err) { refresh(id).catch(() => {}); throw new HttpError(502, `The old order was canceled but its replacement failed, so nothing rests now: ${scrub(err, secretsOf(id))}`) }
   }
-  for (const b of emusOf(id)) if (b.parent === oid) { b.parent = out.id; saveEmu(b) }
+  // A new order id gets brackets of its own. The old brackets stay on the old order: the next pass legs its last fills and drops them.
+  if (out.id !== oid) for (const b of brackets) addBracket(id, out, b.order.tp, b.order.sl);
   for (const t of emusOf(id)) if (t.peer?.id === oid) { t.peer = { id: out.id, sym: out.sym }; saveEmu(t) }
   refresh(id).catch(() => {});
   return annotate(id, [out])[0];
 }
 
-export async function closePosition(id: string, x: unknown) {
+export const closePosition = (id: string, x: unknown) => locked(id, () => close(id, x));
+async function close(id: string, x: unknown) {
   const row = activeRow(id);
   const sym = (x && typeof x === 'object' && typeof (x as { sym?: unknown }).sym === 'string') ? (x as { sym: string }).sym : '';
   if (!/^(?:[A-Z0-9]{2,30}:)?[A-Z0-9_.]{1,40}$/.test(sym)) throw bad('Bad symbol');
-  const st = await refresh(id), ad = adapterOf(id);
+  const st = await poll(id), ad = adapterOf(id);
   let qty: number;
   if (row.acct.market === 'futures') qty = st.positions.filter(p => same(p.sym, sym)).reduce((s, p) => s + p.qty, 0);
   else { const base = parseSym(sym).base; qty = st.balances.find(b => b.asset === base)?.free ?? 0 }
   if (!qty) throw bad('No position in this symbol');
-  // Exits that belong to this position go with it.
-  for (const e of emusOf(id)) if (same(e.order.sym, sym) && (e.kind === 'bracket' || e.send?.reduceOnly)) dropEmu(e.id);
+  // Exits that belong to this position go with it. An entry that still rests keeps its bracket for what fills later
+  // (what filled so far is being closed now, so it counts as legged).
+  for (const e of emusOf(id)) {
+    if (!same(e.order.sym, sym)) continue;
+    const parent = e.kind === 'bracket' ? st.orders.find(o => o.id === e.parent && o.status === 'open') : undefined;
+    if (parent) { e.legQty = parent.filled; saveEmu(e) }
+    else if (e.kind === 'bracket' || e.send?.reduceOnly) dropEmu(e.id);
+  }
   const posSym = row.acct.market === 'futures' ? st.positions.find(p => same(p.sym, sym))!.sym : sym;
   try { await ad.place({ sym: posSym, side: qty > 0 ? 'sell' : 'buy', kind: 'market', qty: Math.abs(qty), reduceOnly: true }) } catch (e) { throw fail(id, e) }
   refresh(id).catch(() => {});

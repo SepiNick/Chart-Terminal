@@ -6,6 +6,8 @@ import { isExprSym } from './core/bars.ts';
 import { isRemote, splitSym } from '../src/data.ts';
 import { watchPrints } from './ccxt.ts';
 import type { Print } from '../src/orderflow/model.ts';
+import { BarBuilder, parseOfTf } from '../src/orderflow/tfbars.ts';
+import type { Bar } from '../src/data.ts';
 
 migration('recorder/1', `
   CREATE TABLE prints (sym TEXT NOT NULL, t REAL NOT NULL, px REAL NOT NULL, qty REAL NOT NULL, buy INTEGER NOT NULL, id INTEGER);
@@ -141,6 +143,25 @@ export function page(sym: string, from: number, cursor?: string, limit = 10_000)
   return { prints, next: rows.length === n && last ? `${last.t}:${last.r}` : null };
 }
 
+/**
+ * Activity bars (100T, R10, REV5, D500) of the recording before `before`, over the last `days` (at most the retention):
+ * far more history than the trades a browser loads itself. The newest `max` bars are returned.
+ */
+export function recordedBars(sym: string, tf: string, before: number, days: number, tick: number, max = 20_000): Bar[] {
+  const spec = parseOfTf(tf);
+  if (!spec || spec.kind === 'time') throw bad('tf must be an activity interval such as 100T, R10, REV5 or D500');
+  const b = new BarBuilder(spec, tick);
+  let cursor: string | undefined, from = before - Math.min(RETENTION_DAYS, Math.max(1, days)) * DAY;
+  for (;;) {
+    const pg = page(sym, from, cursor, 50_000);
+    for (const p of pg.prints) { if (p.t >= before) return b.bars.slice(-max); b.push(p) }
+    if (!pg.next) break;
+    cursor = pg.next;
+    if (b.bars.length > max * 2) b.bars.splice(0, b.bars.length - max - 1);   // keep the forming bar and enough history
+  }
+  return b.bars.slice(-max);
+}
+
 export function stats(symbols = config().symbols) {
   flush();
   const syms = [...new Set([...symbols, ...(db.prepare('SELECT DISTINCT sym FROM prints_days').all() as { sym: string }[]).map(r => r.sym)])];
@@ -198,6 +219,13 @@ route('GET', '/api/recorder/page', c => {
   if (!sym) throw bad('sym required');
   if (!Number.isFinite(from) || !Number.isFinite(limit)) throw bad('from must be a number (seconds)');
   return page(sym, from, q.get('cursor') || undefined, limit);
+});
+
+route('GET', '/api/recorder/bars', c => {
+  const q = c.url.searchParams, sym = q.get('sym'), tf = q.get('tf') ?? '', before = Number(q.get('before')), days = Number(q.get('days') || 7), tick = Number(q.get('tick') || 0);
+  if (!sym) throw bad('sym required');
+  if (![before, days, tick].every(Number.isFinite)) throw bad('before, days and tick must be numbers');
+  return recordedBars(sym, tf, before, days, tick);
 });
 
 if (!process.env.CT_NO_AUTOSTART) {

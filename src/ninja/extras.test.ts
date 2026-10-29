@@ -124,6 +124,44 @@ test('OnRender: RenderTarget calls become drawings at chart coordinates (static 
   assert.equal(d[2].type, 'label'); assert.equal(d[2].text, 'hi');
 });
 
+test('OnRender with the chart view: real pixels of the visible bars, PathGeometry outlines', () => {
+  const r = runCs(`public class Rg : Indicator {
+    protected override void OnStateChange() { if (State == State.SetDefaults) { Name = "Rg"; IsOverlay = true; } }
+    protected override void OnBarUpdate() { }
+    protected override void OnRender(ChartControl chartControl, ChartScale chartScale) {
+      Print(ChartBars.FromIndex + " " + ChartBars.ToIndex + " " + chartControl.GetXByBarIndex(ChartBars, ChartBars.FromIndex + 10));
+      SharpDX.Direct2D1.PathGeometry g = new SharpDX.Direct2D1.PathGeometry(NinjaTrader.Core.Globals.D2DFactory);
+      SharpDX.Direct2D1.GeometrySink sink = g.Open();
+      int a = ChartBars.FromIndex, b = ChartBars.ToIndex;
+      sink.BeginFigure(new SharpDX.Vector2(chartControl.GetXByBarIndex(ChartBars, a), chartScale.GetYByValue(High.GetValueAt(a))), SharpDX.Direct2D1.FigureBegin.Filled);
+      sink.AddLine(new SharpDX.Vector2(chartControl.GetXByBarIndex(ChartBars, b), chartScale.GetYByValue(High.GetValueAt(b))));
+      sink.AddLine(new SharpDX.Vector2(chartControl.GetXByBarIndex(ChartBars, b), chartScale.GetYByValue(Low.GetValueAt(b))));
+      sink.EndFigure(SharpDX.Direct2D1.FigureEnd.Closed);
+      sink.Close();
+      RenderTarget.FillGeometry(g, Brushes.Blue.ToDxBrush(RenderTarget));
+      g.Dispose();
+    }
+  }`, 'Rg', { view: { from: 200, to: 250, width: 500, height: 400 } });
+  assert.deepEqual(logs(r), ['200 250 100']);
+  assert.equal(r.result.rendered, true);
+  const d = r.out.drawings as any[];
+  assert.equal(d.length, 3, 'a closed triangle = 3 segments');
+  assert.equal(d[0].x1, bars[200].time * 1000); assert.equal(d[0].x2, bars[250].time * 1000);
+  assert.ok(Math.abs(d[2].y2 - bars[200].high) < 1e-6, 'closed back to the first point');
+});
+
+test('Calculate.OnEachTick ticks the primary series of a multi-series script', () => {
+  const r = runCs(`public class Mt : Indicator {
+    int ticks;
+    protected override void OnStateChange() {
+      if (State == State.SetDefaults) { Name = "Mt"; Calculate = Calculate.OnEachTick; }
+      else if (State == State.Configure) AddDataSeries(BarsPeriodType.Minute, 60);
+    }
+    protected override void OnBarUpdate() { if (BarsInProgress == 0 && CurrentBar == 5) ticks++; if (CurrentBar == 6 && BarsInProgress == 0 && IsFirstTickOfBar) Print("t" + ticks); }
+  }`, 'Mt', { barsFor: (_s: string, tf: number) => tf === 3600 ? bars.filter((_, i) => i % 4 === 0).map(b => ({ ...b })) : [] });
+  assert.deepEqual(logs(r), ['t4']);
+});
+
 test('trading hours: IsFirstBarOfSession, SessionIterator and exit on session close follow the template', () => {
   const ind = runCs(`public class Ss : Indicator {
     protected override void OnBarUpdate() {

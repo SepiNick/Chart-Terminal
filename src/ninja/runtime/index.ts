@@ -147,14 +147,14 @@ export function runNinja(classes: Record<string, Function>, className: string, _
       root.__ctxs.forEach((c: any, s: number) => c.bars.forEach((b: any, j: number) => ev.push([b.time + c.tfSec, s, j])));
       ev.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
       for (const [, s, j] of ev) {
-        if (s === 0) { primary(j); continue }
+        if (s === 0) { (tickMode ? ticked : primary)(j); continue }   // the primary series ticks; added series update on bar close
         root.__ctxs[s].cur = j; root.__running = true; root.BarsInProgress = s;
         try { root.OnBarUpdate() } finally { root.BarsInProgress = 0; root.__running = false }
       }
     }
     phase = 'OnStateChange';
     root.__state('Transition'); root.__state('Realtime');
-    if (root.OnRender !== NinjaScriptBase.prototype.OnRender) { phase = 'OnRender'; renderSnapshot(root, e) }
+    if (root.OnRender !== NinjaScriptBase.prototype.OnRender) { phase = 'OnRender'; renderSnapshot(root, e, opts.view); res.rendered = true }
   } catch (err) {
     res.error = `Error on calling '${phase}' method on bar ${c0.cur}: ${err instanceof Error ? err.message : String(err)}`;
   } finally {

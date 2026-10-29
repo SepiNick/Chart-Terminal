@@ -129,6 +129,29 @@ plot(g.Side.down == g.Side.down ? 1 : 0)`;
   assert.throws(() => go(src), /Library 'me\/Geo\/1' not found/);
 });
 
+test('a library can import another library; cycles are an error', () => {
+  const outer = `//@version=6
+library("Outer")
+import me/Geo/1 as geo
+export quad(float v) => geo.double(geo.double(v))`;
+  const out = go('import me/Outer/1 as o\nplot(o.quad(close))', { library: path => findLibrary(path, [LIB_SRC, outer]) });
+  assert.equal(out.plots[0].values[3], bars[3].close * 4);
+  const loop = 'library("Loop")\nimport me/Loop/1 as l\nexport f() => 1';
+  assert.throws(() => go('import me/Loop/1 as l\nplot(l.f())', { library: () => loop }), /import cycle/);
+});
+
+test('request.security_lower_tf: one array per chart bar of the lower bars inside it', () => {
+  const m15: Bar[] = bars.slice(0, 20).flatMap(b => [0, 1, 2, 3].map(k => ({ ...b, time: b.time + k * 900, close: b.close + k })));
+  const out = go('a = request.security_lower_tf(syminfo.tickerid, "15", close)\nplot(array.size(a))\nplot(array.size(a) > 0 ? array.last(a) : na)\n[c, o] = request.security_lower_tf(syminfo.tickerid, "15", [close, open])\nplot(array.size(o))',
+    { security: (s, tf) => (s === 'BTCUSDT' && tf === '15m' ? m15 : undefined) });
+  assert.equal(out.plots[0].values[0], 4);
+  assert.equal(out.plots[1].values[2], bars[2].close + 3);
+  assert.equal(out.plots[0].values[25], 0, 'no lower bars there: empty array');
+  assert.equal(out.plots[2].values[1], 4, 'tuple of arrays');
+  const miss = go('plot(array.size(request.security_lower_tf(syminfo.tickerid, "5", close)))');
+  assert.deepEqual(miss.securityMissing, [{ symbol: 'BTCUSDT', tf: '5m' }]);
+});
+
 test('matrix and map', () => {
   const out = go(`
 m = matrix.new<float>(2, 3, 1)

@@ -253,3 +253,14 @@ kbd{font:11px ui-monospace,Consolas,monospace;background:var(--bg);border:1px so
   dialog{padding:12px}.alform input,.alform select,.alform textarea,.srv input{font-size:16px}
   .srv .al-span{overflow-x:auto}
 }
+/* phase 9: watchlist sections/flags/details, market panel */
+.wsec td{background:var(--bg2,rgba(127,127,127,.08));font-size:12px;padding-top:6px}
+.wflag{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;border:1px solid var(--border,#8884);vertical-align:middle;cursor:pointer}
+.wdet{border-top:1px solid var(--border,#8884);padding:6px;max-height:55vh;overflow:auto}
+.mkt{padding:6px;overflow:auto}.mkt h4,.wdet h4{margin:8px 0 4px}
+table.scr{width:100%;font-size:12px}table.scr td,table.scr th{padding:2px 4px;white-space:nowrap}
+table.seas td{font-size:11px;text-align:right}
+.heatmap>div{box-sizing:border-box;border:1px solid var(--bg);overflow:hidden;font-size:11px;padding:2px;line-height:1.2;color:var(--fg)}
+.news{padding:4px 0;border-bottom:1px solid var(--border,#8884)}.news a{color:var(--fg)}
+.imp{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}.imp-high{background:#f23645}.imp-medium{background:#ff9800}.imp-low{background:#ffeb3b}.imp-holiday{background:#9598a1}
+#mktTabs{flex-wrap:wrap}

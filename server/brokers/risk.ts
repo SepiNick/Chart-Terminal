@@ -18,8 +18,9 @@ export interface OrderCtx {
   equity: number;           // in the order's quote currency
   dayEquity: number;        // in the account's main quote, for the breaker
   dayStart?: number;
-  hasStop: boolean;         // an open stop on the opposite side for this symbol already protects the position
+  stopQty: number;          // remaining qty of open opposite-side stops for this symbol: they protect that much of the position
   pending?: number;         // other resting orders on this side that would open/add (base units): they count toward the cap
+  pendingNoSl?: number;     // …the part of them with no bracket SL of its own: it needs cover from existing stops
   skipStop?: boolean;       // emulated child orders that were checked when placed
 }
 export type Verdict = { ok: true; reducing: boolean } | { ok: false; reason: string; trip?: boolean };
@@ -46,7 +47,11 @@ export function checkOrder(o: Pick<OrderReq, 'side' | 'qty' | 'reduceOnly' | 'sl
   if (!(c.equity > 0)) return { ok: false, reason: 'No equity in this quote currency' };
   const after = Math.abs(c.pos + (o.side === 'buy' ? 1 : -1) * ((c.pending ?? 0) + o.qty)) * c.price, cap = (c.equity * c.guard.maxPositionPct) / 100;
   if (after > cap * (1 + 1e-9)) return { ok: false, reason: `Position cap: ${fmt(after)} notional would exceed ${c.guard.maxPositionPct}% of equity (${fmt(cap)})` };
-  if (c.guard.requireStop && !c.skipStop && !o.sl && !c.hasStop) return { ok: false, reason: 'A stop-loss is required: add an SL to this order or place a stop first' };
+  // Existing stops count only for the quantity they close: a tiny stop doesn't protect a big position.
+  // Resting same-side entries without an SL of their own will add to it when they fill.
+  const exposed = Math.abs(c.pos + (o.side === 'buy' ? 1 : -1) * ((c.pendingNoSl ?? 0) + o.qty));
+  if (c.guard.requireStop && !c.skipStop && !o.sl && c.stopQty < exposed * (1 - 1e-9))
+    return { ok: false, reason: c.stopQty > 0 ? `A stop-loss is required for the whole position: stops cover ${fmt(c.stopQty)} of ${fmt(exposed)} — add an SL to this order or enlarge the stop` : 'A stop-loss is required: add an SL to this order or place a stop first' };
   return { ok: true, reducing: false };
 }
 const fmt = (n: number) => (Math.abs(n) >= 100 ? n.toFixed(0) : n.toPrecision(4));

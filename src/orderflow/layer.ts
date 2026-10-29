@@ -26,6 +26,7 @@ export interface OFCfg {
   clusterWindow?: number; // bars searched, counted back from the last
   clusterAlert?: boolean; // toast (and an `orderflow:cluster` window event) when the forming bar gets a new hit
   absorption?: boolean;
+  sessionStart?: number;  // TPO / volume profile sessions start this many minutes after 00:00 UTC
 }
 export const defaultOF = (): OFCfg => ({ footprint: 'off', row: 0, ratio: 3, heatmap: false, bubbles: false, bigMin: 0, cvd: false, delta: false, tpo: false, vprofile: false, cluster: 'off', clusterMin: 0, clusterMax: 0, clusterWindow: 50, clusterAlert: false, absorption: false });
 /** `type`: the chart types 'footprint' and 'tpo' switch the matching layer on by themselves. */
@@ -291,12 +292,12 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
     const c = this.cfg(), bars = this.host.bars();
     if ((!c.tpo && !c.vprofile) || !this.chart || !this.series || !bars.length) return;
     const ts = this.chart.timeScale(), sp = ts.options().barSpacing, s = this.series, colors = this.host.colors(), tfSec = this.host.tfSec();
-    // ponytail: UTC-day sessions (week / 30 days on daily+ charts) and 30-min TPO periods (one bar when bars are longer); no custom session templates.
+    // Day sessions from the chosen start (week / 30 days on daily+ charts) and 30-min TPO periods (one bar when bars are longer).
     const len = tfSec < 4 * 3600 ? 86400 : tfSec <= 86400 ? 604800 : 30 * 86400, period = Math.max(1800, tfSec);
     const overlay = this.host.type?.() !== 'tpo', POC = '#f5a623';
     const yRange = (k: number, row: number) => { const a = s.priceToCoordinate((k + 1) * row), b = s.priceToCoordinate(k * row); return a == null || b == null ? null : { top: Math.min(a, b), h: Math.abs(b - a) } };
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }: { context: Ctx; mediaSize: { width: number; height: number } }) => {
-      for (const ses of sessions(bars, len)) {
+      for (const ses of sessions(bars, len, len === 86400 ? (c.sessionStart ?? 0) * 60 : 0)) {
         const xa = ts.timeToCoordinate(ses.bars[0].time as UTCTimestamp), xb = ts.timeToCoordinate(ses.bars.at(-1)!.time as UTCTimestamp);
         if (xa == null || xb == null || xb + sp < 0 || xa - sp > mediaSize.width) continue;
         const x0 = xa - sp / 2, x1 = xb + sp / 2;

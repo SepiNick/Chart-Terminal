@@ -1,7 +1,7 @@
 // Turn a chart's strategy (Pine, MQL expert or NinjaScript strategy) into an Evaluate function. A Job is plain
 // data, so the same job can be posted to the tester worker.
 import type { Bar } from '../data.ts';
-import { runScript } from '../pine/engine.ts';
+import { findLibrary, runScript } from '../pine/engine.ts';
 import type { RunOpts, ScriptInput } from '../pine/interp.ts';
 import { fromBroker } from '../pine/report.ts';
 import { runMql, tradesFromDeals, type MqlRun, type MqlRunOpts } from '../mql/engine.ts';
@@ -10,7 +10,7 @@ import type { NtCompileResult, NtRunOptions } from '../ninja/contract.ts';
 import type { Evaluate, ParamSpec, TesterData } from './types.ts';
 
 export type Job =
-  | { kind: 'pine'; src: string; opts: Omit<RunOpts, 'inputs'> }
+  | { kind: 'pine'; src: string; opts: Omit<RunOpts, 'inputs' | 'security' | 'library'>; libs?: string[]; sec?: Record<string, Bar[]> }   // libs/sec: import and request.security as data
   | { kind: 'mql'; js: string; opts: Omit<MqlRunOpts, 'inputs' | 'barsFor'> }
   | { kind: 'ninja'; cr: NtCompileResult; cls: string; opts: Omit<NtRunOptions, 'bars' | 'inputs'> };
 
@@ -34,7 +34,7 @@ export function makeEvaluate(job: Job, bars: Bar[]): Evaluate {
   return (inputs, range) => {
     const b = bars.slice(range.from, range.to);
     if (job.kind === 'pine') {
-      const r = runScript(job.src, b, { ...job.opts, inputs: inputs as RunOpts['inputs'] });
+      const r = runScript(job.src, b, { ...job.opts, inputs: inputs as RunOpts['inputs'], ...(job.libs ? { library: (p: string) => findLibrary(p, job.libs) } : {}), security: (s, tf) => job.sec?.[`${s}|${tf}`] });
       if (r.error) throw new Error(r.error.msg);
       return r.out?.broker ? fromBroker(r.out.broker, b) : EMPTY;
     }

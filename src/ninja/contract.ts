@@ -51,6 +51,7 @@ export interface NtResult {
   kind: 'indicator' | 'strategy';
   name: string;
   overlay: boolean;                       // IsOverlay
+  rendered?: boolean;                     // OnRender ran: its drawings depend on `view`, so the host re-runs on scroll/zoom
   plots: { name: string; color: string; width: number; style: 'line' | 'bar' | 'dot' | 'hash' | 'square' | 'triangleUp' | 'triangleDown' | 'cross' | 'block'; values: number[]; colors: (string | null)[] }[];
   lines: { name: string; value: number; color: string }[];   // AddLine
   draws: { type: 'line' | 'ray' | 'hline' | 'vline' | 'rect' | 'text' | 'arrowUp' | 'arrowDown' | 'dot' | 'triangleUp' | 'triangleDown' | 'diamond' | 'square'; tag: string; t1: number; p1: number; t2?: number; p2?: number; color: string; text?: string }[];
@@ -79,6 +80,8 @@ export interface NtRunOptions {
   inputs?: Record<string, unknown>;
   /** Extra data series for AddDataSeries(...): return bars for (symbol, tfSec) or [] when unavailable. */
   barsFor?: (symbol: string, tfSec: number) => Bar[];
+  /** Visible bar range (logical indexes) and pane size in px: OnRender gets real chart pixels (runtime/render.ts). */
+  view?: { from: number; to: number; width: number; height: number };
   /** Trading hours: a template name ("CME US Index Futures RTH", "US Equities RTH", "Default 24 x 7" …) or "HH:mm-HH:mm[ Time/Zone]".
    *  The "Trading hours" run input (inputs.__tradingHours) overrides it. */
   session?: string;
