@@ -12,6 +12,7 @@ import type { Adapter, Native } from './adapter.ts';
 import { parseSym } from './adapter.ts';
 import { ccxtAdapter } from './ccxtx.ts';
 import { nobitexAdapter } from './nobitex.ts';
+import { mt5Adapter } from './mt5.ts';
 import { arm, sendKind, step, type Trigger } from './emulate.ts';
 import { breakerHit, checkOrder, guardItems, utcDay, type OrderCtx } from './risk.ts';
 import { scrub } from './safety.ts';
@@ -57,6 +58,7 @@ const keysOf = (id: string) => ({ apiKey: secretGet(secretName(id, 'apiKey')) ??
 function makeAdapter(a: BrokerAccount, k: ReturnType<typeof keysOf>): Adapter {
   if (a.broker === 'kucoin') throw Error(KUCOIN_MSG);
   if (a.broker === 'nobitex') return nobitexAdapter(k.apiKey);
+  if (a.broker === 'mt5') return mt5Adapter(k.apiKey);   // the bridge token
   if (a.broker === 'paper') throw Error('The paper account lives in the browser');
   return ccxtAdapter(a.broker, a.market, k);
 }
@@ -77,7 +79,8 @@ function adapterOf(id: string): Adapter {
 }
 function dropAdapter(id: string) { const r = rt(id); r.unwatch?.(); r.unwatch = undefined; r.ad?.close(); r.ad = null }
 
-const mainQuote = (a: BrokerAccount) => (a.broker === 'nobitex' ? 'IRT' : 'USDT');
+// shortcut: an MT5 account must be in USD (another currency shows no equity, so every order is refused); read it from /account if needed.
+const mainQuote = (a: BrokerAccount) => (a.broker === 'nobitex' ? 'IRT' : a.broker === 'mt5' ? 'USD' : 'USDT');
 /** Same instrument? BTCUSDT, BINANCE:BTCUSDT and BYBIT:BTC_USDT all mean BTC/USDT. */
 const keyOf = (sym: string) => { try { const p = parseSym(sym); return `${p.base}/${p.quote}` } catch { return sym } };
 const same = (a: string, b: string) => keyOf(a) === keyOf(b);

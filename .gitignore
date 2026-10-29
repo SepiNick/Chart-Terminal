@@ -7,3 +7,5 @@ server/data/
 desktop/app/
 desktop/release/
 desktop/build/
+mt5bridge/token.txt
+__pycache__/

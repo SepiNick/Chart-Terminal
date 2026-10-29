@@ -1,6 +1,6 @@
 // Chart Terminal desktop shell: starts the bundled server on a free 127.0.0.1 port with the data in the user's app-data
 // folder, then shows the app in a window from that server (same origin, so login cookies, /api and /ws work as usual).
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, shell, utilityProcess } = require('electron');
 const { createServer } = require('node:net');
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
@@ -10,7 +10,13 @@ if (process.env.CT_USER_DATA) app.setPath('userData', process.env.CT_USER_DATA);
 if (!app.requestSingleInstanceLock()) app.quit();   // two servers must never share one database
 
 const APP = join(__dirname, 'app');
-let server = null, win = null, origin = '';
+let server = null, win = null, origin = '', tray = null;   // win: the main window (more come from "New window")
+app.setAppUserModelId('app.chartterminal.desktop');   // Windows shows the app's notifications under its own name
+
+// Settings of the shell itself (not of the app, which keeps its own on the server).
+const settingsFile = () => join(app.getPath('userData'), 'desktop.json');
+const settings = () => { try { return { tray: true, ...JSON.parse(readFileSync(settingsFile(), 'utf8')) } } catch { return { tray: true } } };
+const saveSettings = s => { try { writeFileSync(settingsFile(), JSON.stringify(s)) } catch {} };
 
 /** A free loopback port: `want` if it is free, else any (the dev server or the user's own server may hold 8787). */
 const freePort = want => new Promise((ok, fail) => {
@@ -46,22 +52,68 @@ async function startServer() {
   throw new Error(`The server did not start.\n\n${log.join('').slice(-1500)}`);
 }
 
-function createWindow() {
-  win = new BrowserWindow({
+function createWindow(main = true) {
+  const w = new BrowserWindow({
     width: 1440, height: 900, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#131722',
     title: 'Chart Terminal', icon: join(__dirname, 'build', 'icon.png'),
-    // The page only talks HTTP to its own server; the preload only adds window.prompt().
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs') },
+    // The page only talks HTTP to its own server; the preload only adds window.prompt(). It keeps running when the
+    // window is hidden in the tray (live prices, alert notifications), so it is not throttled in the background.
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'), backgroundThrottling: false },
   });
-  win.once('ready-to-show', () => win.show());
+  if (main) {
+    win = w;
+    // Closing the main window hides it in the tray: the server keeps running (alerts, forward tests, recording).
+    w.on('close', e => {
+      if (quitting || !settings().tray || !tray) return;
+      e.preventDefault(); w.hide();
+      if (!settings().trayTold) { saveSettings({ ...settings(), trayTold: true }); notify('Chart Terminal is still running', 'Alerts and forward tests keep working. Quit from the tray icon.') }
+    });
+    w.on('closed', () => { if (win === w) win = null });
+    // Windows shutdown / sign-out: really close (no hiding), and let before-quit stop the server cleanly.
+    w.on('query-session-end', () => { quitting = true });
+    w.on('session-end', () => { quitting = true; app.quit() });
+  }
+  w.once('ready-to-show', () => w.show());
   // Stay on our own origin; other links open in the system browser.
-  win.webContents.on('will-navigate', (e, url) => { if (!sameOrigin(url)) { e.preventDefault(); openOutside(url) } });
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  w.webContents.on('will-navigate', (e, url) => { if (!sameOrigin(url)) { e.preventDefault(); openOutside(url) } });
+  w.webContents.setWindowOpenHandler(({ url }) => {
     if (sameOrigin(url)) return { action: 'allow' };   // e.g. a shared chart image /s/…
     openOutside(url);
     return { action: 'deny' };
   });
-  win.loadURL(origin);
+  w.loadURL(origin);
+  return w;
+}
+const showMain = () => { if (!win) createWindow(); else { if (win.isMinimized()) win.restore(); win.show(); win.focus() } };
+const notify = (title, body) => { if (Notification.isSupported()) { const n = new Notification({ title, body, icon: join(__dirname, 'build', 'icon.png') }); n.on('click', showMain); n.show() } };
+
+function createTray() {
+  tray = new Tray(join(__dirname, 'build', 'icon.png'));
+  tray.setToolTip('Chart Terminal');
+  const menu = () => Menu.buildFromTemplate([
+    { label: 'Open Chart Terminal', click: showMain },
+    { label: 'New window', click: () => createWindow(false) },
+    { type: 'separator' },
+    { label: 'Keep running in the tray when the window closes', type: 'checkbox', checked: settings().tray, click: i => { saveSettings({ ...settings(), tray: i.checked }) } },
+    { label: 'Start with Windows', type: 'checkbox', visible: process.platform !== 'linux', checked: app.getLoginItemSettings().openAtLogin, click: i => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },
+    { label: 'Check for updates', enabled: app.isPackaged, click: () => checkUpdates(true) },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+  ]);
+  tray.setContextMenu(menu());
+  tray.on('right-click', () => tray.setContextMenu(menu()));
+  tray.on('click', showMain);
+}
+
+// Updates: electron-updater reads the feed from app-update.yml, which electron-builder writes only when package.json
+// "build.publish" is set. Without it (or offline) the check fails quietly unless asked from the tray.
+function checkUpdates(manual = false) {
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')) } catch { return }
+  autoUpdater.autoDownload = true;
+  autoUpdater.once('update-downloaded', i => notify('Update ready', `Chart Terminal ${i.version} will be installed when you quit.`));
+  autoUpdater.checkForUpdates().then(r => { if (manual && !r?.isUpdateAvailable) notify('Chart Terminal is up to date', `Version ${app.getVersion()}`) },
+    e => { if (manual) dialog.showErrorBox('Chart Terminal', `Could not check for updates: ${e.message}`) });
 }
 const openOutside = url => { if (/^https?:\/\//i.test(url)) shell.openExternal(url) };
 // Parsed, not a string prefix: "http://127.0.0.1:9163" must not also match port 91631.
@@ -80,8 +132,9 @@ document.getElementById('o').onclick = () => done(v.value); document.getElementB
 addEventListener('keydown', e => { if (e.key === 'Enter') done(v.value); if (e.key === 'Escape') done(null) });
 </script>`;
 ipcMain.on('ct:prompt', (e, msg, def) => {
-  if (!win || e.sender !== win.webContents) { e.returnValue = null; return }
-  const p = new BrowserWindow({ parent: win, modal: true, width: 440, height: 170, resizable: false, minimizable: false, maximizable: false,
+  const owner = BrowserWindow.fromWebContents(e.sender);
+  if (!owner || !sameOrigin(e.sender.getURL())) { e.returnValue = null; return }
+  const p = new BrowserWindow({ parent: owner, modal: true, width: 440, height: 170, resizable: false, minimizable: false, maximizable: false,
     title: 'Chart Terminal', backgroundColor: '#1e222d', autoHideMenuBar: true, show: false,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false } });
   let answered = false;
@@ -101,12 +154,16 @@ app.on('before-quit', () => {
   // Ask the server to exit cleanly (the trade recorder flushes on exit); kill it if it doesn't within 3 s.
   if (server) { server.postMessage('quit'); const s = server; setTimeout(() => s.kill(), 3000).unref() }
 });
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus() } });
-app.on('window-all-closed', () => app.quit());   // closing the window stops the server too (alerts, forward tests, recording)
+app.on('second-instance', showMain);
+// Without the tray, closing the last window stops the server too (alerts, forward tests, recording).
+app.on('window-all-closed', () => { if (!tray || !settings().tray) app.quit() });
 
 app.whenReady().then(async () => {
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);   // the app has its own menus; keep the macOS app menu
   try { await startServer() } catch (e) { dialog.showErrorBox('Chart Terminal', e.message); app.quit(); return }
-  createWindow();
-  app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow() });
+  try { createTray() } catch (e) { console.error('No tray:', e.message) }   // some Linux desktops have none
+  // "Start with Windows" starts hidden in the tray.
+  if (!(process.argv.includes('--hidden') && tray)) createWindow();
+  app.on('activate', showMain);
+  if (app.isPackaged) setTimeout(() => checkUpdates(), 10_000);
 });

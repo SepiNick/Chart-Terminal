@@ -4,7 +4,7 @@ import { bad } from '../core/http.ts';
 import { parseSym } from './adapter.ts';
 
 export const KUCOIN_MSG = 'KuCoin is not available: CCXT 4.5 has no KuCoin sandbox (KuCoin closed its sandbox), so there is no testnet to trade on';
-const BROKERS = ['binance', 'binanceusdm', 'bybit', 'okx', 'kucoin', 'nobitex'] as const;
+const BROKERS = ['binance', 'binanceusdm', 'bybit', 'okx', 'kucoin', 'nobitex', 'mt5'] as const;
 const KINDS: OrderKind[] = ['market', 'limit', 'stop', 'stop_limit', 'trailing_stop'];
 const MAX = 1e15;
 
@@ -40,10 +40,11 @@ export function validAccount(x: unknown, defaults: Guard): AccountInput & { guar
   const market = b.market;
   if ((broker === 'binance' || broker === 'nobitex') && market !== 'spot') throw bad(`${broker} accounts are spot (use binanceusdm for futures)`);
   if (broker === 'binanceusdm' && market !== 'futures') throw bad('binanceusdm accounts are futures (use binance for spot)');
+  if (broker === 'mt5' && market !== 'futures') throw bad('MetaTrader 5 accounts hold positions: use market futures');
   const a: AccountInput & { guard: Guard } = {
     broker, market, label: str(b.label, 'label', 60),
     apiKey: str(b.apiKey, 'apiKey', 512, KEY_RE),
-    secret: broker === 'nobitex' && (b.secret === undefined || b.secret === '') ? '' : str(b.secret, 'secret', 512, KEY_RE),
+    secret: (broker === 'nobitex' || broker === 'mt5') && (b.secret === undefined || b.secret === '') ? '' : str(b.secret, 'secret', 512, KEY_RE),
     guard: b.guard === undefined ? { ...defaults } : validGuard(b.guard, defaults),
   };
   if (b.passphrase !== undefined && b.passphrase !== '') a.passphrase = str(b.passphrase, 'passphrase', 128, KEY_RE);

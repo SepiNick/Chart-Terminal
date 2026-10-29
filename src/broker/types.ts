@@ -4,7 +4,7 @@ import type { Side } from '../trading.ts';
 
 export type { Side };
 /** 'paper' is the synced paper account; the rest are exchange TESTNETS only (the server refuses mainnet). */
-export type BrokerId = 'paper' | 'binance' | 'binanceusdm' | 'bybit' | 'okx' | 'kucoin' | 'nobitex';
+export type BrokerId = 'paper' | 'binance' | 'binanceusdm' | 'bybit' | 'okx' | 'kucoin' | 'nobitex' | 'mt5';
 export type Market = 'spot' | 'futures';
 export type OrderKind = 'market' | 'limit' | 'stop' | 'stop_limit' | 'trailing_stop';
 

@@ -24,7 +24,7 @@ import { initDom, domSync } from './orderflow/domui.ts';
 import { derivsAttach, derivsMenu } from './derivs/layer.ts';   // derivs
 import { initLiqPanel } from './derivs/liqpanel.ts';   // derivs
 import { ofMenu, replayButton, marketReplayUi } from './orderflow/menu.ts';
-import { initJournal, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
+import { initJournal, journalBrokers, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
 import { journalReplayOrder } from './journal/replay.ts';
 import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
 import { serverMode, onServer, api } from './sync.ts';
@@ -34,6 +34,7 @@ import './tooltip.ts';
 import { parseTvWatchlist } from './tvimport.ts';
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 import { chartEvents, initMarket, renderDetails, renderMarket } from './market/ui.ts';
+import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
 
 // ---------- layouts (grid arrangements) ----------
 interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
@@ -417,7 +418,18 @@ function setSymbol(raw: string) {
   try { if (isExpr(s)) parse(s); else if (!/^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/.test(s)) throw Error('Invalid symbol') } catch (e) { return toast((e as Error).message) }
   st.recent = [s, ...st.recent.filter(x => x !== s)].slice(0, 12); store.set('recentSymbols', st.recent);
   targets('symbol').forEach(p => applyCfg(p, { symbol: s }, 'symbol change'));
+  const link = st.layout.panes[st.layout.active]?.link;
+  if (link && !st.layout.sync.symbol) linkChannel?.postMessage({ link, symbol: s });
 }
+// Colour link groups across windows (desktop "New window", or two browser tabs of this app): a symbol picked in a
+// group also changes the charts of that group in the other windows.
+// var: setSymbol can run before this line (startup); it then just doesn't broadcast.
+var linkChannel = 'BroadcastChannel' in window ? new BroadcastChannel('ct-link') : null;   // eslint-disable-line no-var
+linkChannel?.addEventListener('message', e => {
+  const { link, symbol } = (e.data ?? {}) as { link?: unknown; symbol?: unknown };
+  if (typeof link !== 'string' || typeof symbol !== 'string' || !/^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/.test(symbol)) return;
+  panes.forEach((p, i) => { if (st.layout.panes[i]?.link === link && p.cfg.symbol !== symbol) applyCfg(p, { symbol }, 'symbol change') });
+});
 function setTf(tf: string) { targets('tf').forEach(p => applyCfg(p, { tf }, 'interval change')) }
 function syncUI() {
   const p = active(); if (!p) return;
@@ -606,6 +618,11 @@ function chartMenu(p: ChartPane, e: MouseEvent, price: number | null) {
   const px = price != null ? +price.toFixed(p.prec) : null, last = p.lastPrice() ?? 0;
   showMenu(e.clientX, e.clientY, [
     { label: 'Reset chart view', hint: 'Alt+R', action: () => p.resetView() },
+    { label: 'Auto analysis', icon: '✨', sub: [
+      { label: 'Trend lines, levels and patterns', action: () => autoAnalyze(p) },
+      { label: `Add ${higherTf(p.cfg.tf)} support / resistance`, action: () => void htfLevels(p) },
+      { label: 'Clear auto analysis', action: () => clearAuto(p) },
+    ] },
     ...(px != null ? [
       { label: `Copy price ${px}`, action: () => navigator.clipboard.writeText(String(px)).catch(() => {}) },
       { label: `Add alert at ${px}`, icon: '⏰', action: () => addAlert({ sym: p.cfg.symbol, price: px }) },
@@ -997,7 +1014,7 @@ $('#resetAcct').onclick = () => { if (confirm('Reset paper account to 10,000 USD
 // Lines, panels and the ticket follow the active broker; re-subscribe when it (or the list of accounts) changes.
 let unwatch = () => {};
 function tradeChanged() { panes.forEach(p => p.tradeOverlay()); later(renderTrading); later(renderTicket); connectTickers() }
-function watchBroker() { unwatch(); unwatch = activeBroker()?.onChange(tradeChanged) ?? (() => {}); renderAcctSel(); tradeChanged() }
+function watchBroker() { unwatch(); unwatch = activeBroker()?.onChange(tradeChanged) ?? (() => {}); renderAcctSel(); tradeChanged(); journalBrokers(allBrokers()) }
 onBrokers(watchBroker); watchBroker();
 function renderTrading() {
   const b = activeBroker(), s = b?.state(), f = (x: number) => x.toFixed(calcPrec(x));
@@ -1135,6 +1152,7 @@ initPineUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
 initTesterUI({ paper: (p, side, qty) => { const px = pxOf(p.cfg.symbol); if (px) { journalSource('Forward test'); submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p, paper); journalSource('') } }, watchlist: () => watchSyms() });
 initJournal({
   tfOf: sym => panes.find(p => p.cfg.symbol === sym)?.cfg.tf,
+  brokers: allBrokers,
   bracketOf: sym => {
     const ex = st.acct.orders.filter(o => o.sym === sym && o.reduceOnly);
     return { stop: ex.find(o => o.type === 'stop')?.price, target: ex.find(o => o.type === 'limit')?.price };
