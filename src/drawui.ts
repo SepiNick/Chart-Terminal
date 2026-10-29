@@ -80,7 +80,8 @@ function flyout(host: DrawUIHost, group: string, anchor: HTMLElement) {
     const t = rows[i];
     const star = document.createElement('span');
     star.className = 'star' + (fav.has(t.id) ? ' on' : ''); star.innerHTML = iconSvg('favbar'); star.dataset.tip = fav.has(t.id) ? 'Remove from favorites' : 'Add to favorites';
-    star.onclick = e => { e.stopPropagation(); fav.has(t.id) ? fav.delete(t.id) : fav.add(t.id); store.set('favTools', [...fav]); star.classList.toggle('on'); renderFavBar(host) };
+    // Starring shows the favorites bar, as TradingView does; the ★ button at the bottom still hides it.
+    star.onclick = e => { e.stopPropagation(); if (fav.has(t.id)) fav.delete(t.id); else { fav.add(t.id); store.set('favBar', true) } store.set('favTools', [...fav]); star.classList.toggle('on'); renderLeftToolbar(host) };
     row.append(star);
   });
 }
