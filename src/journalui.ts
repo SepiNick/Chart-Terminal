@@ -1,7 +1,8 @@
 // Journal side panel: auto-captured trades, reason prompts on open/close, stats, calendar with daily notes, setups.
 import type { Account } from './trading.ts';
+import type { Broker, BrokerState } from './broker/types.ts';
 import {
-  EMOTIONS, EXIT_KINDS, MISTAKES, dayKey, migrate, filterTrades, incomplete, mark, newJournal, rMultiple, stats, syncFills, toCsv,
+  EMOTIONS, EXIT_KINDS, MISTAKES, dayKey, migrate, filterTrades, incomplete, mark, newJournal, rMultiple, stats, syncFills, syncBrokerFills, toCsv,
   type Filter, type JTrade, type Journal,
 } from './journal.ts';
 import { $, $$, esc, store, toast } from './store.ts';
@@ -13,6 +14,8 @@ import type { ChartPane } from './chart.ts';
 export interface JournalHost {
   /** Timeframe of a chart showing this symbol, if any. */
   tfOf(sym: string): string | undefined;
+  /** Every account (paper and exchange testnets); exchange fills are journaled by themselves. */
+  brokers(): Broker[];
   /** Bracket levels resting in the account for this symbol (set by the order ticket's TP/SL). */
   bracketOf(sym: string): { stop?: number; target?: number };
   /** Chart image of the active pane, or null. */
@@ -56,6 +59,29 @@ export function journalSync(a: Account) {
   save(true); render(); workspaceChanged();
 }
 export function journalMark(sym: string, px: number) { if (mark(j, sym, px)) save() }
+/**
+ * Exchange accounts (testnets, src/broker): their fills go into the journal by themselves, as their own journal
+ * account. The first sync imports the fills the exchange still lists, without asking about each one.
+ */
+const brokerSubs = new Map<string, () => void>();
+export function journalBrokers(list: Broker[]) {
+  if (!host) return;   // initJournal runs later; it subscribes then
+  for (const [id, off] of brokerSubs) if (!list.some(b => b.account.id === id)) { off(); brokerSubs.delete(id) }
+  for (const b of list) {
+    const id = b.account.id;
+    if (id === 'paper' || brokerSubs.has(id)) continue;
+    const sync = (s: BrokerState) => {
+      const accs = (j.accounts ??= []), first = !j.brokerSeen?.[id];
+      if (!accs.some(a => a.id === id)) accs.push({ id, name: `${b.account.label} (${b.account.broker === 'mt5' ? 'MT5 demo' : `${b.account.broker} testnet`})`, initial: s.dayStartEquity ?? s.equity ?? 0, kind: 'exchange', transfers: [] });
+      const r = syncBrokerFills(j, id, s.fills, { source: 'Exchange' });
+      if (!r.added) { if (first) save(); return }
+      if (!first) { if (cfg.askOpen) r.opened.forEach(t => ask(t.id, 'open')); if (cfg.askClose) r.closed.forEach(t => ask(t.id, 'close')); [...r.opened, ...r.closed].forEach(t => award(t)) }
+      save(true); render(); workspaceChanged();
+    };
+    brokerSubs.set(id, b.onChange(sync));
+    const s = b.state(); if (s) sync(s);
+  }
+}
 
 // ---------- prompts ----------
 type Mode = 'open' | 'close' | 'edit';
@@ -227,6 +253,7 @@ function setupsView() {
 // ---------- wiring ----------
 export function initJournal(h: JournalHost) {
   host = h;
+  journalBrokers(h.brokers());
   $('#jTabs').onclick = e => { const t = (e.target as HTMLElement).dataset.jt; if (t) { cfg.tab = t; store.set('journalCfg', cfg); render() } };
   $('#s-journal').addEventListener('change', e => {
     const f = (e.target as HTMLElement).dataset.f;

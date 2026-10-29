@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newAccount, placeOrder, closePosition, onPrice } from './trading.ts';
-import { applyFill, barIndex, barPath, mark, newJournal, rMultiple, stats, syncFills, toCsv, incomplete } from './journal.ts';
+import { applyFill, barIndex, barPath, mark, newJournal, rMultiple, stats, syncFills, syncBrokerFills, toCsv, incomplete } from './journal.ts';
 
 test('journal: open, scale in, partial exit, close → one round trip with matching P&L', () => {
   const a = newAccount(10000), j = newJournal();
@@ -93,4 +93,14 @@ test('journal: replay helpers find the bar of a time and walk a bar', () => {
   assert.equal(barIndex(bars, -1), -1); assert.equal(barIndex(bars, 0), 0); assert.equal(barIndex(bars, 90), 1); assert.equal(barIndex(bars, 999), 2);
   assert.deepEqual(barPath({ open: 10, high: 11, low: 5, close: 8 }), [10, 11, 5, 8]);
   assert.deepEqual(barPath({ open: 10, high: 15, low: 9, close: 12 }), [10, 9, 15, 12]);
+});
+
+test('exchange fills: imported once by id, spot P&L from the average entry', () => {
+  const j = newJournal(), F = (id: string, side: 'buy' | 'sell', qty: number, price: number, ts: number) => ({ id, sym: 'BTCUSDT', side, qty, price, fee: 0.1, ts });
+  let r = syncBrokerFills(j, 'acc1', [F('b', 'sell', 1, 110, 2_000_000_000_000), F('a', 'buy', 1, 100, 1_900_000_000_000)]);
+  assert.equal(r.added, 2); assert.equal(r.closed.length, 1);
+  const t = j.trades[0];
+  assert.equal(t.accountId, 'acc1'); assert.equal(t.gross, 10); assert.ok(Math.abs(t.net - 9.8) < 1e-9); assert.equal(t.openTime, 1_900_000_000);
+  r = syncBrokerFills(j, 'acc1', [F('a', 'buy', 1, 100, 1_900_000_000_000)]);
+  assert.equal(r.added, 0, 'seen ids are skipped');
 });

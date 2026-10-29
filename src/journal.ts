@@ -37,13 +37,14 @@ export interface JTrade {
   noTradeReason?: string;
   points?: Record<string, number>;          // discipline points earned per item (kept once earned in time)
 }
-export interface JAccount { id: string; name: string; initial: number; kind: 'paper' | 'manual' | 'backtest'; transfers: { id: string; t: number; amount: number; note?: string }[] }
+export interface JAccount { id: string; name: string; initial: number; kind: 'paper' | 'manual' | 'backtest' | 'exchange'; transfers: { id: string; t: number; amount: number; note?: string }[] }
 export interface Checklist { id: string; title: string; items: { id: string; text: string; weight: number }[]; advanced?: boolean }
 export interface Note { id: string; title: string; body: string; tags: string[]; pinned?: boolean; created: number; updated: number }
 export interface CustomField { id: string; label: string; type: 'text' | 'number' | 'select' | 'checkbox' | 'date'; options?: string[] }
 export interface Prop { id: string; name: string; accountId: string; phase: string; target: number; maxDD: number; dailyDD: number; ddType: 'static' | 'trailing'; minDays: number; start: number }
 export interface Journal {
   trades: JTrade[]; seen: number; synced?: boolean; notes: Record<string, string>; setups: string[];
+  brokerSeen?: Record<string, string[]>;    // exchange account id → fill ids already imported
   accounts?: JAccount[]; account?: string;  // selected account ('' = all)
   entryReasons?: string[]; exitReasons?: string[]; motives?: string[]; questions?: string[]; tagList?: string[];
   checklists?: Checklist[]; docs?: Note[]; fields?: CustomField[]; props?: Prop[];
@@ -106,6 +107,26 @@ export function applyFill(j: Journal, sym: string, f: JFill, ctx: { tf?: string;
     open.fees += fee; open.net = open.gross - open.fees;
   }
   return { opened, closed };
+}
+
+/**
+ * Fills of an exchange account the journal has not seen yet (by fill id; any order; ms or s timestamps). Spot fills
+ * carry no realised P&L, so the closing part is priced against the open trade's average entry.
+ */
+export function syncBrokerFills(j: Journal, accountId: string, fills: { id: string; sym: string; side: 'buy' | 'sell'; qty: number; price: number; fee: number; realized?: number; ts: number }[], ctx: Parameters<typeof applyFill>[3] = {}) {
+  const opened: JTrade[] = [], closed: JTrade[] = [], seen = new Set((j.brokerSeen ??= {})[accountId] ?? []);
+  const fresh = fills.filter(f => !seen.has(f.id)).sort((a, b) => a.ts - b.ts);
+  for (const f of fresh) {
+    let realized = f.realized;
+    if (realized == null) {
+      const open = j.trades.find(t => t.sym === f.sym && t.status === 'open' && t.accountId === accountId);
+      realized = open && open.dir !== (f.side === 'buy' ? 'long' : 'short') ? (f.price - open.avgEntry) * Math.min(f.qty, open.qty) * (open.dir === 'long' ? 1 : -1) : 0;
+    }
+    const r = applyFill(j, f.sym, { t: f.ts > 1e11 ? f.ts / 1000 : f.ts, side: f.side, qty: f.qty, px: f.price, fee: f.fee, realized }, { ...ctx, accountId });
+    opened.push(...r.opened); closed.push(...r.closed); seen.add(f.id);
+  }
+  j.brokerSeen[accountId] = [...seen].slice(-3000);   // an exchange returns its last ~100 fills; old ids can go
+  return { opened, closed, added: fresh.length };
 }
 
 /** Import every fill the journal has not seen yet (account fills are newest-first). */

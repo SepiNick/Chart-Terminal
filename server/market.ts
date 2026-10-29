@@ -12,20 +12,23 @@
 import { aggregate, tfSeconds, validTf, type Bar } from '../src/data.ts';
 import * as cx from './ccxt.ts';
 import { fxMarkets, yahooBars, yahooTicker } from './yahoo.ts';
+import { mt5Markets, mt5Ohlcv } from './mt5.ts';
 import { HttpError, bad, onWs, onWsClose, route, type WsClient } from './core/http.ts';
 
 export const SYM_RE = /^[A-Z0-9_.]{1,40}$/, EX_RE = /^[a-z0-9]{2,30}$/;
+/** Sources served here rather than through CCXT: Yahoo ('fx') and the local MetaTrader 5 bridge ('mt5'). */
+const LOCAL = new Set(['fx', 'mt5']);
 
 
 function params(u: URL) {
   const exchange = u.searchParams.get('exchange') ?? '', symbol = (u.searchParams.get('symbol') ?? '').toUpperCase(), tf = u.searchParams.get('tf') ?? '';
-  if (!EX_RE.test(exchange) || (exchange !== 'fx' && !cx.isExchange(exchange))) throw bad('Unknown exchange');
+  if (!EX_RE.test(exchange) || (!LOCAL.has(exchange) && !cx.isExchange(exchange))) throw bad('Unknown exchange');
   return { exchange, symbol, tf };
 }
 const checkSymTf = (symbol: string, tf: string) => { if (!SYM_RE.test(symbol)) throw bad('Bad symbol'); if (!validTf(tf)) throw bad('Bad timeframe') };
 
 export async function bars(exchange: string, symbol: string, tf: string, until?: number, limit = 1000): Promise<{ bars: Bar[]; base: string }> {
-  const r = exchange === 'fx' ? await yahooBars(symbol, tf, until, limit) : await cx.ohlcv(exchange, symbol, tf, until, limit);
+  const r = exchange === 'fx' ? await yahooBars(symbol, tf, until, limit) : exchange === 'mt5' ? await mt5Ohlcv(symbol, tf, until, limit) : await cx.ohlcv(exchange, symbol, tf, until, limit);
   if (r.base === tf) return r;
   const agg = aggregate(r.bars, tfSeconds(tf));
   return { bars: agg.length > 1 ? agg.slice(1) : agg, base: r.base };   // first bucket may be partial
@@ -36,10 +39,11 @@ let exchangesCache: { id: string; name: string; ws: boolean }[] | null = null;
 async function marketRoute(u: URL): Promise<unknown> {
   switch (u.pathname) {
     case '/api/exchanges':
-      return (exchangesCache ??= [{ id: 'fx', name: 'Forex, metals, indices & stocks', ws: false }, ...cx.exchangeIds().map(id => ({ id, name: id, ws: false }))]);
+      return (exchangesCache ??= [{ id: 'fx', name: 'Forex, metals, indices & stocks', ws: false }, { id: 'mt5', name: 'MetaTrader 5 (local bridge, demo)', ws: false }, ...cx.exchangeIds().map(id => ({ id, name: id, ws: false }))]);
     case '/api/markets': {
       const { exchange } = params(u);
       if (exchange === 'fx') return fxMarkets().map(m => ({ sym: m.sym, base: m.sym, quote: '', type: m.type, name: m.name }));
+      if (exchange === 'mt5') return mt5Markets();
       return (await cx.markets(exchange)).list.filter(m => m.active).map(({ sym, base, quote, type }) => ({ sym, base, quote, type }));
     }
     case '/api/bars': {
@@ -52,7 +56,7 @@ async function marketRoute(u: URL): Promise<unknown> {
     }
     case '/api/trades': {
       const { exchange, symbol } = params(u);
-      if (exchange === 'fx') throw bad('No order flow for FX');
+      if (LOCAL.has(exchange)) throw bad('No order flow for FX or MT5');
       if (!SYM_RE.test(symbol)) throw bad('Bad symbol');
       return cx.trades(exchange, symbol);
     }
@@ -65,7 +69,7 @@ async function marketRoute(u: URL): Promise<unknown> {
     }
     case '/api/tickers': {
       const { exchange } = params(u);
-      return exchange === 'fx' ? [] : cx.tickers(exchange);
+      return LOCAL.has(exchange) ? [] : cx.tickers(exchange);
     }
   }
   throw new HttpError(404, 'Not found');
@@ -87,12 +91,14 @@ export function startFeed(exchange: string, symbol: string, tf: string, send: (b
     const ps = [...parts.values()].sort((x, y) => x.time - y.time);
     send({ time: t, open: ps[0].open, high: Math.max(...ps.map(p => p.high)), low: Math.min(...ps.map(p => p.low)), close: ps.at(-1)!.close, volume: ps.reduce((a, p) => a + p.volume, 0) });
   };
-  if (exchange === 'fx') {
+  if (LOCAL.has(exchange)) {
+    // Neither Yahoo nor MT5 pushes prices here: poll (the local MT5 bridge often, Yahoo gently).
     let alive = true;
+    const get = exchange === 'fx' ? yahooBars : mt5Ohlcv, every = exchange === 'fx' ? 15000 : 2000;
     (async () => {
       while (alive) {
-        try { const r = await yahooBars(symbol, tf === '1M' ? '1M' : tf, undefined, 3); if (alive) r.base === tf ? r.bars.slice(-2).forEach(send) : r.bars.slice(-Math.ceil(sec / tfSeconds(r.base)) - 1).forEach(emitAgg) } catch {}
-        await new Promise(r => setTimeout(r, 15000));
+        try { const r = await get(symbol, tf === '1M' ? '1M' : tf, undefined, 3); if (alive) r.base === tf ? r.bars.slice(-2).forEach(send) : r.bars.slice(-Math.ceil(sec / tfSeconds(r.base)) - 1).forEach(emitAgg) } catch {}
+        await new Promise(r => setTimeout(r, every));
       }
     })();
     return () => { alive = false };
@@ -114,7 +120,7 @@ function onMarket(c: WsClient, m: Record<string, unknown>) {
   const exchange = String(m.exchange ?? ''), symbol = String(m.symbol ?? '').toUpperCase(), tf = String(m.tf ?? ''), mine = mineOf(c);
   if (m.kind === 'trades' || m.kind === 'book') {
     // Order flow feeds share the same fan-out map, keyed by kind instead of timeframe.
-    if (exchange === 'fx' || !cx.isExchange(exchange) || !SYM_RE.test(symbol)) return;
+    if (LOCAL.has(exchange) || !cx.isExchange(exchange) || !SYM_RE.test(symbol)) return;
     const kind = m.kind, k = keyOf(exchange, symbol, '#' + kind);
     if (m.op === 'unsub') return drop(c, k);
     if (mine.has(k)) return;
@@ -128,7 +134,7 @@ function onMarket(c: WsClient, m: Record<string, unknown>) {
     f.subs.add(c); mine.add(k);
     return;
   }
-  if (!EX_RE.test(exchange) || (exchange !== 'fx' && !cx.isExchange(exchange)) || !SYM_RE.test(symbol) || !validTf(tf)) return;
+  if (!EX_RE.test(exchange) || (!LOCAL.has(exchange) && !cx.isExchange(exchange)) || !SYM_RE.test(symbol) || !validTf(tf)) return;
   if (exchange === 'fx' && !yahooTicker(symbol)) return;
   const k = keyOf(exchange, symbol, tf);
   if (m.op === 'unsub') return drop(c, k);

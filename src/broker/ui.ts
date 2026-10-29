@@ -15,6 +15,7 @@ const EXCHANGES: { id: Exclude<BrokerId, 'paper'>; name: string; markets: Market
   { id: 'okx', name: 'OKX demo trading', markets: ['spot', 'futures'], pass: true, keys: 'okx.com → Trade → Demo trading → Personal center → Demo trading API' },
   // KuCoin left out: CCXT 4.5 has no sandbox for it, and the server refuses it.
   { id: 'nobitex', name: 'Nobitex testnet', markets: ['spot'], keys: 'testnet.nobitex.ir — sign up, then API token in the profile' },
+  { id: 'mt5', name: 'MetaTrader 5 demo (local bridge)', markets: ['futures'], keys: 'open MT5 on a netting demo account, run python mt5bridge/bridge.py, paste the token it prints (no secret)' },
 ];
 const exName = (b: BrokerId) => (b === 'paper' ? 'Paper' : EXCHANGES.find(e => e.id === b)?.name ?? b);
 const STATUS: Record<BrokerAccount['status'], string> = { active: 'active', pending: 'pending check', tripped: 'tripped', disabled: 'disabled', error: 'error' };
