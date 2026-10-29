@@ -1,9 +1,11 @@
 // The Market panel (ROADMAP phase 9): screener for any exchange (CEX) and DEX pairs, crypto heatmap with dominance,
 // market movers, economic calendar (also on the charts) and news; plus the watchlist's symbol details (technical
 // rating, seasonals, news). Keyless sources only: exchanges, DexScreener, CoinGecko, ForexFactory, RSS (server/marketdata.ts).
-import { fetch24h, fetchBars, fetchExchanges, isRemote, serverJson, splitSym, type Ticker24 } from '../data.ts';
+import { fetch24h, fetchBars, fetchExchanges, isRemote, serverJson, splitSym, type Bar, type Ticker24 } from '../data.ts';
 import { $, calcPrec, esc, fmtVol, store } from '../store.ts';
 import { movers, seasonals, squarify, technicalRating, type Rating } from './analysis.ts';
+import { describe, matches, needsBars, parseQuery, test1, type Query, type Row as QRow } from './query.ts';
+import { ema, rsi, sma } from '../indicators.ts';
 
 export interface MarketHost { setSymbol(s: string): void; addWatch(s: string): void; symbol(): string; refreshCharts(): void }
 let host: MarketHost;
@@ -49,8 +51,27 @@ const price = (x: number) => (Number.isFinite(x) ? x.toFixed(calcPrec(x)) : '–
 const ratingCell = (r?: Rating) => (r ? `<span class="${r.all > 0.1 ? 'up' : r.all < -0.1 ? 'dn' : 'muted'}" title="MA ${r.ma.toFixed(2)} · oscillators ${r.osc.toFixed(2)}">${r.label}</span>` : '');
 
 // ---------- screener (any exchange) ----------
-const scr = store.get('mktScr', { ex: 'binance', quote: 'USDT', minVol: 1_000_000, q: '', sort: 'qv' as keyof Ticker24 | 'rating', desc: true });
+const scr = store.get('mktScr', { ex: 'binance', quote: 'USDT', minVol: 1_000_000, q: '', cond: '', sort: 'qv' as keyof Ticker24 | 'rating', desc: true });
 const scrRows = new Map<string, Ticker24[]>(), ratings = new Map<string, Rating>();
+/** Daily closes, RSI and rating per symbol, for screener conditions (kept for the session). */
+const metrics = new Map<string, { closes?: number[]; rsi?: number | null; rating?: number | null }>();
+const lastOf = (s: (number | null)[]) => s.at(-1) ?? null;
+/** 300 daily bars (SMA 200 and the rating need no more): one request for Binance, the usual path elsewhere. */
+async function dailyBars(sym: string): Promise<Bar[]> {
+  if (isRemote(sym)) return fetchBars(sym, '1d');
+  const r = await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(sym)}&interval=1d&limit=300`);
+  if (!r.ok) throw Error(`klines ${r.status}`);
+  return ((await r.json()) as string[][]).map(k => ({ time: +k[0] / 1000, open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5] }));
+}
+function dailyMetrics(b: Bar[]) {
+  const closes = b.map(x => x.close);
+  return { closes, rsi: lastOf(rsi(closes, 14)), rating: b.length > 30 ? technicalRating(b).all : null };
+}
+/** A screener row with the moving averages this query asks for, computed from the cached closes. */
+function qrow(q: Query, r: Ticker24): QRow {
+  const m = metrics.get(r.s), c = m?.closes, ma = (k: 'sma' | 'ema') => Object.fromEntries(q.conds.filter(x => x.field === k).map(x => [x.period!, c ? lastOf((k === 'sma' ? sma : ema)(c, x.period!)) : null]));
+  return { price: r.c, change: r.ch, volume: r.qv, rsi: m?.rsi, rating: m?.rating, sma: ma('sma'), ema: ma('ema') };
+}
 let exList: { id: string; name: string }[] | null = null;
 async function tickersOf(ex: string): Promise<Ticker24[]> {
   let r = scrRows.get(ex);
@@ -67,16 +88,53 @@ async function screener(v: HTMLElement) {
     <input id="scrQuote" value="${esc(scr.quote)}" placeholder="Quote" title="Quote currency (empty = all)" style="width:60px">
     <input id="scrMin" type="number" value="${esc(scr.minVol)}" title="Minimum 24h volume (quote)" style="width:90px">
     <input id="scrQ" value="${esc(scr.q)}" placeholder="Search" style="width:80px">
-    <button id="scrRate" title="Technical rating (daily) of the first 25 rows">Rate</button></div><div id="scrOut" class="muted">Loading…</div>`;
+    <button id="scrRate" title="Technical rating (daily) of the first 25 rows">Rate</button></div>
+    <div class="row"><input id="scrCond" class="grow" dir="auto" value="${esc(scr.cond)}" placeholder="شرط: RSI زیر ۳۰ و حجم بالای ۱ میلیون · price above sma 50 and change > 3%"><button id="scrCondGo">Filter</button></div>
+    <div id="scrCondOut" class="muted"></div><div id="scrOut" class="muted">Loading…</div>`;
   const read = () => { Object.assign(scr, { ex: $<HTMLSelectElement>('#scrEx').value, quote: $<HTMLInputElement>('#scrQuote').value.trim().toUpperCase(), minVol: +$<HTMLInputElement>('#scrMin').value || 0, q: $<HTMLInputElement>('#scrQ').value.trim().toUpperCase() }); store.set('mktScr', scr); draw() };
   v.querySelector('.row')!.addEventListener('change', read);
   $('#scrQ').oninput = read;
   $('#scrRate').onclick = () => void rateRows();
-  let rows: Ticker24[] = [];
+  // Conditions in plain words (src/market/query.ts): parsed here, shown back, applied in draw().
+  let query: Query | null = null;
+  const parseCond = () => {
+    scr.cond = $<HTMLInputElement>('#scrCond').value.trim(); store.set('mktScr', scr);
+    const out = $('#scrCondOut');
+    query = null;
+    if (!scr.cond) { out.textContent = ''; return }
+    try { query = parseQuery(scr.cond); out.className = 'up'; out.textContent = `✓ ${describe(query)}` }
+    catch (e) { out.className = 'dn'; out.textContent = (e as Error).message }
+  };
+  $('#scrCondGo').onclick = () => { parseCond(); draw() };
+  $('#scrCond').onkeydown = e => { if (e.key === 'Enter') { parseCond(); draw() } };
+  parseCond();
+  let rows: Ticker24[] = [], drawing = 0;
   const draw = async () => {
+    const me = ++drawing;
     try { rows = await tickersOf(scr.ex) } catch (e) { return fail($('#scrOut'), e) }
     const quoteOf = (s: string) => (isRemote(s) ? splitSym(s).symbol : s).replace(/\.P$/, '');
-    const list = rows.filter(r => r.qv >= scr.minVol && (!scr.quote || quoteOf(r.s).endsWith(scr.quote)) && (!scr.q || r.s.includes(scr.q)));
+    let list = rows.filter(r => r.qv >= scr.minVol && (!scr.quote || quoteOf(r.s).endsWith(scr.quote)) && (!scr.q || r.s.includes(scr.q)));
+    if (query) {
+      const q = query, row = (r: Ticker24) => qrow(q, r);
+      // RSI / moving averages / rating need daily bars: fetched for at most 60 rows (by volume) that pass the rest.
+      const cheap = q.conds.filter(c => !needsBars(c));
+      const pre = q.join === 'and' ? list.filter(r => cheap.every(c => test1(c, row(r)))) : list;
+      if (q.conds.some(needsBars)) {
+        const todo = [...pre].sort((a, b) => b.qv - a.qv).slice(0, 60).filter(r => !metrics.has(r.s));
+        let done = 0, next = 0;
+        const worker = async () => {
+          while (next < todo.length && me === drawing) {
+            const r = todo[next++];
+            try { metrics.set(r.s, dailyMetrics(await dailyBars(r.s))) } catch { metrics.set(r.s, {}) }
+            $('#scrOut').textContent = `Daily data ${++done}/${todo.length}…`;
+          }
+        };
+        await Promise.all(Array.from({ length: 6 }, worker));   // 6 at a time: fast, still gentle on the exchange
+        if (me !== drawing) return;
+      }
+      list = pre.filter(r => matches(q, row(r)));
+    }
+    if (me !== drawing) return;
     const key = scr.sort, val = (r: Ticker24) => (key === 'rating' ? ratings.get(r.s)?.all ?? -9 : r[key]);
     list.sort((a, b) => { const x = val(a), y = val(b); return (typeof x === 'string' ? String(x).localeCompare(String(y)) : (x as number) - (y as number)) * (scr.desc ? -1 : 1) });
     shown = list.slice(0, 200);

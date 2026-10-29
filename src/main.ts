@@ -1,5 +1,5 @@
 import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from './chart.ts';
-import { TFS, anyTf, streamTickers, fetchSymbols, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type RemoteMarket } from './data.ts';
+import { TFS, anyTf, streamTickers, fetchBars, fetchSymbols, serverJson, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type RemoteMarket } from './data.ts';
 import { INDICATORS } from './indicators.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { TOOL_MAP } from './tools/index.ts';
@@ -24,7 +24,7 @@ import { initDom, domSync } from './orderflow/domui.ts';
 import { derivsAttach, derivsMenu } from './derivs/layer.ts';   // derivs
 import { initLiqPanel } from './derivs/liqpanel.ts';   // derivs
 import { ofMenu, replayButton, marketReplayUi } from './orderflow/menu.ts';
-import { initJournal, journalBrokers, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
+import { initJournal, journal, journalBrokers, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
 import { journalReplayOrder } from './journal/replay.ts';
 import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
 import { serverMode, onServer, api } from './sync.ts';
@@ -35,6 +35,8 @@ import { parseTvWatchlist } from './tvimport.ts';
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 import { chartEvents, initMarket, renderDetails, renderMarket } from './market/ui.ts';
 import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
+import { initSkills, renderSkills } from './skills/ui.ts';
+import { rMultiple } from './journal.ts';
 
 // ---------- layouts (grid arrangements) ----------
 interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
@@ -789,6 +791,7 @@ function showSide(name: string) {
   if (st.side === 'screener') renderMarket();
   if (st.side === 'journal') renderJournal();
   if (st.side === 'accts') renderAccounts();   // accounts
+  if (st.side === 'skills') renderSkills();
   domSync();
 }
 $('#rail').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) showSide(s) };
@@ -927,6 +930,15 @@ function renderDataWindow() {
 }
 
 initMarket({ setSymbol: s => setSymbol(s), addWatch, symbol: () => active().cfg.symbol, refreshCharts: () => panes.forEach(p => p.tradeOverlay()) });
+initSkills({
+  bars: (sym, tf) => fetchBars(sym, tf),
+  account: () => {
+    const positions = Object.entries(st.acct.pos).map(([sym, p]) => ({ sym, qty: p.qty, avg: p.avg, px: pxOf(sym) ?? p.avg }));
+    return { cash: st.acct.cash, positions, equity: st.acct.cash + positions.reduce((s, p) => s + p.qty * p.px, 0) };
+  },
+  trades: () => journal().trades.filter(t => t.kind !== 'notrade').map(t => ({ sym: t.sym, dir: t.dir, openTime: t.openTime, closeTime: t.closeTime, net: t.net, r: rMultiple(t), status: t.status, setup: t.setup, mistakes: t.mistakes })),
+  json: <T,>(path: string) => serverJson<T>(path),
+});
 
 // ---------- order ticket & trading panel ----------
 const ticket = { side: 'buy' as Side, type: 'market' as OrderType };

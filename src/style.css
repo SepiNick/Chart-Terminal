@@ -264,3 +264,6 @@ table.seas td{font-size:11px;text-align:right}
 .news{padding:4px 0;border-bottom:1px solid var(--border,#8884)}.news a{color:var(--fg)}
 .imp{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}.imp-high{background:#f23645}.imp-medium{background:#ff9800}.imp-low{background:#ffeb3b}.imp-holiday{background:#9598a1}
 #mktTabs{flex-wrap:wrap}
+/* skills panel */
+#s-skills{padding:6px;overflow:auto}#s-skills select#skPick{width:100%;margin:4px 0}#s-skills .form .field{display:flex;justify-content:space-between;gap:8px;margin:3px 0}
+#s-skills textarea{width:100%;font:12px var(--mono,monospace)}.skv{margin:8px 0;font-size:15px}

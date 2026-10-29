@@ -352,7 +352,12 @@
   - **قواعد:** همه‌ی تلورانس‌ها نسبت به ATR هستند، پس روی هر نماد و تایم‌فریمی کار می‌کنند.
   - **نتیجه:** رسم‌های معمولی در گروه «Auto analysis» یا «Higher-timeframe levels» است، پس می‌شود جابه‌جا یا پاکشان کرد. اجرای دوباره جایگزینشان می‌کند.
   - **تست:** ۴ تست واحد. روی BTCUSDT زنده هم امتحان شد: دو خط روند، سطح‌ها، سقف و کف دوقلو، و ۶ سطح روزانه.
-- ⏳ **Screener با زبان طبیعی فارسی:** منتظر تصمیم شما است: مدل زبانی Claude با کلید API، یا parser قاعده‌محور بدون هوش مصنوعی.
+- ✅ **Screener با جمله‌ی فارسی یا انگلیسی، بدون مدل زبانی (2026-10-30، `src/market/query.ts`):**
+  - **دستور زبان ثابت:** «فیلد عملگر مقدار»، با «و» یا «یا». مثال‌ها: «RSI زیر ۳۰ و حجم بالای ۱ میلیون»، «قیمت بالای میانگین ۲۰۰»، «تغییر بین ۲ و ۸ درصد»، «امتیاز خرید قوی»، `price above ema20 and change > 3%`.
+  - **نرمال‌سازی:** ارقام فارسی و عربی، ی و ک عربی، ٪ و نیم‌فاصله.
+  - **شفافیت:** شرطی که فهمیده شده همیشه نشان داده می‌شود. کلمه‌ی ناشناخته خطا می‌دهد و هیچ‌وقت بی‌صدا حذف نمی‌شود.
+  - **داده‌ی روزانه:** RSI، SMA/EMA (هر دوره‌ای) و امتیاز تکنیکال برای حداکثر ۶۰ نماد پرحجم، ۶ تا هم‌زمان.
+  - **تست:** ۳ تست، شامل ده جمله‌ی نمونه. روی Binance زنده هم امتحان شد و عددها با محاسبه‌ی دستی یکی بودند.
 
 ### 🟡 فاز ۱۳: برنامه‌ی دسکتاپ (`docs/desktop-shell-spec.md`، راهنما: `docs/desktop.md`)
 - ✅ **نصبی ویندوز، مک و لینوکس (2026-10-28، پوشه‌ی `desktop/`):**
@@ -380,6 +385,24 @@
 - **مانده:**
   - تب داخل یک پنجره و جدا کردن تب. فعلاً پنجره‌ی جدا جای آن را می‌گیرد.
   - منبع به‌روزرسانی: مخزن GitHub منتظر تصمیم شماست.
+
+### 🟡 فاز ۱۴: اسکیل‌های معاملاتی داخل برنامه، بدون مدل زبانی (از 2026-10-30، `src/skills/`)
+اسکیل‌های نصب‌شده‌ی claude-trading-skills و trader-skills داخل پنل 🧰 «Skills» می‌آیند. هر اسکیل از داده‌ی خود برنامه استفاده می‌کند، نه FMP. قواعد و امتیازدهی‌شان از روی توضیحاتشان در TypeScript از نو نوشته شده است، و هر جا خود اسکیل تست یا کد قابل‌اجرا داشت، با همان عددها مقایسه شده است (golden test). خروجی‌ها فقط پیشنهادند و هیچ سفارشی ثبت نمی‌شود.
+- **چارچوب:** هر اسکیل یک شیء است (ورودی‌ها و تابع `run`) و یک renderer مشترک فرم و نتیجه را می‌کشد.
+- ✅ **دسته‌ی A، انجام‌شده:**
+  - **اندازه‌ی پوزیشن:** position-sizer (کسر ثابت، ATR، نیم‌کلی، سقف پوزیشن و سقف بخش) و futures-position-sizer (۲۳ قرارداد با ضریب و تیک).
+  - **پورتفو:** trader-risk (بررسی سفارش‌ها)، trader-budget و trader-rebalance.
+  - **ژورنال:** drawdown-circuit-breaker، pre-trade-discipline-gate، weekly-performance-digest و trade-performance-coach.
+  - **آپشن:** options-strategy-advisor (Black-Scholes، Greeks و ۱۰ استراتژی).
+  - **مقایسه با اصل:** position-sizer، trader-budget و futures-position-sizer با عددهای خود اسکیل اصلی یکی هستند. Black-Scholes با پیاده‌سازی مستقل `erf` تا ۶ رقم اعشار یکی است.
+- ⏳ **مانده:**
+  - **دسته‌ی A:** breakout-trade-planner، contrarian-setup-gate، residual-edge-analyzer، trader-memory-core و trader-tax.
+  - **دسته‌ی B (رژیم و breadth بازار):** crypto-regime، market-breadth، uptrend، sector، ftd، ibd-distribution، market-top، macro-regime، downtrend-duration، exposure-coach و druckenmiller.
+  - **دسته‌ی C (اسکنرهای قیمت):** vcp، پنج اسکیل stockbee، parabolic-short، pair-trade و finviz.
+  - **دسته‌ی D (بنیادی، از SEC EDGAR):** analyst، copycat و 13F، institutional-flow، canslim، pead، earnings، dividend و kanchi.
+  - **در آخر:** us-undervalued-growth و pelosi (خواندن PDF).
+- **کنار گذاشته (به درخواست شما، برای مدل محلی در آینده):** اسکیل‌هایی که ذاتاً کار مدل زبانی‌اند، و trader-broker. همچنین manifoldbt (موتور Rust بیرونی) و mt5-robot-tester (MT5 لازم دارد).
+- **مجوز:** فایل LICENSE در پوشه‌ی اسکیل‌ها پیدا نشد. کد کپی نشده و قواعد از توضیحات از نو نوشته شده‌اند.
 
 ## کنار گذاشته‌شده، فعلاً
 copy trading (ریسک حقوقی)، ابزار کامل آپشن، داده‌ی on-chain پولی (پرداخت از ایران مشکل است)، شبکه‌ی اجتماعی (Ideas و Streams)، و اخبار Reuters و Dow Jones (مجوز لازم دارند).
