@@ -87,7 +87,7 @@ export const reviewSkill: Skill = {
   async run(v, ctx: Ctx) {
     const syms = [...new Set((String(v.symbols ?? '').trim() ? String(v.symbols).toUpperCase().split(/[\s,]+/) : ctx.account().positions.map(p => p.sym.replace(/^FX:/, ''))).filter(s => /^[A-Z][A-Z0-9.]{0,9}$/.test(s)))];
     if (!syms.length) throw new Error('Give tickers, or hold US stocks in the paper account');
-    const today = new Date().toISOString().slice(0, 10), res = [];
+    const today = new Date().toISOString().slice(0, 10), res: ReturnType<typeof evaluate>[] = [];
     for (const s of syms) {
       const [divs, cf, sub] = await Promise.all([ctx.json<Pay[]>(`/api/dividends?sym=${encodeURIComponent(s)}`).catch(() => [] as Pay[]), ctx.json<Facts>(`/api/sec/facts?q=${encodeURIComponent(s)}`).catch(() => null), ctx.json<{ filings?: { recent?: Record<string, string[]> } }>(`/api/sec/submissions?q=${encodeURIComponent(s)}`).catch(() => null)]);
       res.push(evaluate(holdingInput(s, divs, cf, sub, today)));
