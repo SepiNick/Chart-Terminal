@@ -38,5 +38,7 @@ import { kanchiSkill } from './kanchi.ts';
 import { divTaxSkill, reviewSkill } from './kanchireview.ts';
 import { copycatSkill } from './copycat.ts';
 import { instFlowSkill } from './instflow.ts';
+import { earnCalSkill } from './earncal.ts';
+import { pelosiSkill } from './pelosi.ts';
 
-export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill, uptrendSkill, sectorSkill, ftdSkill, distributionSkill, marketTopSkill, macroSkill, downtrendSkill, exposureSkill, druckenmillerSkill, vcpSkill, burstSkill, hammerSkill, study20Skill, pivotSkill, fluencySkill, parabolicSkill, pairsSkill, finvizSkill, analystSkill, canslimSkill, earnTradeSkill, peadSkill, divGrowthSkill, valueDivSkill, kanchiSkill, reviewSkill, divTaxSkill, copycatSkill, instFlowSkill];
+export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill, uptrendSkill, sectorSkill, ftdSkill, distributionSkill, marketTopSkill, macroSkill, downtrendSkill, exposureSkill, druckenmillerSkill, vcpSkill, burstSkill, hammerSkill, study20Skill, pivotSkill, fluencySkill, parabolicSkill, pairsSkill, finvizSkill, analystSkill, canslimSkill, earnTradeSkill, peadSkill, divGrowthSkill, valueDivSkill, kanchiSkill, reviewSkill, divTaxSkill, copycatSkill, instFlowSkill, earnCalSkill, pelosiSkill];

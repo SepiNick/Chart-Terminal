@@ -15,6 +15,7 @@ import './derivs.ts';
 import './brokers/index.ts';
 import './marketdata.ts';
 import './sec.ts';
+import './ptr.ts';
 import { startLan } from './lan.ts';
 import * as cx from './ccxt.ts';
 
