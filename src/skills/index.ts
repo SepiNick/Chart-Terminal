@@ -23,5 +23,7 @@ import { vcpSkill } from './vcp.ts';
 import { burstSkill } from './burst.ts';
 import { hammerSkill } from './hammer.ts';
 import { study20Skill } from './study20.ts';
+import { pivotSkill } from './pivot.ts';
+import { fluencySkill } from './fluency.ts';
 
-export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill, uptrendSkill, sectorSkill, ftdSkill, distributionSkill, marketTopSkill, macroSkill, downtrendSkill, exposureSkill, druckenmillerSkill, vcpSkill, burstSkill, hammerSkill, study20Skill];
+export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill, uptrendSkill, sectorSkill, ftdSkill, distributionSkill, marketTopSkill, macroSkill, downtrendSkill, exposureSkill, druckenmillerSkill, vcpSkill, burstSkill, hammerSkill, study20Skill, pivotSkill, fluencySkill];
