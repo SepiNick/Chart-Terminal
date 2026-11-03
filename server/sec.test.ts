@@ -27,3 +27,8 @@ test('SEC: ticker lookup, gzip, request spacing, cache and strict path validatio
   await assert.rejects(S.filingFile('320193', '0000320193-25-000001', '../secret'), /Bad filing path/);
   assert.deepEqual(await S.filingFile('320193', '0000320193-25-000001', 'index.json'), { url: 'https://www.sec.gov/Archives/edgar/data/320193/000032019325000001/index.json' });
 });
+
+test('earnings 8-Ks: item 2.02 only, timed in New York time', async () => {
+  S.deps.fetch = async (url: string) => new Response(JSON.stringify(url.endsWith('company_tickers.json') ? { 0: { cik_str: 1, ticker: 'ZZ', title: 'Zz' } } : { filings: { recent: { form: ['8-K', '8-K', '10-Q', '8-K'], items: ['2.02,9.01', '5.07', '', '2.02'], filingDate: ['2026-11-02', '2026-10-01', '2026-11-01', '2026-07-30'], acceptanceDateTime: ['2026-11-02T21:30:23.000Z', '2026-10-01T12:00:00.000Z', '', '2026-07-30T11:05:00.000Z'] } } }));
+  assert.deepEqual(await S.earnings8k('1234'), [{ date: '2026-11-02', accepted: '2026-11-02T21:30:23.000Z', timing: 'amc' }, { date: '2026-07-30', accepted: '2026-07-30T11:05:00.000Z', timing: 'bmo' }]);
+});

@@ -71,3 +71,15 @@ route('GET', '/api/sec/submissions', c => submissions(q(c, 'q')));
 route('GET', '/api/sec/cik', async c => ({ cik: await cikOf(q(c, 'q')) }));
 route('GET', '/api/sec/frame', c => frame(c.url.searchParams.get('taxonomy') ?? 'us-gaap', q(c, 'concept'), q(c, 'unit'), q(c, 'period')));
 route('GET', '/api/sec/file', c => filingFile(q(c, 'cik'), q(c, 'acc'), q(c, 'name')));
+/** Earnings releases: 8-Ks with item 2.02, timed by SEC's acceptance stamp in New York time (before 9:30 → BMO, from 16:00 → AMC). */
+export async function earnings8k(q: string) {
+  const r = ((await submissions(q)) as { filings?: { recent?: Record<string, string[]> } }).filings?.recent ?? {}, out: { date: string; accepted: string; timing: 'bmo' | 'amc' | 'unknown' }[] = [];
+  (r.form ?? []).forEach((f, i) => {
+    if (f !== '8-K' || !(r.items?.[i] ?? '').includes('2.02')) return;
+    const acc = r.acceptanceDateTime?.[i] ?? '', ny = acc ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(acc)) : '';
+    const m = ny ? +ny.slice(0, 2) * 60 + +ny.slice(3, 5) : NaN;
+    out.push({ date: r.filingDate[i], accepted: acc, timing: !Number.isFinite(m) ? 'unknown' : m < 570 ? 'bmo' : m >= 960 ? 'amc' : 'unknown' });
+  });
+  return out;
+}
+route('GET', '/api/sec/earnings', c => earnings8k(q(c, 'q')));
