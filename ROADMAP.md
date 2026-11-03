@@ -423,8 +423,22 @@
       - تم‌ها و جریان نهادی هنوز منبعی داخل برنامه ندارند، پس در exposure-coach و druckenmiller «مفقود» حساب می‌شوند.
       - تاریخچه‌ی روزانه حدود ۴ سال است، نه ۵ سال.
       - قیمت‌های Yahoo فقط برای split تعدیل شده‌اند، نه برای سود نقدی.
+- ✅ **دسته‌ی C، اسکنرهای قیمت (2026-11-03):** همه روی جهان سهام آمریکا اجرا می‌شوند، یعنی بزرگ‌ترین شرکت‌ها از فهرست Nasdaq، یا نمادهایی که خودتان می‌دهید.
+  - **vcp-screener:** الگوی VCP مینروینی. شامل trend template، قدرت نسبی رتبه‌بندی‌شده بین کاندیداها، انقباض‌های zigzag با ATR، خشک شدن حجم، فاصله تا pivot، و execution state که سقف رتبه را تعیین می‌کند.
+  - **stockbee-momentum-burst-screener:** breakout چهار درصدی، breakout دلاری و range expansion از دل base فشرده.
+  - **stockbee-exhaustion-hammer-screener:** چکش فرسودگی بعد از پولبک در سهم‌های پیشرو، برای خرید نزدیک بسته شدن بازار.
+  - **stockbee-20pct-study:** سهام با حرکت ۲۰ درصدی در ۵ جلسه. شامل الگو، کیفیت بسته شدن، ریسک کشیدگی و امتیازها، backfill روی جلسه‌های گذشته، نتیجه‌ی ۱ تا ۲۰ روز بعد، و cohortها همراه با قانون‌های کاندید.
+  - **stockbee-episodic-pivot-analyzer:** Episodic Pivot. رویدادهای کاتالیست را خودتان می‌دهید، یا سهم‌هایی که امروز ۴٪ یا بیشتر gap یا رشد داشته‌اند اسکن می‌شوند.
+  - **stockbee-setup-fluency-trainer:** model book. اسکن momentum burst روی جلسه‌های گذشته دوباره اجرا می‌شود، با نتیجه‌ی ۳ و ۵ روزه و cohort بر اساس رتبه، trigger و تگ.
+  - **parabolic-short-trade-planner:** فاز ۱ (امتیاز پنج‌جزئی و درجه‌ی A تا D) و فاز ۲ (طرح‌های ORL، first red و VWAP fail، اندازه‌ی fixed-fractional، و بررسی SSR و borrow). فاز ۳، یعنی پایش لحظه‌ای trigger، ساخته نشد چون به فید ۵ دقیقه‌ای بروکر و موجودی قرض سهم نیاز دارد.
+  - **pair-trade-screener:** جفت‌های cointegrated. تست ADF دقیقاً مثل `adfuller` در statsmodels پیاده شده است: انتخاب lag با AIC، p-value و مقادیر بحرانی MacKinnon. به‌علاوه‌ی half-life با AR(1) و z-score نود روزه.
+  - **finviz-screener:** درخواست را با کلمه‌های جدول مرجع خود اسکیل (بیش از ۶۰۰ فیلتر)، به‌علاوه‌ی چند اصطلاح فارسی، به لینک screener فین‌ویز تبدیل می‌کند. نتیجه‌ی اسکیل‌ها حالا می‌تواند لینک https داشته باشد.
+  - **مقایسه با اصل:** همه با کد پایتون اصلی روی داده‌ی ساختگی یکی‌اند. برای pair-trade، خود statsmodels معیار است و تفاوت حدود 1e-9 است. همه روی داده‌ی زنده هم اجرا شدند و هر کدام ۱ تا ۷ ثانیه طول کشید.
+  - **محدودیت‌ها:**
+    - کاتالیست خبری و تاریخ گزارش مالی منبعی ندارند. 20pct و parabolic آن‌ها را «نامعلوم» می‌گیرند.
+    - شمار نهادهای سهام‌دار در دسترس نیست، پس exhaustion-hammer آن امتیاز را هیچ‌وقت نمی‌دهد.
+    - backfillها روی جهان سهام امروز اجرا می‌شوند، پس survivorship bias دارند.
 - ⏳ **مانده:**
-  - **دسته‌ی C (اسکنرهای قیمت):** vcp، پنج اسکیل stockbee، parabolic-short، pair-trade و finviz.
   - **دسته‌ی D (بنیادی، از SEC EDGAR):** analyst، copycat و 13F، institutional-flow، canslim، pead، earnings، dividend و kanchi.
   - **در آخر:** us-undervalued-growth و pelosi (خواندن PDF).
 - **کنار گذاشته (به درخواست شما، برای مدل محلی در آینده):** اسکیل‌هایی که ذاتاً کار مدل زبانی‌اند، و trader-broker. همچنین manifoldbt (موتور Rust بیرونی) و mt5-robot-tester (MT5 لازم دارد).

@@ -58,5 +58,6 @@ export function view(r: Result): string {
   return (r.verdict ? `<div class="skv"><b${tone(r.verdict.tone)}>${esc(r.verdict.label)}</b>${r.verdict.detail ? ` <span class="muted">${esc(r.verdict.detail)}</span>` : ''}</div>` : '')
     + (r.kpis?.length ? `<div class="row wrap kpis">${r.kpis.map(k => `<div><span>${esc(k.label)}</span><b${tone(k.tone)}>${esc(k.value)}</b></div>`).join('')}</div>` : '')
     + (r.tables ?? []).map(t => `<h4>${esc(t.title)}</h4>${t.rows.length ? `<table class="scr"><tr>${t.cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>${t.rows.map(row => `<tr>${row.map(c => `<td>${esc(c ?? '–')}</td>`).join('')}</tr>`).join('')}</table>` : '<div class="muted">Nothing.</div>'}`).join('')
-    + (r.notes ?? []).map(n => `<div class="muted">• ${esc(n)}</div>`).join('');
+    + (r.notes ?? []).map(n => `<div class="muted">• ${esc(n)}</div>`).join('')
+    + (r.links ?? []).filter(l => /^https:\/\//.test(l.url)).map(l => `<div><a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.label)}</a></div>`).join('');
 }

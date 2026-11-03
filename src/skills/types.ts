@@ -15,6 +15,8 @@ export interface Result {
   kpis?: { label: string; value: string | number; tone?: Tone }[];
   tables?: { title: string; cols: string[]; rows: (string | number | null)[][] }[];
   notes?: string[];
+  /** External pages to open (https only). */
+  links?: { label: string; url: string }[];
 }
 /** What a skill may read. Proposals only: nothing here places an order. */
 export interface Ctx {
