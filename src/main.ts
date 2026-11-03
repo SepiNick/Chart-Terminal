@@ -934,7 +934,7 @@ initSkills({
   bars: (sym, tf) => fetchBars(sym, tf),
   account: () => {
     const positions = Object.entries(st.acct.pos).map(([sym, p]) => ({ sym, qty: p.qty, avg: p.avg, px: pxOf(sym) ?? p.avg }));
-    return { cash: st.acct.cash, positions, equity: st.acct.cash + positions.reduce((s, p) => s + p.qty * p.px, 0) };
+    return { cash: st.acct.cash, positions, equity: st.acct.cash + positions.reduce((s, p) => s + p.qty * p.px, 0), fills: st.acct.fills.map(f => ({ sym: f.sym, side: f.side, qty: f.qty, px: f.px, fee: f.fee, ts: f.ts })) };
   },
   trades: () => journal().trades.filter(t => t.kind !== 'notrade').map(t => ({ sym: t.sym, dir: t.dir, openTime: t.openTime, closeTime: t.closeTime, net: t.net, r: rMultiple(t), status: t.status, setup: t.setup, mistakes: t.mistakes })),
   json: <T,>(path: string) => serverJson<T>(path),

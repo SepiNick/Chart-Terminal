@@ -1,6 +1,10 @@
 // Keyless market data for phase 9: crypto news from public RSS feeds, DEX pairs (DexScreener), coin market caps and
 // global dominance (CoinGecko). Fixed upstream hosts only, cached, and a stale copy is served when an upstream fails.
 import { HttpError, bad, route } from './core/http.ts';
+import { db, migration } from './core/db.ts';
+
+// CoinGecko gives today's dominance only: one row per UTC day builds the history the regime analysis needs.
+migration('marketdata/1', 'CREATE TABLE dominance (day TEXT PRIMARY KEY, btc REAL NOT NULL, eth REAL)');
 
 /** Swappable for tests. */
 export const deps = { fetch: (url: string) => fetch(url, { signal: AbortSignal.timeout(15_000), headers: { 'user-agent': 'ChartTerminal/0.1', accept: 'application/json, application/rss+xml, application/xml, text/xml' } }), now: () => Date.now() };
@@ -79,6 +83,7 @@ export const globalStats = () => cached('cg|global', 5 * 60_000, async () => {
   const pct = d.market_cap_percentage;
   // TradingView-style names: TOTAL (all), TOTAL2 (without BTC), TOTAL3 (without BTC and ETH), BTC.D, ETH.D, USDT.D
   const total = d.total_market_cap.usd;
+  if (pct.btc != null) db.prepare('INSERT INTO dominance (day, btc, eth) VALUES (?, ?, ?) ON CONFLICT(day) DO UPDATE SET btc = excluded.btc, eth = excluded.eth').run(new Date(deps.now()).toISOString().slice(0, 10), pct.btc, pct.eth ?? null);
   return { TOTAL: total, TOTAL2: total * (1 - (pct.btc ?? 0) / 100), TOTAL3: total * (1 - ((pct.btc ?? 0) + (pct.eth ?? 0)) / 100), 'BTC.D': pct.btc ?? null, 'ETH.D': pct.eth ?? null, 'USDT.D': pct.usdt ?? null, volume24h: d.total_volume.usd, change24h: d.market_cap_change_percentage_24h_usd };
 });
 
@@ -86,3 +91,17 @@ route('GET', '/api/news', c => news(c.url.searchParams.get('q') ?? undefined));
 route('GET', '/api/dex', c => dex(c.url.searchParams.get('q') ?? ''));
 route('GET', '/api/coins', () => coins());
 route('GET', '/api/global', () => globalStats());
+route('GET', '/api/global/history', () => db.prepare('SELECT day, btc, eth FROM dominance ORDER BY day').all());
+
+// ---------- US market breadth (TraderMonty's public CSVs, used by the breadth skills) ----------
+const BREADTH = 'https://tradermonty.github.io/market-breadth-analysis/';
+/** Simple CSV (no quoted commas in these files) → header-keyed rows. */
+export function parseCsv(text: string): Record<string, string>[] {
+  const [head, ...lines] = text.trim().split(/\r?\n/), cols = head.split(',');
+  return lines.filter(Boolean).map(l => { const v = l.split(','); return Object.fromEntries(cols.map((c, i) => [c, v[i] ?? ''])) });
+}
+const csvOf = (file: string) => cached(`csv|${file}`, 60 * 60_000, async () => { const r = await deps.fetch(BREADTH + file); if (!r.ok) throw new HttpError(502, `${file}: ${r.status}`); return parseCsv(await r.text()) });
+route('GET', '/api/breadth', async () => {
+  const [rows, summary] = await Promise.all([csvOf('market_breadth_data.csv'), csvOf('market_breadth_summary.csv')]);
+  return { rows, summary: Object.fromEntries(summary.map(r => [r.Metric, r.Value])) };
+});
