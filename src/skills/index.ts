@@ -32,5 +32,7 @@ import { analystSkill } from './analyst.ts';
 import { canslimSkill } from './canslim.ts';
 import { earnTradeSkill } from './earntrade.ts';
 import { peadSkill } from './pead.ts';
+import { divGrowthSkill } from './divgrowth.ts';
+import { valueDivSkill } from './valuediv.ts';
 
-export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill, uptrendSkill, sectorSkill, ftdSkill, distributionSkill, marketTopSkill, macroSkill, downtrendSkill, exposureSkill, druckenmillerSkill, vcpSkill, burstSkill, hammerSkill, study20Skill, pivotSkill, fluencySkill, parabolicSkill, pairsSkill, finvizSkill, analystSkill, canslimSkill, earnTradeSkill, peadSkill];
+export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill, uptrendSkill, sectorSkill, ftdSkill, distributionSkill, marketTopSkill, macroSkill, downtrendSkill, exposureSkill, druckenmillerSkill, vcpSkill, burstSkill, hammerSkill, study20Skill, pivotSkill, fluencySkill, parabolicSkill, pairsSkill, finvizSkill, analystSkill, canslimSkill, earnTradeSkill, peadSkill, divGrowthSkill, valueDivSkill];
