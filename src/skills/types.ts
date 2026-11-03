@@ -20,7 +20,7 @@ export interface Result {
 export interface Ctx {
   bars(sym: string, tf: string): Promise<Bar[]>;
   /** The app's accounts: paper equity and positions, journal trades. */
-  account(): { equity: number; cash: number; positions: { sym: string; qty: number; avg: number; px: number }[] };
+  account(): { equity: number; cash: number; positions: { sym: string; qty: number; avg: number; px: number }[]; fills: { sym: string; side: 'buy' | 'sell'; qty: number; px: number; fee: number; ts: number }[] };
   trades(): { sym: string; dir: 'long' | 'short'; openTime: number; closeTime?: number; net: number; r?: number | null; status: string; setup?: string; mistakes?: string[] }[];
   json<T>(path: string): Promise<T>;   // the app's own server (/api/...)
 }

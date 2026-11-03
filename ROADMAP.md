@@ -395,9 +395,19 @@
   - **ژورنال:** drawdown-circuit-breaker، pre-trade-discipline-gate، weekly-performance-digest و trade-performance-coach.
   - **آپشن:** options-strategy-advisor (Black-Scholes، Greeks و ۱۰ استراتژی).
   - **مقایسه با اصل:** position-sizer، trader-budget و futures-position-sizer با عددهای خود اسکیل اصلی یکی هستند. Black-Scholes با پیاده‌سازی مستقل `erf` تا ۶ رقم اعشار یکی است.
+  - **بقیه‌ی دسته‌ی A (2026-10-30):**
+    - **trader-tax (قواعد آمریکا):** lotها از fillهای حساب تمرینی ساخته می‌شوند. FIFO، گران‌ترین اول، lot دلخواه، wash sale و برداشت ضرر مالیاتی.
+    - **breakout-trade-planner:** ورود و حد ضرر و هدف، اندازه بر اساس امتیاز الگو، و heat پورتفو.
+    - **contrarian-setup-gate:** ماشین وضعیت سه‌مرحله‌ای Shapiro.
+    - **residual-edge-analyzer:** OLS با خطای Newey–West، روی بازده روزانه‌ی ژورنال یا یک سری دلخواه.
+    - هر چهار با عددهای اسکیل اصلی یکی‌اند.
+    - **trader-memory-core** جدا ساخته نشد، چون ژورنال برنامه همین کار را می‌کند: ایده تا بستن معامله، دلیل‌ها، درس‌ها و تحلیل بعد از معامله.
+- 🟡 **دسته‌ی B، شروع‌شده:**
+  - **crypto-regime-analyzer:** شش جزء با وزن‌های اصلی. جزء دامیننس از ۳۱ روز بعد فعال می‌شود، چون سرور حالا روزی یک بار دامیننس BTC را ثبت می‌کند.
+  - **market-breadth-analyzer:** CSV عمومی TraderMonty، با cache روی سرور.
+  - هر دو با محاسبه‌گرهای اصلی روی همان داده یکی‌اند: ۹ امتیاز جزء کریپتو، و شش نقطه از تاریخچه‌ی breadth از «Critical» تا «Healthy».
 - ⏳ **مانده:**
-  - **دسته‌ی A:** breakout-trade-planner، contrarian-setup-gate، residual-edge-analyzer، trader-memory-core و trader-tax.
-  - **دسته‌ی B (رژیم و breadth بازار):** crypto-regime، market-breadth، uptrend، sector، ftd، ibd-distribution، market-top، macro-regime، downtrend-duration، exposure-coach و druckenmiller.
+  - **دسته‌ی B (رژیم و breadth بازار):** uptrend، sector، ftd، ibd-distribution، market-top، macro-regime، downtrend-duration، exposure-coach و druckenmiller.
   - **دسته‌ی C (اسکنرهای قیمت):** vcp، پنج اسکیل stockbee، parabolic-short، pair-trade و finviz.
   - **دسته‌ی D (بنیادی، از SEC EDGAR):** analyst، copycat و 13F، institutional-flow، canslim، pead، earnings، dividend و kanchi.
   - **در آخر:** us-undervalued-growth و pelosi (خواندن PDF).

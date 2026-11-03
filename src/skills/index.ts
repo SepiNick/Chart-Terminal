@@ -5,5 +5,11 @@ import { circuitBreakerSkill, coachSkill, preTradeGateSkill, weeklyDigestSkill }
 import { budgetSkill, rebalanceSkill, riskSkill } from './portfolio.ts';
 import { optionsSkill } from './options.ts';
 import { futuresSizer } from './sizing.ts';
+import { taxSkill } from './tax.ts';
+import { breakoutSkill } from './breakout.ts';
+import { contrarianSkill } from './contrarian.ts';
+import { residualSkill } from './residual.ts';
+import { cryptoRegimeSkill } from './regime.ts';
+import { breadthSkill } from './breadth.ts';
 
-export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer];
+export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill];
