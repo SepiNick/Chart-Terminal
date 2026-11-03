@@ -60,3 +60,17 @@ export async function yahooBars(sym: string, tf: string, until?: number, limit =
   });
   return { bars, base: nb.base };
 }
+
+const divCache = new Map<string, { at: number; data: { date: string; dividend: number }[] }>();
+/** Cash dividends per share (ex-date, amount) over the last `years`, oldest first; cached for 12 hours. */
+export async function yahooDividends(sym: string, years = 12): Promise<{ date: string; dividend: number }[]> {
+  const t = yahooTicker(sym); if (!t) throw Error(`Unknown symbol FX:${sym}`);
+  const c = divCache.get(t); if (c && Date.now() - c.at < 12 * 3600_000) return c.data;
+  const end = Math.floor(Date.now() / 1000), start = end - years * 366 * 86400;
+  const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t)}?interval=1mo&period1=${start}&period2=${end}&events=div`, { headers: { 'user-agent': 'Mozilla/5.0' } });
+  const j = await r.json() as { chart: { result?: { events?: { dividends?: Record<string, { amount: number; date: number }> } }[]; error?: { description: string } } };
+  if (!r.ok || j.chart.error) throw Error(j.chart.error?.description ?? `Yahoo ${r.status}`);
+  const data = Object.values(j.chart.result?.[0]?.events?.dividends ?? {}).filter(d => Number.isFinite(d.amount) && d.amount > 0).map(d => ({ date: new Date(d.date * 1000).toISOString().slice(0, 10), dividend: d.amount })).sort((a, b) => (a.date < b.date ? -1 : 1));
+  divCache.set(t, { at: Date.now(), data }); if (divCache.size > 2000) divCache.delete(divCache.keys().next().value!);
+  return data;
+}

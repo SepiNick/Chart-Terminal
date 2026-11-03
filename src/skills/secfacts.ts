@@ -110,3 +110,38 @@ export function latestFilings(sub: { filings?: { recent?: Record<string, string[
   });
   return out;
 }
+
+// ---- annual statements (10-K) and key metrics, for the dividend and value skills ----
+export interface Annual { end: string; revenue: number | null; netIncome: number | null; eps: number | null; totalDebt: number | null; equity: number | null; currentAssets: number | null; currentLiabilities: number | null; dividendsPaid: number | null; ocf: number | null; capex: number | null; fcf: number | null; da: number | null; shares: number | null }
+const ANNUAL_FLOW: Record<string, string[]> = {
+  netIncome: ['NetIncomeLoss', 'ProfitLoss'], eps: ['EarningsPerShareDiluted', 'EarningsPerShareBasicAndDiluted'], dividendsPaid: ['PaymentsOfDividendsCommonStock', 'PaymentsOfDividends'],
+  ocf: ['NetCashProvidedByUsedInOperatingActivities'], capex: ['PaymentsToAcquirePropertyPlantAndEquipment'], da: ['DepreciationDepletionAndAmortization', 'DepreciationAndAmortization', 'DepreciationAmortizationAndAccretionNet'], shares: ['WeightedAverageNumberOfDilutedSharesOutstanding'],
+};
+const ANNUAL_STOCK: Record<string, string[]> = { equity: ['StockholdersEquity', 'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'], currentAssets: ['AssetsCurrent'], currentLiabilities: ['LiabilitiesCurrent'], ltdAll: ['LongTermDebt', 'LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities', 'DebtLongtermAndShorttermCombinedAmount'], ltdNon: ['LongTermDebtNoncurrent', 'LongTermDebtAndCapitalLeaseObligations'], ltdCur: ['LongTermDebtCurrent', 'LongTermDebtAndCapitalLeaseObligationsCurrent', 'DebtCurrent'], stb: ['ShortTermBorrowings', 'OtherShortTermBorrowings'], cp: ['CommercialPaper'] };
+/** Full-year values from 10-Ks by fiscal year end, first concept with a value wins. */
+function annualFlow(cf: Facts, concepts: string[], unit?: string) {
+  const out = new Map<string, number>();
+  for (const c of concepts) for (const f of periods(factsFor(cf, c, unit), ['10-K']).values()) { const d = day(f.end) - day(f.start!); if (d >= 350 && d <= 380 && !out.has(f.end)) out.set(f.end, f.val) }
+  return out;
+}
+function annualStock(cf: Facts, concepts: string[]) {
+  const out = new Map<string, number>();
+  for (const c of concepts) { const best = new Map<string, Fact>(); for (const f of factsFor(cf, c, 'USD')) if (!f.start && (f.form ?? '').startsWith('10-K') && (!best.has(f.end) || (f.filed ?? '') > (best.get(f.end)!.filed ?? ''))) best.set(f.end, f); for (const [e, f] of best) if (!out.has(e)) out.set(e, f.val) }
+  return out;
+}
+/** Newest-first fiscal years (up to `n`). Total debt = long-term debt including its current part (or non-current + current) + short-term borrowings + commercial paper. */
+export function annuals(cf: Facts, n = 5): Annual[] {
+  const rev = annualFlow(cf, CONCEPTS.revenue, 'USD'), fl = Object.fromEntries(Object.entries(ANNUAL_FLOW).map(([k, c]) => [k, annualFlow(cf, c, k === 'eps' ? 'USD/shares' : k === 'shares' ? 'shares' : 'USD')]));
+  const st = Object.fromEntries(Object.entries(ANNUAL_STOCK).map(([k, c]) => [k, annualStock(cf, c)]));
+  return [...new Set([...rev.keys(), ...fl.netIncome.keys()])].sort().reverse().slice(0, n).map(end => {
+    const g = (m: Map<string, number>) => m.get(end) ?? null, ocf = g(fl.ocf), capex = g(fl.capex), lt = g(st.ltdAll) ?? (g(st.ltdNon) == null && g(st.ltdCur) == null ? null : (g(st.ltdNon) ?? 0) + (g(st.ltdCur) ?? 0));
+    const debt = lt == null && g(st.stb) == null && g(st.cp) == null ? null : (lt ?? 0) + (g(st.stb) ?? 0) + (g(st.cp) ?? 0);
+    return { end, revenue: g(rev), netIncome: g(fl.netIncome), eps: g(fl.eps), totalDebt: debt, equity: g(st.equity), currentAssets: g(st.currentAssets), currentLiabilities: g(st.currentLiabilities), dividendsPaid: g(fl.dividendsPaid), ocf, capex, fcf: ocf != null ? ocf - (capex ?? 0) : null, da: g(fl.da), shares: g(fl.shares) };
+  });
+}
+/** FMP-style key metrics from the latest fiscal year and today's price. */
+export function keyMetrics(a: Annual | undefined, price: number) {
+  if (!a) return { peRatio: null as number | null, pbRatio: null as number | null, roe: null as number | null, netProfitMargin: null as number | null, payoutRatio: null as number | null };
+  const bvps = a.equity && a.shares ? a.equity / a.shares : null;
+  return { peRatio: a.eps && a.eps > 0 ? price / a.eps : null, pbRatio: bvps && bvps > 0 ? price / bvps : null, roe: a.netIncome != null && a.equity ? a.netIncome / a.equity : null, netProfitMargin: a.netIncome != null && a.revenue ? a.netIncome / a.revenue : null, payoutRatio: a.dividendsPaid != null && a.netIncome && a.netIncome > 0 ? Math.abs(a.dividendsPaid) / a.netIncome : null };
+}

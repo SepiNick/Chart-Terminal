@@ -11,7 +11,7 @@
 //       {op:'sub'|'unsub', kind:'trades'|'book', exchange, symbol}  ←  {kind, exchange, symbol, data}
 import { aggregate, tfSeconds, validTf, type Bar } from '../src/data.ts';
 import * as cx from './ccxt.ts';
-import { fxMarkets, yahooBars, yahooTicker } from './yahoo.ts';
+import { fxMarkets, yahooBars, yahooDividends, yahooTicker } from './yahoo.ts';
 import { mt5Markets, mt5Ohlcv } from './mt5.ts';
 import { HttpError, bad, onWs, onWsClose, route, type WsClient } from './core/http.ts';
 
@@ -153,3 +153,4 @@ onWsClose(c => [...mineOf(c)].forEach(k => drop(c, k)));
 
 route('GET', '/api/health', () => ({ ok: true, exchanges: cx.exchangeIds().length }), { public: true });
 for (const p of ['/api/exchanges', '/api/markets', '/api/bars', '/api/tickers', '/api/trades', '/api/calendar']) route('GET', p, c => marketRoute(c.url));
+route('GET', '/api/dividends', c => { const s = (c.url.searchParams.get('sym') ?? '').toUpperCase(); if (!/^[A-Z0-9.]{1,12}$/.test(s)) throw new HttpError(400, 'sym: a ticker'); return yahooDividends(s) });

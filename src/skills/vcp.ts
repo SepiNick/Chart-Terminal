@@ -217,7 +217,7 @@ export async function barsMany(ctx: Ctx, syms: string[], n = 6) {
   await Promise.all(Array.from({ length: n }, async () => { while (i < syms.length) { const s = syms[i++]; try { const b = await ctx.bars(`FX:${s}`, '1d'); if (b.length) out.set(s, b) } catch { /* skipped */ } } }));
   return out;
 }
-export interface Stock { sym: string; name: string; sector: string; industry: string; cap: number; price: number; volume: number; chg: number }
+export interface Stock { sym: string; name: string; sector: string; industry: string; cap: number; price: number; volume: number; chg: number; country?: string }
 
 export const vcpSkill: Skill = {
   id: 'vcp-screener', name: 'VCP screener', group: 'Screeners', from: 'vcp-screener',
