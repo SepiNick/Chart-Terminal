@@ -91,7 +91,7 @@ export const burstSkill: Skill = {
     const live = res.filter(r => r.state !== 'REJECTED');
     return {
       verdict: { label: `${res.filter(r => r.state === 'ACTIONABLE_DAY1').length} actionable · ${live.length} candidates`, tone: live.length ? 'up' : 'muted', detail: `${bars.size} stocks scanned for the session of ${new Date(([...bars.values()][0]?.at(-1)?.time ?? 0) * 1000).toISOString().slice(0, 10)}.` },
-      tables: [{ title: 'Momentum bursts', cols: ['Symbol', 'Name', 'State', 'Rating', 'Score', 'Trigger', 'Gain', 'Vol ×', 'Base days', 'Close loc', 'Entry', 'Stop', 'Risk', 'Flags'], rows: live.slice(0, 60).map(r => 't' in r ? [r.s, names.get(r.s)?.name ?? '', r.state.replace(/_/g, ' '), r.rating, r.score, r.t.tags.join(', '), `${r.t.gain.toFixed(1)}%`, Math.max(r.t.v1, r.t.v20).toFixed(1), r.b.days, `${r.t.loc.toFixed(0)}%`, r.entry.toFixed(2), r.stop.toFixed(2), `${r.risk.toFixed(1)}%`, r.soft.join(', ')] : []) }],
+      tables: [{ title: 'Momentum bursts', cols: ['Symbol', 'Name', 'State', 'Rating', 'Score', 'Trigger', 'Gain', 'Vol ×', 'Base days', 'Close loc', 'Entry', 'Stop', 'Risk', 'Flags'], rows: live.slice(0, 60).map(r => r.t && r.b ? [r.s, names.get(r.s)?.name ?? '', r.state.replace(/_/g, ' '), r.rating, r.score, r.t.tags.join(', '), `${r.t.gain.toFixed(1)}%`, Math.max(r.t.v1, r.t.v20).toFixed(1), r.b.days, `${r.t.loc.toFixed(0)}%`, r.entry.toFixed(2), r.stop.toFixed(2), `${r.risk.toFixed(1)}%`, r.soft.join(', ')] : []) }],
       notes: ['Exit template: 3 to 5 days, or protect an abnormal profit early. Stop = the burst day\'s low.', 'Daily bars include today\'s unfinished session while the market is open. No order is placed.'],
     };
   },
