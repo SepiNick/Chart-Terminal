@@ -83,3 +83,6 @@ export async function earnings8k(q: string) {
   return out;
 }
 route('GET', '/api/sec/earnings', c => earnings8k(q(c, 'q')));
+/** SEC's ticker file as rows [cik, ticker, title], in its own order (13F name matching needs every row). */
+export const tickerRows = async () => Object.values(await get<Record<string, { cik_str: number; ticker: string; title: string }>>('https://www.sec.gov/files/company_tickers.json', 24 * H)).map(v => [String(v.cik_str).padStart(10, '0'), v.ticker, v.title]);
+route('GET', '/api/sec/tickers', () => tickerRows());
