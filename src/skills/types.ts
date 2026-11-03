@@ -44,4 +44,6 @@ export const money = (x: number) => (Number.isFinite(x) ? x.toLocaleString(undef
 export const pct = (x: number, d = 2) => (Number.isFinite(x) ? `${x.toFixed(d)}%` : '–');
 /** Python's round(): halves go to the even neighbour (the original skills' scores use it). */
 export const pyRound = (x: number) => { const f = Math.floor(x); return x - f === 0.5 ? (f % 2 === 0 ? f : f + 1) : Math.round(x) };
-export const pyRound1 = (x: number) => pyRound(x * 10) / 10;
+/** Python's round(x, d): rounds the exact binary value; only dyadic values can be true ties, and those go to even. */
+export const pyRoundN = (x: number, d: number) => { const t = x * 10 ** d; return Number.isInteger(x * 2 ** (d + 1)) && Math.abs(t % 1) === 0.5 ? pyRound(t) / 10 ** d : Number(x.toFixed(d)) };
+export const pyRound1 = (x: number) => pyRoundN(x, 1);

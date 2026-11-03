@@ -1,13 +1,11 @@
 // market-breadth-analyzer: a 0–100 US equity breadth health score from TraderMonty's public breadth CSV (S&P 500
 // members above their 200-day MA), six components with the original's weights and rules.
-import { pct, type Ctx, type Skill } from './types.ts';
+import { pct, pyRound, pyRound1, type Ctx, type Skill } from './types.ts';
 
 export interface BRow { date: string; sp: number; raw: number; ma200: number; ma8: number; trend: number; bearish: boolean; peak: boolean; trough: boolean; troughBelow04: boolean }
 export const toRow = (r: Record<string, string>): BRow => ({ date: r.Date, sp: +r['S&P500_Price'], raw: +r.Breadth_Index_Raw, ma200: +r.Breadth_Index_200MA, ma8: +r.Breadth_Index_8MA, trend: +r.Breadth_200MA_Trend, bearish: r.Bearish_Signal === 'True', peak: r.Is_Peak === 'True', trough: r.Is_Trough === 'True', troughBelow04: r.Is_Trough_8MA_Below_04 === 'True' });
 export interface BComp { score: number; available: boolean; signal: string }
 const clamp = (x: number) => Math.max(0, Math.min(100, x));
-const pyRound = (x: number) => { const f = Math.floor(x), d = x - f; return d === 0.5 ? (f % 2 === 0 ? f : f + 1) : Math.round(x) };   // Python round(): half to even
-const pyRound1 = (x: number) => pyRound(x * 10) / 10;
 
 export function levelTrend(rows: BRow[]): BComp {
   if (!rows.length) return { score: 50, available: false, signal: 'no data' };

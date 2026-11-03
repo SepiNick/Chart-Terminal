@@ -104,13 +104,13 @@ export function powerTrend(h: D[]) {
 /** Post-FTD health and the 0–100 quality score (the original's points), on the full chronological history. */
 export function quality(m: ReturnType<typeof marketState>, sp: D[], nq: D[]) {
   const src = m.sp500.ftd ? { f: m.sp500.ftd, h: sp } : m.nasdaq.ftd ? { f: m.nasdaq.ftd, h: nq } : null;
-  if (!src) return { score: 0, exposure: '0–25%', lines: ['No follow-through day'], invalidated: false };
+  if (!src) return { score: 0, exposure: '0–25%', lines: ['No follow-through day'], invalidated: false, distCount: 0 };
   const f = src.f, idx = src.h.findIndex(x => x.date === f.date), lines: string[] = [];
   let s = f.day <= 7 ? 60 : f.day <= 10 ? 50 : 40; lines.push(`Day ${f.day} FTD: +${s}`);
   const g = f.gain >= 2 ? 15 : f.gain >= 1.5 ? 10 : f.gain >= 1.25 ? 5 : 0; s += g; lines.push(`${f.gain.toFixed(2)}% gain: +${g}`);
   if (f.volumeAboveAvg) { s += 10; lines.push('Volume above the 50-day average: +10') }
   if (m.dual) { s += 15; lines.push('Both indexes confirmed: +15') }
-  let invalidated = false;
+  let invalidated = false, distCount = 0;
   if (idx >= 0) {
     const dist: number[] = [];
     for (let i = idx + 1; i < Math.min(idx + 6, src.h.length); i++) { const c = src.h[i], p = src.h[i - 1]; if (p.close > 0 && p.volume > 0 && ((c.close - p.close) / p.close) * 100 <= -0.2 && c.volume > p.volume) dist.push(i - idx) }
@@ -118,10 +118,10 @@ export function quality(m: ReturnType<typeof marketState>, sp: D[], nq: D[]) {
     let adj = monitored === 0 ? 0 : !dist.length ? 10 : dist[0] <= 2 ? -30 : dist[0] === 3 ? -15 : -5;
     if (dist.length >= 2) adj -= 20;
     s += adj; lines.push(`Post-FTD (${monitored} days, ${dist.length} distribution): ${adj >= 0 ? '+' : ''}${adj}`);
-    invalidated = src.h.slice(idx + 1).some(x => x.close < src.h[idx].low);
+    invalidated = src.h.slice(idx + 1).some(x => x.close < src.h[idx].low); distCount = dist.length;
   }
   s = Math.max(0, Math.min(100, s));
-  return { score: s, exposure: s >= 80 ? '75–100%' : s >= 60 ? '50–75%' : s >= 40 ? '25–50%' : '0–25%', lines, invalidated };
+  return { score: s, exposure: s >= 80 ? '75–100%' : s >= 60 ? '50–75%' : s >= 40 ? '25–50%' : '0–25%', lines, invalidated, distCount };
 }
 
 const toD = (b: { time: number; high: number; low: number; close: number; volume: number }[]): D[] => b.map(x => ({ date: new Date(x.time * 1000).toISOString().slice(0, 10), high: x.high, low: x.low, close: x.close, volume: x.volume }));
