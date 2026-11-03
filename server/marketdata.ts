@@ -112,3 +112,20 @@ route('GET', '/api/uptrend', async () => {
   const [ts, sectors] = await Promise.all([upCsv('uptrend_ratio_timeseries.csv'), upCsv('sector_summary.csv')]);
   return { all: ts.filter(r => r.worksheet === 'all'), sectors };
 });
+// 10Y and 2Y Treasury yields from FRED's public CSV (no key), oldest first, for the macro regime skill's yield curve.
+export const treasury = () => cached('fred|treasury', 6 * 60 * 60_000, async () => {
+  const r = await deps.fetch('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10,DGS2');
+  if (!r.ok) throw new HttpError(502, `FRED: ${r.status}`);
+  return parseCsv(await r.text()).filter(x => x.observation_date >= '2015' && +x.DGS10 > -50 && +x.DGS2 > -50 && x.DGS10 !== '' && x.DGS2 !== '').map(x => ({ date: x.observation_date, year10: +x.DGS10, year2: +x.DGS2 }));
+});
+route('GET', '/api/treasury', () => treasury());
+// Every US-listed stock with sector, industry, market cap, price and volume from Nasdaq's public screener (no key):
+// the universe for the stock skills (downtrends, scanners, fundamentals).
+export interface UsStock { sym: string; name: string; sector: string; industry: string; cap: number; price: number; volume: number; chg: number; country: string }
+const usd = (s: string) => Number(String(s ?? '').replace(/[$,%]/g, ''));
+export const usStocks = () => cached('nasdaq|stocks', 6 * 60 * 60_000, async () => {
+  const j = await getJson('https://api.nasdaq.com/api/screener/stocks?tableonly=true&download=true') as { data?: { rows?: Record<string, string>[] } };
+  const rows = j.data?.rows; if (!rows?.length) throw new HttpError(502, 'Nasdaq screener returned no rows');
+  return rows.filter(r => /^[A-Z]{1,5}$/.test(r.symbol)).map((r): UsStock => ({ sym: r.symbol, name: r.name.replace(/ (Common Stock|Class [A-C] Common Stock|Ordinary Shares).*$/, ''), sector: r.sector || 'Unknown', industry: r.industry || '', cap: usd(r.marketCap) || 0, price: usd(r.lastsale), volume: usd(r.volume) || 0, chg: usd(r.pctchange), country: r.country })).sort((a, b) => b.cap - a.cap);
+});
+route('GET', '/api/us-stocks', () => usStocks());

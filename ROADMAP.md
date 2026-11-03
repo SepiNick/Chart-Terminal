@@ -411,8 +411,19 @@
     - **ftd-detector:** روز follow-through روی S&P 500 و Nasdaq، با امتیاز کیفیت.
     - **ibd-distribution-day-monitor:** روزهای توزیع روی QQQ و SPY، با سیاست exposure برای TQQQ و QQQ.
     - هر چهار با کد اصلی یکی‌اند: uptrend در چهار نقطه از تاریخچه، FTD در هر ۹ ترکیب، و روزهای توزیع در شش تاریخچه. روی داده‌ی زنده هم اجرا شدند.
+  - **بقیه‌ی دسته‌ی B (2026-11-03)، دسته‌ی B کامل شد:**
+    - **market-top-detector:** امتیاز ۰ تا ۱۰۰ خطر سقف برای ۲ تا ۸ هفته‌ی آینده، از شش جزء: روزهای توزیع، سلامت ETFهای پیشرو، چرخش به بخش‌های دفاعی، واگرایی breadth، تکنیکال شاخص‌ها و سنتیمنت (VIX و ساختار زمانی VIX/VIX3M). breadth ۲۰۰ و ۵۰ روزه از CSV عمومی TraderMonty می‌آید. put/call و margin debt ورودی اختیاری‌اند.
+    - **macro-regime-detector:** رژیم ساختاری ۱ تا ۲ ساله از شش نسبت ماهانه (RSP/SPY، 10Y−2Y، HYG/LQD، IWM/SPY، SPY/TLT همراه با همبستگی سهام و اوراق، XLY/XLP). یکی از پنج رژیم Concentration، Broadening، Contraction، Inflationary یا Transitional را می‌دهد. بازده اوراق ۱۰ و ۲ ساله از CSV عمومی FRED می‌آید (`/api/treasury`).
+    - **downtrend-duration-analyzer:** مدت اصلاح‌ها از سقف تا کف در بزرگ‌ترین سهام آمریکا، به تفکیک بخش و اندازه‌ی شرکت، با میانه و صدک‌ها.
+    - **exposure-coach:** همه‌ی اسکیل‌های رژیم را در یک وضعیت جمع می‌کند: سقف exposure، یکی از NEW ENTRY، REDUCE ONLY یا CASH PRIORITY، جهت رشد یا ارزش، و گستردگی مشارکت.
+    - **stanley-druckenmiller-investment:** conviction از ۰ تا ۱۰۰، الگوی Druckenmiller و ترکیب هدف سهام، اوراق، جایگزین‌ها و نقد، به‌علاوه‌ی سقف اندازه‌ی پوزیشن.
+    - **جهان سهام آمریکا (`/api/us-stocks`):** همه‌ی سهام فهرست‌شده با بخش، صنعت، ارزش بازار، قیمت و حجم، از screener عمومی Nasdaq و بدون کلید. پایه‌ی اسکیل‌های سهام است.
+    - **مقایسه با اصل:** هر پنج با کد اصلی یکی‌اند. market-top در ۱۲ بازار ساختگی، macro در ۱۶ بازار و ۳۰۰ ترکیب جهت، downtrend در ۱۰ مسیر، exposure در ۴۰۰ ترکیب ورودی و druckenmiller در ۴۰۰ ترکیب سیگنال. گرد کردن حالا دقیقاً مثل `round()` پایتون است. روی داده‌ی زنده هم اجرا شدند و هر کدام حدود ۲ ثانیه طول کشید.
+    - **محدودیت‌ها:**
+      - تم‌ها و جریان نهادی هنوز منبعی داخل برنامه ندارند، پس در exposure-coach و druckenmiller «مفقود» حساب می‌شوند.
+      - تاریخچه‌ی روزانه حدود ۴ سال است، نه ۵ سال.
+      - قیمت‌های Yahoo فقط برای split تعدیل شده‌اند، نه برای سود نقدی.
 - ⏳ **مانده:**
-  - **دسته‌ی B (رژیم و breadth بازار):** market-top، macro-regime، downtrend-duration، exposure-coach و druckenmiller.
   - **دسته‌ی C (اسکنرهای قیمت):** vcp، پنج اسکیل stockbee، parabolic-short، pair-trade و finviz.
   - **دسته‌ی D (بنیادی، از SEC EDGAR):** analyst، copycat و 13F، institutional-flow، canslim، pead، earnings، dividend و kanchi.
   - **در آخر:** us-undervalued-growth و pelosi (خواندن PDF).

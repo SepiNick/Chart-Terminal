@@ -13,7 +13,7 @@ const SPECIAL: FxMarket[] = [
   ['USOIL', 'CL=F', 'WTI crude oil', 'energy'], ['UKOIL', 'BZ=F', 'Brent crude oil', 'energy'], ['NATGAS', 'NG=F', 'Natural gas', 'energy'], ['GASOLINE', 'RB=F', 'Gasoline', 'energy'],
   ['US500', '^GSPC', 'S&P 500', 'index'], ['NAS100', '^NDX', 'Nasdaq 100', 'index'], ['US30', '^DJI', 'Dow Jones 30', 'index'], ['US2000', '^RUT', 'Russell 2000', 'index'],
   ['GER40', '^GDAXI', 'DAX 40', 'index'], ['UK100', '^FTSE', 'FTSE 100', 'index'], ['FRA40', '^FCHI', 'CAC 40', 'index'], ['EU50', '^STOXX50E', 'Euro Stoxx 50', 'index'],
-  ['JPN225', '^N225', 'Nikkei 225', 'index'], ['HK50', '^HSI', 'Hang Seng', 'index'], ['AUS200', '^AXJO', 'ASX 200', 'index'], ['VIX', '^VIX', 'Volatility index', 'index'], ['DXY', 'DX-Y.NYB', 'US dollar index', 'index'],
+  ['JPN225', '^N225', 'Nikkei 225', 'index'], ['HK50', '^HSI', 'Hang Seng', 'index'], ['AUS200', '^AXJO', 'ASX 200', 'index'], ['VIX', '^VIX', 'Volatility index', 'index'], ['VIX3M', '^VIX3M', '3-month volatility index', 'index'], ['DXY', 'DX-Y.NYB', 'US dollar index', 'index'],
   ['WHEAT', 'ZW=F', 'Wheat', 'commodity'], ['CORN', 'ZC=F', 'Corn', 'commodity'], ['SOYBEAN', 'ZS=F', 'Soybeans', 'commodity'], ['COFFEE', 'KC=F', 'Coffee', 'commodity'], ['SUGAR', 'SB=F', 'Sugar', 'commodity'], ['COCOA', 'CC=F', 'Cocoa', 'commodity'],
   ['US10Y', '^TNX', 'US 10Y yield', 'index'],
 ].map(([sym, yahoo, name, type]) => ({ sym, yahoo, name, type }) as FxMarket);

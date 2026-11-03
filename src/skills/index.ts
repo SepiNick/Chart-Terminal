@@ -14,5 +14,10 @@ import { breadthSkill } from './breadth.ts';
 import { sectorSkill, uptrendSkill } from './uptrend.ts';
 import { ftdSkill } from './ftd.ts';
 import { distributionSkill } from './distribution.ts';
+import { marketTopSkill } from './top.ts';
+import { macroSkill } from './macro.ts';
+import { downtrendSkill } from './downtrend.ts';
+import { exposureSkill } from './exposure.ts';
+import { druckenmillerSkill } from './druckenmiller.ts';
 
-export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill, uptrendSkill, sectorSkill, ftdSkill, distributionSkill];
+export const SKILLS: Skill[] = [positionSizer, riskSkill, circuitBreakerSkill, preTradeGateSkill, budgetSkill, rebalanceSkill, weeklyDigestSkill, coachSkill, optionsSkill, futuresSizer, taxSkill, breakoutSkill, contrarianSkill, residualSkill, cryptoRegimeSkill, breadthSkill, uptrendSkill, sectorSkill, ftdSkill, distributionSkill, marketTopSkill, macroSkill, downtrendSkill, exposureSkill, druckenmillerSkill];
