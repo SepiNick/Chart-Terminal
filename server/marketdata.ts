@@ -105,3 +105,10 @@ route('GET', '/api/breadth', async () => {
   const [rows, summary] = await Promise.all([csvOf('market_breadth_data.csv'), csvOf('market_breadth_summary.csv')]);
   return { rows, summary: Object.fromEntries(summary.map(r => [r.Metric, r.Value])) };
 });
+// Uptrend ratio dashboard (share of stocks in an uptrend, overall and per sector), for the uptrend and sector skills.
+const UPTREND = 'https://raw.githubusercontent.com/tradermonty/uptrend-dashboard/main/data/';
+const upCsv = (file: string) => cached(`up|${file}`, 60 * 60_000, async () => { const r = await deps.fetch(UPTREND + file); if (!r.ok) throw new HttpError(502, `${file}: ${r.status}`); return parseCsv(await r.text()) });
+route('GET', '/api/uptrend', async () => {
+  const [ts, sectors] = await Promise.all([upCsv('uptrend_ratio_timeseries.csv'), upCsv('sector_summary.csv')]);
+  return { all: ts.filter(r => r.worksheet === 'all'), sectors };
+});

@@ -42,3 +42,6 @@ export const num = (v: unknown, name: string, { min = -Infinity, max = Infinity,
 };
 export const money = (x: number) => (Number.isFinite(x) ? x.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '–');
 export const pct = (x: number, d = 2) => (Number.isFinite(x) ? `${x.toFixed(d)}%` : '–');
+/** Python's round(): halves go to the even neighbour (the original skills' scores use it). */
+export const pyRound = (x: number) => { const f = Math.floor(x); return x - f === 0.5 ? (f % 2 === 0 ? f : f + 1) : Math.round(x) };
+export const pyRound1 = (x: number) => pyRound(x * 10) / 10;
