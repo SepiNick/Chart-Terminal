@@ -406,8 +406,13 @@
   - **crypto-regime-analyzer:** شش جزء با وزن‌های اصلی. جزء دامیننس از ۳۱ روز بعد فعال می‌شود، چون سرور حالا روزی یک بار دامیننس BTC را ثبت می‌کند.
   - **market-breadth-analyzer:** CSV عمومی TraderMonty، با cache روی سرور.
   - هر دو با محاسبه‌گرهای اصلی روی همان داده یکی‌اند: ۹ امتیاز جزء کریپتو، و شش نقطه از تاریخچه‌ی breadth از «Critical» تا «Healthy».
+  - **اضافه‌شده در 2026-11-03:**
+    - **uptrend-analyzer و sector-analyst:** داشبورد عمومی Uptrend Ratio، شامل رتبه‌ی بخش‌ها و فاز چرخه‌ی اقتصادی.
+    - **ftd-detector:** روز follow-through روی S&P 500 و Nasdaq، با امتیاز کیفیت.
+    - **ibd-distribution-day-monitor:** روزهای توزیع روی QQQ و SPY، با سیاست exposure برای TQQQ و QQQ.
+    - هر چهار با کد اصلی یکی‌اند: uptrend در چهار نقطه از تاریخچه، FTD در هر ۹ ترکیب، و روزهای توزیع در شش تاریخچه. روی داده‌ی زنده هم اجرا شدند.
 - ⏳ **مانده:**
-  - **دسته‌ی B (رژیم و breadth بازار):** uptrend، sector، ftd، ibd-distribution، market-top، macro-regime، downtrend-duration، exposure-coach و druckenmiller.
+  - **دسته‌ی B (رژیم و breadth بازار):** market-top، macro-regime، downtrend-duration، exposure-coach و druckenmiller.
   - **دسته‌ی C (اسکنرهای قیمت):** vcp، پنج اسکیل stockbee، parabolic-short، pair-trade و finviz.
   - **دسته‌ی D (بنیادی، از SEC EDGAR):** analyst، copycat و 13F، institutional-flow، canslim، pead، earnings، dividend و kanchi.
   - **در آخر:** us-undervalued-growth و pelosi (خواندن PDF).
