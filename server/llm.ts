@@ -11,9 +11,10 @@ export function baseUrl(raw?: string | null) {
   const s = (raw || process.env.CT_LLM_URL || DEFAULTS[0]).trim().replace(/\/+$/, '');
   let u: URL; try { u = new URL(s) } catch { throw bad('Model URL is not a URL') }
   if (!/^https?:$/.test(u.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname) || u.username || u.password) throw bad('Only a model server on this computer (127.0.0.1 / localhost) is allowed');
-  const path = u.pathname.replace(/\/+$/, ''), env = process.env.CT_LLM_URL ? new URL(process.env.CT_LLM_URL).port : '';
+  const path = u.pathname.replace(/\/+$/, ''), port = (x: URL) => x.port || (x.protocol === 'https:' ? '443' : '80');
+  let envPort: string[] = []; try { if (process.env.CT_LLM_URL) envPort = [port(new URL(process.env.CT_LLM_URL))] } catch { /* ignored: a bad CT_LLM_URL just adds nothing */ }
   // Fixed ports and path: an override can't be used to probe other local services (databases, this server, dev tools).
-  if (path !== '/v1' || u.search || ![...DEFAULTS.map(d => new URL(d).port), env].includes(u.port)) throw bad('Model URL must be http://127.0.0.1:11434/v1 (Ollama), :1234/v1 (LM Studio) or the port in CT_LLM_URL');
+  if (path !== '/v1' || u.search || ![...DEFAULTS.map(d => port(new URL(d))), ...envPort].includes(port(u))) throw bad('Model URL must be http://127.0.0.1:11434/v1 (Ollama), :1234/v1 (LM Studio) or the port in CT_LLM_URL');
   return `${u.origin}${path}`;
 }
 async function call(url: string, init: RequestInit = {}, ms = 10_000) {
