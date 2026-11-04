@@ -10,3 +10,11 @@ desktop/build/
 mt5bridge/token.txt
 __pycache__/
 dist-lite/
+
+android/keystore.properties
+android/*.jks
+android/*.keystore
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/

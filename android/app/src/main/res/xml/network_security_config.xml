@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release: system CAs only. User-installed CAs are trusted in DEBUG builds only.
+     Cleartext is enabled at OS level because NSC cannot match IP ranges; MainActivity restricts
+     http:// (setup check, shouldInterceptRequest) and ws:// (injected guard) to 10/8, 172.16/12,
+     192.168/16 and localhost. Certificate validation is never disabled. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>
