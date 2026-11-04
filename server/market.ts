@@ -14,14 +14,16 @@ import * as cx from './ccxt.ts';
 import { fxMarkets, yahooBars, yahooDividends, yahooTicker } from './yahoo.ts';
 import { isPublic } from './core/mode.ts';
 import { limits } from './core/quota.ts';
+import { IRAN } from './iran/index.ts';
 
 // The MetaTrader bridge client is a private-server feature: a public server never loads it, and 'mt5' is just an unknown exchange there.
 const MT5 = isPublic ? null : await import('./mt5.ts');
 import { HttpError, bad, clients, onWs, onWsClose, route, type WsClient } from './core/http.ts';
 
-export const SYM_RE = /^[A-Z0-9_.]{1,40}$/, EX_RE = /^[a-z0-9]{2,30}$/;
+// SYM_RE also admits Persian letters and digits: Tehran Stock Exchange tickers.
+export const SYM_RE = /^[A-Z0-9_.\u0600-\u06FF]{1,40}$/, EX_RE = /^[a-z0-9]{2,30}$/;
 /** Sources served here rather than through CCXT: Yahoo ('fx') and the local MetaTrader 5 bridge ('mt5'). */
-const LOCAL = new Set(MT5 ? ['fx', 'mt5'] : ['fx']);
+const LOCAL = new Set([...(MT5 ? ['fx', 'mt5'] : ['fx']), ...Object.keys(IRAN)]);
 
 
 function params(u: URL) {
@@ -32,9 +34,10 @@ function params(u: URL) {
 const checkSymTf = (symbol: string, tf: string) => { if (!SYM_RE.test(symbol)) throw bad('Bad symbol'); if (!validTf(tf)) throw bad('Bad timeframe') };
 
 export async function bars(exchange: string, symbol: string, tf: string, until?: number, limit = 1000): Promise<{ bars: Bar[]; base: string }> {
-  const r = exchange === 'fx' ? await yahooBars(symbol, tf, until, limit) : exchange === 'mt5' ? await MT5!.mt5Ohlcv(symbol, tf, until, limit) : await cx.ohlcv(exchange, symbol, tf, until, limit);
+  const ir = IRAN[exchange];
+  const r = ir ? await ir.bars(symbol, tf, until, limit) : exchange === 'fx' ? await yahooBars(symbol, tf, until, limit) : exchange === 'mt5' ? await MT5!.mt5Ohlcv(symbol, tf, until, limit) : await cx.ohlcv(exchange, symbol, tf, until, limit);
   if (r.base === tf) return r;
-  const agg = aggregate(r.bars, tfSeconds(tf));
+  const agg = aggregate(r.bars, tfSeconds(tf), ir?.weekAnchor);
   return { bars: agg.length > 1 ? agg.slice(1) : agg, base: r.base };   // first bucket may be partial
 }
 
@@ -43,11 +46,12 @@ let exchangesCache: { id: string; name: string; ws: boolean }[] | null = null;
 async function marketRoute(u: URL): Promise<unknown> {
   switch (u.pathname) {
     case '/api/exchanges':
-      return (exchangesCache ??= [{ id: 'fx', name: 'Forex, metals, indices & stocks', ws: false }, ...(MT5 ? [{ id: 'mt5', name: 'MetaTrader 5 (local bridge, demo)', ws: false }] : []), ...cx.exchangeIds().map(id => ({ id, name: id, ws: false }))]);
+      return (exchangesCache ??= [{ id: 'fx', name: 'Forex, metals, indices & stocks', ws: false }, ...(MT5 ? [{ id: 'mt5', name: 'MetaTrader 5 (local bridge, demo)', ws: false }] : []), ...Object.values(IRAN).map(x => ({ id: x.id, name: x.name, ws: false })), ...cx.exchangeIds().map(id => ({ id, name: id, ws: false }))]);
     case '/api/markets': {
       const { exchange } = params(u);
       if (exchange === 'fx') return fxMarkets().map(m => ({ sym: m.sym, base: m.sym, quote: '', type: m.type, name: m.name }));
       if (MT5 && exchange === 'mt5') return MT5.mt5Markets();
+      if (IRAN[exchange]) return IRAN[exchange].markets();
       return (await cx.markets(exchange)).list.filter(m => m.active).map(({ sym, base, quote, type }) => ({ sym, base, quote, type }));
     }
     case '/api/bars': {
@@ -73,7 +77,7 @@ async function marketRoute(u: URL): Promise<unknown> {
     }
     case '/api/tickers': {
       const { exchange } = params(u);
-      return LOCAL.has(exchange) ? [] : cx.tickers(exchange);
+      return IRAN[exchange] ? (IRAN[exchange].tickers?.() ?? []) : LOCAL.has(exchange) ? [] : cx.tickers(exchange);
     }
   }
   throw new HttpError(404, 'Not found');
@@ -93,7 +97,7 @@ export function startFeed(exchange: string, symbol: string, tf: string, send: (b
   let cur = -1, parts = new Map<number, Bar>();
   // Aggregate base-timeframe candles into the requested timeframe (weeks anchored to Monday, like data.ts).
   const emitAgg = (b: Bar) => {
-    const anchor = sec % 604800 === 0 ? 345600 : 0, t = Math.floor((b.time - anchor) / sec) * sec + anchor;
+    const anchor = sec % 604800 === 0 ? (IRAN[exchange]?.weekAnchor ?? 345600) : 0, t = Math.floor((b.time - anchor) / sec) * sec + anchor;
     if (t !== cur) { cur = t; parts = new Map() }
     parts.set(b.time, b);
     const ps = [...parts.values()].sort((x, y) => x.time - y.time);
@@ -101,11 +105,11 @@ export function startFeed(exchange: string, symbol: string, tf: string, send: (b
   };
   if (LOCAL.has(exchange)) {
     // Neither Yahoo nor MT5 pushes prices here: poll (the local MT5 bridge often, Yahoo gently).
-    let alive = true;
-    const get = exchange === 'fx' ? yahooBars : MT5!.mt5Ohlcv, every = exchange === 'fx' ? 15000 : 2000;
+    let alive = true, first = true;
+    const ir = IRAN[exchange], get = ir ? ir.bars : exchange === 'fx' ? yahooBars : MT5!.mt5Ohlcv, every = ir ? ir.every : exchange === 'fx' ? 15000 : 2000;
     (async () => {
       while (alive) {
-        try { const r = await get(symbol, tf === '1M' ? '1M' : tf, undefined, 3); if (alive) r.base === tf ? r.bars.slice(-2).forEach(send) : r.bars.slice(-Math.ceil(sec / tfSeconds(r.base)) - 1).forEach(emitAgg) } catch {}
+        try { const r = await get(symbol, tf === '1M' ? '1M' : tf, undefined, 3); if (alive) r.base === tf ? r.bars.slice(-2).forEach(send) : r.bars.slice(-Math.ceil(sec / tfSeconds(r.base)) - 1).forEach(emitAgg); first = false } catch { if (first && ir) { alive = false; onFail?.(); return } }
         await new Promise(r => setTimeout(r, every));
       }
     })();

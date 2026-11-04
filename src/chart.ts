@@ -8,6 +8,7 @@ import { INDICATORS, type Series } from './indicators.ts';
 import { DrawingLayer, type Drawing } from './drawings.ts';
 import { createMainSeries, toSeriesData, transformBars, isPriceBased, typeDefaults, CHART_TYPES, type ChartType, type TypeOpts } from './charttypes.ts';
 import { isExpr, parse, symbols, combine } from './symmath.ts';
+import { JALALI_MONTHS, JALALI_WEEKDAYS, jalaliIn } from './jalali.ts';
 import type { Settings } from './settings.ts';
 import type { Side } from './trading.ts';
 import type { Broker, BrokerOrder, OrderPatch } from './broker/types.ts';
@@ -67,19 +68,25 @@ function timeFormatters(s: Settings) {
   const opts: Intl.DateTimeFormatOptions = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'short', hourCycle: 'h23' };
   let f: Intl.DateTimeFormat;
   try { f = new Intl.DateTimeFormat('en-GB', { timeZone: s.tz, ...opts }) } catch { f = new Intl.DateTimeFormat('en-GB', opts) }
-  const parts = (t: number) => Object.fromEntries(f.formatToParts(t * 1000).map(p => [p.type, p.value])) as Record<string, string>;
+  const jal = s.calendar === 'jalali', months = jal ? JALALI_MONTHS : MONTHS;
+  const parts = (t: number) => {
+    const p = Object.fromEntries(f.formatToParts(t * 1000).map(x => [x.type, x.value])) as Record<string, string>;
+    if (jal) { const j = jalaliIn(t, s.tz); p['year'] = String(j.y); p['month'] = String(j.m).padStart(2, '0'); p['day'] = String(j.d).padStart(2, '0'); p['weekday'] = JALALI_WEEKDAYS[j.wd] }
+    return p;
+  };
   const time = (p: Record<string, string>, sec = false) => {
     let h = +p.hour; const ap = s.hour12 ? (h >= 12 ? ' PM' : ' AM') : '';
     if (s.hour12) h = h % 12 || 12;
     return `${String(h).padStart(2, '0')}:${p.minute}${sec ? ':' + p.second : ''}${ap}`;
   };
   const date = (p: Record<string, string>) => {
+    if (jal) return `${p.year}/${p.month}/${p.day}`;
     const mon = MONTHS[+p.month - 1], yy = p.year.slice(2);
     return s.dateFormat === 'yyyy-MM-dd' ? `${p.year}-${p.month}-${p.day}` : s.dateFormat === 'MM/dd/yy' ? `${p.month}/${p.day}/${yy}` : s.dateFormat === 'dd.MM.yyyy' ? `${p.day}.${p.month}.${p.year}` : `${p.day} ${mon} ${yy}`;
   };
   return {
     full: (t: number, tf: string) => { const p = parts(t), sec = tfSeconds(tf); return `${s.dayOfWeek ? p.weekday + ' ' : ''}${date(p)}${sec < 86400 ? '  ' + time(p, sec < 60) : ''}` },
-    tick: (t: number, type: number) => { const p = parts(t); return [p.year, MONTHS[+p.month - 1], String(+p.day), time(p), time(p, true)][type] },
+    tick: (t: number, type: number) => { const p = parts(t); return [p.year, months[+p.month - 1], String(+p.day), time(p), time(p, true)][type] },
   };
 }
 

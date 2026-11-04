@@ -39,6 +39,7 @@ import { initSkills, renderSkills } from './skills/ui.ts';
 import { initAi, refreshAi } from './ai/panel.ts';
 import { registerServiceWorker } from './push.ts';
 import { rMultiple } from './journal.ts';
+import { initI18n } from './i18n.ts';
 
 // ---------- layouts (grid arrangements) ----------
 interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
@@ -419,7 +420,7 @@ wireLeftToolbar(drawHost);
 // ---------- top bar ----------
 function setSymbol(raw: string) {
   const s = raw.trim().toUpperCase().replace(/\s+/g, '');
-  try { if (isExpr(s)) parse(s); else if (!/^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/.test(s)) throw Error('Invalid symbol') } catch (e) { return toast((e as Error).message) }
+  try { if (isExpr(s)) parse(s); else if (!/^([A-Z0-9]+:)?[A-Z0-9_.\u0600-\u06FF]{2,40}$/.test(s)) throw Error('Invalid symbol') } catch (e) { return toast((e as Error).message) }
   st.recent = [s, ...st.recent.filter(x => x !== s)].slice(0, 12); store.set('recentSymbols', st.recent);
   targets('symbol').forEach(p => applyCfg(p, { symbol: s }, 'symbol change'));
   const link = st.layout.panes[st.layout.active]?.link;
@@ -431,7 +432,7 @@ function setSymbol(raw: string) {
 var linkChannel = 'BroadcastChannel' in window ? new BroadcastChannel('ct-link') : null;   // eslint-disable-line no-var
 linkChannel?.addEventListener('message', e => {
   const { link, symbol } = (e.data ?? {}) as { link?: unknown; symbol?: unknown };
-  if (typeof link !== 'string' || typeof symbol !== 'string' || !/^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/.test(symbol)) return;
+  if (typeof link !== 'string' || typeof symbol !== 'string' || !/^([A-Z0-9]+:)?[A-Z0-9_.\u0600-\u06FF]{2,40}$/.test(symbol)) return;
   panes.forEach((p, i) => { if (st.layout.panes[i]?.link === link && p.cfg.symbol !== symbol) applyCfg(p, { symbol }, 'symbol change') });
 });
 function setTf(tf: string) { targets('tf').forEach(p => applyCfg(p, { tf }, 'interval change')) }
@@ -552,6 +553,7 @@ function shareShot(c: HTMLCanvasElement) {
   }, 'image/png');
 }
 function copyShot(c: HTMLCanvasElement) { c.toBlob(b => b && navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(() => toast('Chart image copied'), () => toast('Clipboard not available'))) }
+initI18n();
 $('#themeBtn').onclick = () => applySettings({ theme: st.settings.theme === 'dark' ? 'light' : 'dark', bgColor: '', gridColor: '', scaleTextColor: '', separatorColor: '' });
 
 // ---------- replay ----------
@@ -652,6 +654,8 @@ const styleOf = (type: string, color: string) => styleFor(TOOL_MAP.get(type)!, c
 // ---------- symbol search ----------
 let allSymbols: string[] = [];
 fetchSymbols().then(s => (allSymbols = s.sort())).catch(() => {});
+// Search tabs of the Iranian sources: Tehran bourse instrument kinds, tgju groups, Nobitex quote currencies.
+const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'] };
 let searchMode: 'symbol' | 'compare' = 'symbol', searchQuote = 'USDT', searchEx = store.get<string>('searchEx', 'binance');
 const marketCache = new Map<string, RemoteMarket[]>();
 let exchangesLoaded = false;
@@ -660,7 +664,7 @@ async function loadExchanges() {
   try {
     const ex = await fetchExchanges();
     exchangesLoaded = true;
-    $('#searchEx').innerHTML = '<option value="binance">Binance (direct)</option>' + ex.map(x => `<option value="${esc(x.id)}">${x.id === 'fx' ? 'Forex, metals, indices &amp; stocks' : esc(x.id)}</option>`).join('');
+    $('#searchEx').innerHTML = '<option value="binance">Binance (direct)</option>' + ex.map(x => `<option value="${esc(x.id)}">${esc(x.name && x.name !== x.id ? x.name : x.id)}</option>`).join('');
     $<HTMLSelectElement>('#searchEx').value = searchEx;
   } catch (e) { if (searchEx !== 'binance') toast((e as Error).message, 6000) }
 }
@@ -677,7 +681,7 @@ async function renderSearch() {
   const q = $<HTMLInputElement>('#searchIn').value.trim().toUpperCase();
   const row = (sym: string, desc: string, i: number) => `<div class="sl${i === 0 ? ' sel' : ''}" data-s="${esc(sym)}"><b>${esc(sym)}</b><span class="muted">${esc(desc)}</span></div>`;
   if (searchEx !== 'binance') {
-    const tabs = searchEx === 'fx' ? ['all', 'forex', 'metal', 'energy', 'index', 'commodity'] : ['all', 'spot', 'swap', 'future'];
+    const tabs = IR_TABS[searchEx] ?? (searchEx === 'fx' ? ['all', 'forex', 'metal', 'energy', 'index', 'commodity'] : ['all', 'spot', 'swap', 'future']);
     if (!tabs.includes(searchQuote)) searchQuote = 'all';
     $('#searchTabs').innerHTML = tabs.map(x => `<button type="button" data-q="${x}" class="${x === searchQuote ? 'on' : ''}">${x === 'swap' ? 'perpetual' : x}</button>`).join('');
     let ms = marketCache.get(searchEx);
@@ -686,12 +690,16 @@ async function renderSearch() {
       try { ms = await fetchMarkets(searchEx); marketCache.set(searchEx, ms) }
       catch (e) { $('#searchList').innerHTML = `<div class="dn sl-h">${esc((e as Error).message)}</div>`; return }
     }
-    const EX = searchEx.toUpperCase(), qq = q.replace('/', '_');
-    const list = ms.filter(m => (searchQuote === 'all' || m.type === searchQuote) && (!q || m.sym.includes(qq) || (m.name ?? '').toUpperCase().includes(q)))
+    const EX = searchEx.toUpperCase(), qq = (searchEx === 'tse' ? q.replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/\s+/g, '_') : q).replace('/', '_');
+    const list = ms.filter(m => (searchQuote === 'all' || m.type === searchQuote || m.quote === searchQuote) && (!q || m.sym.includes(qq) || (m.name ?? '').toUpperCase().includes(q)))
       .sort((a, b) => (a.sym.startsWith(qq) ? 0 : 1) - (b.sym.startsWith(qq) ? 0 : 1) || a.sym.length - b.sym.length).slice(0, 100);
     // FX also accepts any stock ticker typed in.
     const extra = searchEx === 'fx' && q && /^[A-Z0-9.]{1,12}$/.test(q) && !list.some(m => m.sym === q) ? row(`FX:${q}`, 'Stock or other Yahoo ticker', list.length ? 1 : 0) : '';
-    $('#searchList').innerHTML = (list.map((m, i) => row(`${EX}:${m.sym}`, `${m.name ?? `${m.base} / ${m.quote}`} · ${m.type} · ${searchEx}`, i)).join('') + extra) || '<div class="muted sl-h">No matches</div>';
+    // Tehran bourse: any ticker can be typed even when the market list could not be loaded.
+    const tseExtra = searchEx === 'tse' && qq && /^[\u0600-\u06FFA-Z0-9_.]{1,40}$/.test(qq) && !list.some(m => m.sym === qq) ? row(`TSE:${qq}`, 'Ticker as listed on TSETMC', list.length ? 1 : 0) : '';
+    // Nobitex: the Tether premium over the free-market dollar is a symbol expression (daily bars).
+    const premium = searchEx === 'nobitex' && (!q || 'PREMIUM'.includes(q) || 'TETHER'.includes(q) || 'USDT'.includes(q)) ? row('NOBITEX:USDTIRT/TGJU:USD-1', 'Tether premium over the free-market dollar · expression · use 1D', list.length ? 1 : 0) : '';
+    $('#searchList').innerHTML = (list.map((m, i) => row(`${EX}:${m.sym}`, `${m.name ?? `${m.base} / ${m.quote}`} · ${m.type} · ${searchEx}`, i)).join('') + extra + tseExtra + premium) || '<div class="muted sl-h">No matches</div>';
     return;
   }
   const quotes = ['USDT', 'USDC', 'FDUSD', 'BTC', 'ETH', 'TRY', 'EUR'];
