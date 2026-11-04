@@ -78,6 +78,18 @@ def lots(s, units):
     return min(v, s.volume_max)
 
 
+def csize(sym):
+    """Contract size of a symbol, 1 when the terminal no longer knows it (an old deal in the history of a delisted symbol)."""
+    s = mt5.symbol_info(sym)
+    return s.trade_contract_size if s else 1
+
+
+def filling(s):
+    """Brokers allow different fill policies (symbol.filling_mode bit 1 = FOK, bit 2 = IOC); a wrong one is rejected (10030)."""
+    m = getattr(s, 'filling_mode', 0) or 0
+    return mt5.ORDER_FILLING_IOC if m & 2 else mt5.ORDER_FILLING_FOK if m & 1 else mt5.ORDER_FILLING_RETURN
+
+
 KIND = {mt5.ORDER_TYPE_BUY: ('buy', 'market'), mt5.ORDER_TYPE_SELL: ('sell', 'market'), mt5.ORDER_TYPE_BUY_LIMIT: ('buy', 'limit'),
         mt5.ORDER_TYPE_SELL_LIMIT: ('sell', 'limit'), mt5.ORDER_TYPE_BUY_STOP: ('buy', 'stop'), mt5.ORDER_TYPE_SELL_STOP: ('sell', 'stop'),
         mt5.ORDER_TYPE_BUY_STOP_LIMIT: ('buy', 'stop_limit'), mt5.ORDER_TYPE_SELL_STOP_LIMIT: ('sell', 'stop_limit')}
@@ -85,8 +97,7 @@ STATUS = {mt5.ORDER_STATE_FILLED: 'filled', mt5.ORDER_STATE_CANCELED: 'canceled'
 
 
 def order_out(o, history=False):
-    s = mt5.symbol_info(o.symbol)
-    cs = s.trade_contract_size if s else 1
+    cs = csize(o.symbol)
     side, kind = KIND.get(o.type, ('buy', 'market'))
     stop = kind in ('stop', 'stop_limit')
     filled = (o.volume_initial - o.volume_current) * cs
@@ -122,7 +133,7 @@ def place(b):
     if kind == 'market':
         t = mt5.symbol_info_tick(sym)
         req = {'action': mt5.TRADE_ACTION_DEAL, 'type': mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL, 'price': t.ask if buy else t.bid,
-               'deviation': 20, 'type_filling': mt5.ORDER_FILLING_IOC}
+               'deviation': 20, 'type_filling': filling(s)}
     else:
         types = {'limit': (mt5.ORDER_TYPE_BUY_LIMIT, mt5.ORDER_TYPE_SELL_LIMIT), 'stop': (mt5.ORDER_TYPE_BUY_STOP, mt5.ORDER_TYPE_SELL_STOP),
                  'stop_limit': (mt5.ORDER_TYPE_BUY_STOP_LIMIT, mt5.ORDER_TYPE_SELL_STOP_LIMIT)}
@@ -164,7 +175,7 @@ def get(path, q, authed):
     if path == '/positions':
         out = []
         for p in mt5.positions_get() or []:
-            cs = mt5.symbol_info(p.symbol).trade_contract_size
+            cs = csize(p.symbol)
             out.append({'sym': p.symbol, 'qty': p.volume * cs * (1 if p.type == mt5.POSITION_TYPE_BUY else -1), 'entry': p.price_open, 'upnl': p.profit, 'mark': p.price_current})
         return out
     if path == '/orders':
@@ -184,7 +195,7 @@ def get(path, q, authed):
         for d in mt5.history_deals_get(since, int(time.time()) + 60) or []:
             if d.type not in (mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL) or not d.symbol:
                 continue
-            cs = mt5.symbol_info(d.symbol).trade_contract_size
+            cs = csize(d.symbol)
             out.append({'id': str(d.ticket), 'orderId': str(d.order), 'sym': d.symbol, 'side': 'buy' if d.type == mt5.DEAL_TYPE_BUY else 'sell',
                         'qty': d.volume * cs, 'price': d.price, 'fee': -(d.commission + d.fee), 'realized': d.profit + d.swap, 'ts': d.time_msc})
         return out[-100:]
@@ -252,4 +263,7 @@ if __name__ == '__main__':
     a = mt5.account_info()
     print(f'MT5 bridge on http://{HOST}:{PORT} — account {a.login if a else "?"} on {a.server if a else "?"} ({"DEMO" if a and a.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO else "NOT demo: trading refused"})')
     print(f'Token (use it as the API key of the MT5 account in the app): {TOKEN}')
-    HTTPServer((HOST, PORT), Handler).serve_forever()
+    try:
+        HTTPServer((HOST, PORT), Handler).serve_forever()
+    finally:
+        mt5.shutdown()

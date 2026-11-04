@@ -86,6 +86,16 @@ class BridgeSafety(unittest.TestCase):
         with self.assertRaisesRegex(bridge.Refused, 'no opposite position'):
             bridge.place({'sym': 'EURUSDM', 'side': 'buy', 'kind': 'limit', 'price': 1.09, 'qty': 1000, 'reduceOnly': True})
 
+    def test_fill_policy_follows_the_symbol(self):
+        for mode, want in ((2, mt5.ORDER_FILLING_IOC), (3, mt5.ORDER_FILLING_IOC), (1, mt5.ORDER_FILLING_FOK), (0, mt5.ORDER_FILLING_RETURN)):
+            mt5.syms = {'EURUSDm': NS(**{**EURUSD.__dict__, 'filling_mode': mode})}
+            bridge.place({'sym': 'EURUSDM', 'side': 'buy', 'kind': 'market', 'qty': 1000})
+            self.assertEqual(mt5.sent[-1]['type_filling'], want, mode)
+
+    def test_unknown_symbol_in_positions_does_not_crash(self):
+        mt5.pos = [NS(symbol='GONE', volume=0.1, type=mt5.POSITION_TYPE_BUY, price_open=1, profit=0, price_current=1)]
+        self.assertEqual(bridge.get('/positions', {}, True)[0]['qty'], 0.1)
+
 
 if __name__ == '__main__':
     unittest.main()
