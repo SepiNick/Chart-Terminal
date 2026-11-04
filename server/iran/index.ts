@@ -4,7 +4,7 @@
 import type { Bar } from '../../src/data.ts';
 import { isPublic } from '../core/mode.ts';
 import { nobitexBars, nobitexMarkets, nobitexTickers } from './nobitex.ts';
-import { tgjuBars, tgjuMarkets } from './tgju.ts';
+import { tgjuBars, tgjuMarkets, tgjuTickers } from './tgju.ts';
 import { tseBars, tseMarkets, tseTickers } from './tse.ts';
 import { SATURDAY } from './util.ts';
 
@@ -23,7 +23,7 @@ export interface IranSource {
 const MONDAY = 345600;
 const ALL: IranSource[] = [
   { id: 'nobitex', name: 'Nobitex (Toman and Tether markets)', bars: nobitexBars, markets: nobitexMarkets, tickers: nobitexTickers, every: 5_000, weekAnchor: MONDAY },
-  { id: 'tgju', name: 'Dollar, gold and coins (Iran free market)', bars: tgjuBars, markets: tgjuMarkets, every: 60_000, weekAnchor: SATURDAY },
+  { id: 'tgju', name: 'Dollar, gold and coins (Iran free market)', bars: tgjuBars, markets: tgjuMarkets, tickers: tgjuTickers, every: 60_000, weekAnchor: SATURDAY },
   { id: 'tse', name: 'Tehran Stock Exchange: stocks, funds, bonds, indices', bars: tseBars, markets: tseMarkets, tickers: tseTickers, every: 15_000, weekAnchor: SATURDAY },
 ];
 export const IRAN: Record<string, IranSource> = isPublic && process.env['CT_IRAN_PUBLIC'] !== '1' ? {} : Object.fromEntries(ALL.map(s => [s.id, s]));

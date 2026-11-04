@@ -158,7 +158,7 @@ function crypto(t: JTrade) {
 function custom(t: JTrade) {
   const fs = journal().fields ?? [];
   return `<div class="jw-fields">${fs.map(f => {
-    const val = t.custom?.[f.id], name = `f.${f.id}`;
+    const val = t.custom?.[f.id], name = esc(`f.${f.id}`);   // ids come from a backup or the server too
     const input = f.type === 'checkbox' ? `<label class="jw-switch"><input type="checkbox" name="${name}" ${val ? 'checked' : ''}> ${esc(f.label)}</label>`
       : f.type === 'select' ? `<select name="${name}"><option value="">—</option>${(f.options ?? []).map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
       : inp(name, val, f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text');

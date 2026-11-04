@@ -39,3 +39,17 @@ test('markets list carries Persian names and types', () => {
   assert.ok(m.some(x => x.sym === 'SEKKEH' && x.type === 'coin'));
   assert.equal(m.find(x => x.sym === 'ONS')!.quote, 'USD');
 });
+
+test('tickers: latest price and day change for every item; one failing item does not hide the rest; all failing throws', async () => {
+  let n = 0;
+  deps.fetch = async url => { n++; if (url.includes('/geram18?')) throw Error('down'); return new Response(JSON.stringify({ data: rows })) };
+  const t = await G.tgjuTickers();
+  assert.equal(t.length, Object.keys(G.TGJU_ITEMS).length - 1);
+  const usd = t.find(x => x.sym === 'USD')!;
+  assert.equal(usd.last, 165500);
+  assert.ok(Math.abs(usd.change - ((165500 - 165000) / 165000) * 100) < 1e-9);
+  assert.equal(t.find(x => x.sym === 'ONS')!.last, 1_655_000, 'dollar-quoted items are not divided');
+  clearCache();
+  deps.fetch = async () => { throw Error('blocked') };
+  await assert.rejects(G.tgjuTickers(), /blocked/);
+});

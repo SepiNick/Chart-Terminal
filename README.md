@@ -8,6 +8,9 @@ npm run server  # سرور داده روی 127.0.0.1:8787 (برای صرافی�
 npm run dev     # http://localhost:5173
 npm test        # تست‌های موتور معامله
 npm run build
+npm run check:ir    # بررسی زنده‌ی منبع‌های ایرانی (نوبیتکس، tgju، بورس)
+npm run bench       # زمان و حافظه‌ی مسیرهای سنگین
+npm run audit:html  # رشته‌های escape‌نشده در قالب‌های HTML
 ```
 
 | فایل | کار |
