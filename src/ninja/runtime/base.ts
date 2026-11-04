@@ -42,11 +42,11 @@ export const setEngine = (e: Engine | null) => { const p = ENG; ENG = e; return 
 export const isSer = (x: unknown) => x instanceof NtSeries || x instanceof NinjaScriptBase;
 export const toSeries = (x: any): NtSeries => (x instanceof NinjaScriptBase ? x.Values[0] ?? x.Input : x);
 /** Value of a series (barsAgo) or a constant. */
-export const val = (x: any, k: number): number => (typeof x === 'number' ? x : toSeries(x).get(k));
+const val = (x: any, k: number): number => (typeof x === 'number' ? x : toSeries(x).get(k));
 const argKey = (x: any): string => x instanceof NtSeries ? 's' + x.id : x instanceof NinjaScriptBase ? 's' + toSeries(x).id
   : x instanceof NtDateTime ? 'd' + x.ms : typeof x === 'object' && x ? JSON.stringify(x) ?? String(x) : String(x);
 
-export class Plot {
+class Plot {
   Name: string; Brush: SolidColorBrush; Width: number; PlotStyle: string; DashStyleHelper: string; Stroke: Stroke; Min = -Infinity; Max = Infinity;
   constructor(st: Stroke, style: string, name: string) {
     this.Stroke = st; this.Brush = st.Brush; this.Width = st.Width; this.PlotStyle = style; this.DashStyleHelper = st.DashStyleHelper; this.Name = name;

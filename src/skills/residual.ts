@@ -18,7 +18,7 @@ function inverse(m: number[][]): number[][] {
 const mul = (a: number[][], b: number[][]) => a.map(r => b[0].map((_, j) => r.reduce((s, x, k) => s + x * b[k][j], 0)));
 const mean = (x: number[]) => x.reduce((s, v) => s + v, 0) / x.length;
 const sd = (x: number[]) => { const m = mean(x); return Math.sqrt(x.reduce((s, v) => s + (v - m) ** 2, 0) / (x.length - 1)) };
-export const hacLags = (n: number) => Math.max(0, Math.floor(4 * (n / 100) ** (2 / 9)));
+const hacLags = (n: number) => Math.max(0, Math.floor(4 * (n / 100) ** (2 / 9)));
 
 /** Intercept OLS with Newey–West covariance (small-sample correction n/(n−k)), like the original fit_regression. */
 export function fit(y: number[], xs: number[][], lags?: number) {
@@ -36,7 +36,7 @@ export function fit(y: number[], xs: number[][], lags?: number) {
   return { alpha: beta[0], betas: beta.slice(1), t: se.map((s, i) => (s ? beta[i] / s : null)), r2, residVol: sd(res), lags: L, n };
 }
 
-export const THRESH = { r2Explained: 0.75, weakEdge: 0.5, edgeMin: 0.75, tMin: 2, rollingPos: 0.6, minWindows: 12 };
+const THRESH = { r2Explained: 0.75, weakEdge: 0.5, edgeMin: 0.75, tMin: 2, rollingPos: 0.6, minWindows: 12 };
 export function residualEdge(y: number[], xs: number[][], af = 252, window = 63, minObs = 60) {
   const effMin = Math.max(minObs, 10 * (xs.length + 1));
   if (y.length < effMin) return { status: 'INSUFFICIENT_EVIDENCE' as const, reasons: [`${y.length} observations, ${effMin} needed`] };

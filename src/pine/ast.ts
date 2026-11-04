@@ -2,7 +2,7 @@
 // Every node has a unique numeric `id` (stable per parse) — the interpreter uses Call ids as call-site identity
 // for per-call-site state (ta.* history, plot objects, user-function locals).
 
-export interface Pos { id: number; line: number; col: number }   // line/col are 1-based
+interface Pos { id: number; line: number; col: number }   // line/col are 1-based
 
 export type Expr =
   | (Pos & { kind: 'Num'; value: number })

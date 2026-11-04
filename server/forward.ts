@@ -25,12 +25,12 @@ migration('forward/1', `
     t INTEGER NOT NULL, side TEXT NOT NULL, qty REAL NOT NULL, px REAL NOT NULL, error TEXT);
   CREATE INDEX forward_log_fwd ON forward_log (fwd, n);`);
 
-export type ForwardSource = ScriptSource;
-export interface ForwardInput { name: string; sym: string; tf: string; source: ForwardSource; inputs?: Record<string, unknown>; qtyMult: number; channels: Channel[] }
+type ForwardSource = ScriptSource;
+interface ForwardInput { name: string; sym: string; tf: string; source: ForwardSource; inputs?: Record<string, unknown>; qtyMult: number; channels: Channel[] }
 /** runsIn: 'browser' while an open chart runs the strategy and sends the fills, else 'server'. sig: see src/scriptsig.ts. */
-export interface ForwardInfo { id: string; name: string; sym: string; tf: string; qtyMult: number; channels: Channel[]; created: number; start: number | null; status: 'starting' | 'running' | 'error'; fills: number; lastRun: number | null; lastError: string | null; sig: string; runsIn: 'browser' | 'server' }
-export interface ForwardLog { at: number; t: number; side: 'buy' | 'sell'; qty: number; px: number; error: string | null }
-export interface RunReq { id: string; source: ForwardSource; sym: string; tf: string; inputs: Record<string, unknown> }
+interface ForwardInfo { id: string; name: string; sym: string; tf: string; qtyMult: number; channels: Channel[]; created: number; start: number | null; status: 'starting' | 'running' | 'error'; fills: number; lastRun: number | null; lastError: string | null; sig: string; runsIn: 'browser' | 'server' }
+interface ForwardLog { at: number; t: number; side: 'buy' | 'sell'; qty: number; px: number; error: string | null }
+interface RunReq { id: string; source: ForwardSource; sym: string; tf: string; inputs: Record<string, unknown> }
 
 /** Run a test's strategy on `bars` in the engine worker. */
 export const runInWorker = (x: RunReq, bars: Bar[]) => engineFills({ ...x, key: `fwd:${x.id}` }, bars);

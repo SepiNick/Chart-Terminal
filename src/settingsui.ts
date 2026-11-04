@@ -41,7 +41,7 @@ export function initSettingsUI() {
   };
 }
 
-export function openServerSettings() {
+function openServerSettings() {
   $('#srvOff').hidden = serverMode; $('#srvBody').hidden = !serverMode;
   $<HTMLDialogElement>('#srvDlg').showModal();
   if (!serverMode) return;

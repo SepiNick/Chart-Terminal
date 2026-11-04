@@ -3,7 +3,7 @@
 import type { Bar } from '../data.ts';
 import type { Print } from './model.ts';
 
-export type OfKind = 'T' | 'R' | 'REV' | 'D' | 'time';
+type OfKind = 'T' | 'R' | 'REV' | 'D' | 'time';
 export interface OfTf { kind: OfKind; n: number }
 
 /** `100T` = 100 prints, `R10` = 10 of price, `REV5` = 5 ticks (minimum price steps) against the bar, `D500` = |delta| 500. */

@@ -288,7 +288,7 @@ route('DELETE', '/api/alerts/:id', c => {
 });
 
 /** An account was removed in this process: stop its alerts. */
-export function dropUserAlerts(uid: number) { regs.delete(uid); for (const k of [...states.keys()]) if (k.startsWith(uid + ':')) states.delete(k); sync() }
+function dropUserAlerts(uid: number) { regs.delete(uid); for (const k of [...states.keys()]) if (k.startsWith(uid + ':')) states.delete(k); sync() }
 U?.onRemoved(dropUserAlerts);
 
 if (isPublic) { for (const uid of U!.usersWithAlerts()) try { reg(uid) } catch (e) { console.error(`[alerts] user ${uid}: ${(e as Error).message}`) } }

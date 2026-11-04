@@ -33,7 +33,7 @@ export function histVol(closes: number[], window = 30, periods = 252) {
 }
 
 export interface Leg { kind: 'call' | 'put' | 'stock'; side: 1 | -1; K?: number; qty: number }
-export const STRATEGIES: Record<string, (k: number[], S: number) => Leg[]> = {
+const STRATEGIES: Record<string, (k: number[], S: number) => Leg[]> = {
   'Long call': k => [{ kind: 'call', side: 1, K: k[0], qty: 1 }],
   'Long put': k => [{ kind: 'put', side: 1, K: k[0], qty: 1 }],
   'Covered call': k => [{ kind: 'stock', side: 1, qty: 100 }, { kind: 'call', side: -1, K: k[0], qty: 1 }],

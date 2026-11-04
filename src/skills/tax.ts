@@ -10,7 +10,7 @@ const family = (t: string) => new Set(FAMILIES.find(f => f.includes(t)) ?? [t]);
 const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 /** Long term if sold after the first anniversary (a Feb 29 purchase rolls to Feb 28). */
 export function anniversary(d: string) { const [y, m, dd] = d.split('-').map(Number); const a = new Date(Date.UTC(y + 1, m - 1, dd)); return a.getUTCMonth() !== m - 1 ? iso(Date.UTC(y + 1, m - 1, 28)) : iso(+a) }
-export const term = (acquired: string, sold: string) => (sold > anniversary(acquired) ? 'long' as const : 'short' as const);
+const term = (acquired: string, sold: string) => (sold > anniversary(acquired) ? 'long' as const : 'short' as const);
 
 /** Lots still held, rebuilt from fills in time order (buys open lots, sells close the oldest first). */
 export function lotsFromFills(fills: { sym: string; side: 'buy' | 'sell'; qty: number; px: number; fee: number; ts: number }[]): Lot[] {
@@ -27,7 +27,7 @@ export function lotsFromFills(fills: { sym: string; side: 'buy' | 'sell'; qty: n
   return [...by.values()].flat();
 }
 
-export function unrealized(lots: Lot[], prices: Record<string, number>, today: string) {
+function unrealized(lots: Lot[], prices: Record<string, number>, today: string) {
   return lots.filter(l => prices[l.sym]).map(l => { const value = l.shares * prices[l.sym]; return { ...l, value, gain: value - l.cost, term: term(l.date, today), longOn: iso(Date.parse(anniversary(l.date)) + DAY) } });
 }
 

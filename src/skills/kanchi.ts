@@ -6,8 +6,7 @@ import { pyRoundN, type Ctx, type Skill } from './types.ts';
 import { barsMany, type Stock } from './vcp.ts';
 import { annuals, type Facts } from './secfacts.ts';
 
-export const FLOORS: Record<string, number> = { 'income-now': 4, balanced: 3, 'growth-first': 1.5 };
-export const VERDICTS = ['CLEAN-PASS', 'PASS-CAUTION', 'CONDITIONAL-PASS', 'HOLD-REVIEW', 'STEP1-RECHECK', 'FAIL'];
+const FLOORS: Record<string, number> = { 'income-now': 4, balanced: 3, 'growth-first': 1.5 };
 const EPS_EQ = 0.005, FREEZE_GRACE = 45, MIN_PAYS = 4;
 const day = (s: string) => Date.parse(`${s}T00:00:00Z`) / 864e5;
 const median = (v: number[]) => { const s = [...v].sort((a, b) => a - b), n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2 };
@@ -58,8 +57,8 @@ export function basis(history: Pay[], price: number | null, { language = null as
   if (floor != null && out.fwdYield != null && Math.abs(out.fwdYield - floor) <= 0.2) { out.borderline = true; out.reasons.push('floor_borderline_within_0.2pp') }
   return { ...out, latest: r4(last.amt), annualized: annualized ? r4(annualized) : null, regularTtm: regTtm ? r4(regTtm) : null, ttmIncl: incl ? r4(incl) : null, confirmed: last.declared, lastIncrease: inc ? inc.date : null };
 }
-export type Basis = ReturnType<typeof basis>;
-export function step1(b: Basis, floor: number, confirmed = false): [string, string] {
+type Basis = ReturnType<typeof basis>;
+function step1(b: Basis, floor: number, confirmed = false): [string, string] {
   if (b.status === 'NO-DIVIDEND') return ['FAIL', 'no_dividend'];
   if (b.status === 'ASSUMPTION-REQUIRED') return ['STEP1-RECHECK', b.reasons.join(';') || 'assumption_required'];
   if (b.suspension) return ['FAIL', 'dividend_suspension_suspected'];
@@ -71,7 +70,7 @@ export function step1(b: Basis, floor: number, confirmed = false): [string, stri
   if (b.freeze) return ['HOLD-REVIEW', 'dividend_freeze'];
   return ['STEP1-PASS', 'regular_yield_above_floor'];
 }
-export const sectorKind = (s: string | null) => { const x = (s ?? '').trim().toLowerCase(); return ['bank', 'banks', 'financial', 'financials', 'financial services'].includes(x) ? 'bank' : ['utility', 'utilities'].includes(x) ? 'utility' : ['insurance', 'insurer', 'insurers'].includes(x) ? 'insurer' : 'consumer' };
+const sectorKind = (s: string | null) => { const x = (s ?? '').trim().toLowerCase(); return ['bank', 'banks', 'financial', 'financials', 'financial services'].includes(x) ? 'bank' : ['utility', 'utilities'].includes(x) ? 'utility' : ['insurance', 'insurer', 'insurers'].includes(x) ? 'insurer' : 'consumer' };
 type M = Record<string, unknown>;
 export function safety(o: { sector: string | null; dividend: number | null; gaapEps?: number | null; adjEps?: number | null; adjSource?: string; fcfPs?: number | null; merger?: boolean; bank?: M; utility?: M; insurer?: M }) {
   const kind = sectorKind(o.sector), reasons: string[] = [], blockers: string[] = [], ratio = (a: number | null | undefined, b: number | null | undefined) => (a == null || b == null || b === 0 ? null : a / b);
@@ -114,7 +113,7 @@ export function safety(o: { sector: string | null; dividend: number | null; gaap
   return { kind, verdict: v, gaap: r4(g), adj: r4(adj), fcf: r4(fcf), oneOff, reasons, blockers: [...new Set(blockers)].sort() };
 }
 export interface Scan { result: string; reasons?: string[]; completed_mna_within_4q?: boolean }
-export function eventCap(scan: Scan, triggered: boolean) {
+function eventCap(scan: Scan, triggered: boolean) {
   const r = ['CLEAN_CONFIRMED', 'NO_EVENT_FOUND', 'MAJOR_EVENT', 'MINOR_EVENT_CAUTION', 'FAILED-DEGRADED', 'SKIPPED'].includes(String(scan.result).trim()) ? String(scan.result).trim() : 'FAILED-DEGRADED';
   if (r === 'MAJOR_EVENT') return { cap: 'HOLD-REVIEW', t1: true, blockers: ['major_structural_event'], reasons: scan.reasons?.length ? scan.reasons : ['major_structural_event'] };
   if (r === 'MINOR_EVENT_CAUTION') return { cap: null, t1: false, blockers: [] as string[], reasons: ['minor_bolt_on_event_caution_note'] };
@@ -151,7 +150,7 @@ export function entryRow(o: { price: number | null; history: Pay[] | null; yield
   return { signal, dividend, cur, avg, target, buy, drop, b, step1: s1, step1Reason: s1r, safety: sf, cap, verdict, t1, why, blockers: [...new Set([...pre, ...cap.blockers])].sort() };
 }
 /** Calendar-year dividend yields (sum of the year's dividends / last close of the year), newest first. */
-export function yearlyYields(divs: Pay[], closes: { date: string; close: number }[], year: number, n = 5) {
+function yearlyYields(divs: Pay[], closes: { date: string; close: number }[], year: number, n = 5) {
   const last = new Map<string, number>(); for (const c of closes) last.set(c.date.slice(0, 4), c.close);
   const out: number[] = []; for (let y = year - 1; y >= year - n; y--) { const k = String(y), d = divs.filter(x => x.date.startsWith(k)).reduce((a, x) => a + x.dividend, 0), p = last.get(k); if (d > 0 && p) out.push(d / p * 100) }
   return out;

@@ -27,7 +27,7 @@ migration('users/2', `ALTER TABLE sessions ADD COLUMN device TEXT`);   // non-NU
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const SESSION_MS = (Number(process.env.CT_SESSION_DAYS) > 0 ? Number(process.env.CT_SESSION_DAYS) : 30) * 86400_000, IDLE_MS = 14 * 86400_000, MAX_SESSIONS = 20;
-export const UNIFORM_LOGIN_ERROR = 'Wrong username or password';
+const UNIFORM_LOGIN_ERROR = 'Wrong username or password';
 
 // ---------- passwords ----------
 export const stats = { hashes: 0 };   // scrypt runs, so tests can prove an unknown user costs the same work as a known one
@@ -176,7 +176,7 @@ export function sessionUser(token: string, kind?: 'cookie' | 'device'): User | n
   if (now - r.last_seen > 60_000) db.prepare('UPDATE sessions SET last_seen = ? WHERE token_hash = ?').run(now, h);
   return toUser(r);
 }
-export const revokeUserSessions = (userId: number) => { db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId) };
+const revokeUserSessions = (userId: number) => { db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId) };
 export const listSessions = (userId: number) => db.prepare('SELECT substr(token_hash, 1, 16) AS id, created, last_seen, agent, ip FROM sessions WHERE user_id = ? AND device IS NULL ORDER BY last_seen DESC').all(userId) as { id: string }[];
 export function endSessionById(userId: number, id: string): boolean {
   if (!/^[0-9a-f]{16}$/.test(id)) return false;
@@ -188,7 +188,6 @@ export function endDeviceById(userId: number, id: string): boolean {
   if (!/^[0-9a-f]{16}$/.test(id)) return false;
   return db.prepare('DELETE FROM sessions WHERE user_id = ? AND device IS NOT NULL AND substr(token_hash, 1, 16) = ?').run(userId, id).changes > 0;
 }
-export const sessionIdOf = (token: string) => sha(token).slice(0, 16);
 
 // ---------- invites and recovery codes ----------
 export function createInvite(createdBy: number | null, o: { uses?: number; days?: number; note?: string } = {}): string {

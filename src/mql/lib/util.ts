@@ -2,7 +2,7 @@
 import { MqlArray, type Env, type Ref, type Rt } from '../contract.ts';
 import type { Bar } from '../../data.ts';
 
-export const isRef = (x: unknown): x is Ref => !!x && typeof x === 'object' && !(x instanceof MqlArray) && 'v' in x && Object.keys(x).length === 1;
+const isRef = (x: unknown): x is Ref => !!x && typeof x === 'object' && !(x instanceof MqlArray) && 'v' in x && Object.keys(x).length === 1;
 /** Value of a possibly-Ref argument. */
 export const val = <T = unknown>(x: unknown): T => (isRef(x) ? x.v : x) as T;
 /** Write to a Ref argument (no-op for plain values). */
@@ -10,7 +10,6 @@ export const put = (x: unknown, v: unknown) => { if (isRef(x)) x.v = v };
 export const num = (x: unknown) => { const v = val(x); return typeof v === 'number' ? v : typeof v === 'boolean' ? +v : Number(v) || 0 };
 
 export const DBL_MAX = 1.7976931348623157e308;
-export const emptyValue = (env: Env) => (env.dialect === 'mql4' ? 2147483647 : DBL_MAX);
 /** WHOLE_ARRAY / missing count test (MQL4 WHOLE_ARRAY = 0, MQL5 = -1). */
 export const isWhole = (env: Env, n: unknown) => n == null || (n as number) < 0 || (env.dialect === 'mql4' && n === 0);
 

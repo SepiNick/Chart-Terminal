@@ -11,8 +11,8 @@ import { riskPage } from '../risk/page.ts';
 import { toCsv } from '../journal.ts';
 import { $, $$, esc, store, toast } from '../store.ts';
 
-export const ws = store.get('jwCfg', { period: 'all' as Period, from: '', to: '', cols: ['title', 'sym', 'dir', 'vol', 'tf', 'date', 'comm', 'r', 'rexp', 'result', 'media', 'points'], sort: 'date', desc: true, group: '', q: '', page: 0, dashTab: 'bySymbol', heat: 'pnl' });
-export const saveWs = () => store.set('jwCfg', ws);
+const ws = store.get('jwCfg', { period: 'all' as Period, from: '', to: '', cols: ['title', 'sym', 'dir', 'vol', 'tf', 'date', 'comm', 'r', 'rexp', 'result', 'media', 'points'], sort: 'date', desc: true, group: '', q: '', page: 0, dashTab: 'bySymbol', heat: 'pnl' });
+const saveWs = () => store.set('jwCfg', ws);
 let page = 'dashboard', arg = '';
 
 // ---------- shared helpers ----------
@@ -24,7 +24,7 @@ export function fmtDate(t: number | undefined, withTime = true) {
   const cal = journal().calendar === 'jalali' ? 'fa-IR-u-ca-persian-nu-latn' : undefined;
   return new Intl.DateTimeFormat(cal, { year: 'numeric', month: '2-digit', day: '2-digit', ...(withTime ? { hour: '2-digit', minute: '2-digit', hour12: false } : {}) }).format(t * 1000);
 }
-export const range = () => periodRange(ws.period, Date.now() / 1000, { from: ws.from ? Date.parse(ws.from) / 1000 : undefined, to: ws.to ? Date.parse(ws.to) / 1000 + 86400 : undefined });
+const range = () => periodRange(ws.period, Date.now() / 1000, { from: ws.from ? Date.parse(ws.from) / 1000 : undefined, to: ws.to ? Date.parse(ws.to) / 1000 + 86400 : undefined });
 export const trades = () => scope(journal(), range());
 /** Balance at the start of the selected period (so the equity curve starts at the right level). */
 export const startBalance = () => { const r = range(); return balance(journal(), journal().account ?? '', (r.from ?? -Infinity) - 1e-6) };

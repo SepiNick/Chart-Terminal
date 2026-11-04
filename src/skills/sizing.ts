@@ -75,7 +75,7 @@ export const positionSizer: Skill = {
 
 // ---------- futures-position-sizer ----------
 /** [multiplier, tick size, product] — the original skill's verified table (all quoted in USD). */
-export const FUTURES: Record<string, [number, number, string]> = {
+const FUTURES: Record<string, [number, number, string]> = {
   ES: [50, 0.25, 'E-mini S&P 500'], NQ: [20, 0.25, 'E-mini Nasdaq-100'], YM: [5, 1, 'E-mini Dow ($5)'], QR: [50, 0.1, 'E-mini Russell 2000 (RTY)'], VX: [1000, 0.05, 'VIX futures'],
   ZT: [2000, 0.00390625, '2-Year T-Note'], ZF: [1000, 0.0078125, '5-Year T-Note'], ZN: [1000, 0.015625, '10-Year T-Note'], ZB: [1000, 0.03125, '30-Year T-Bond'], DX: [1000, 0.005, 'U.S. Dollar Index'],
   E6: [125000, 0.00005, 'Euro FX (6E)'], J6: [12500000, 0.0000005, 'Japanese Yen (6J)'], B6: [62500, 0.0001, 'British Pound (6B)'], A6: [100000, 0.00005, 'Australian Dollar (6A)'], D6: [100000, 0.00005, 'Canadian Dollar (6C)'], S6: [125000, 0.00005, 'Swiss Franc (6S)'],

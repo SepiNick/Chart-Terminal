@@ -55,13 +55,13 @@ export function format(fmt: string, args: unknown[]): string {
   });
 }
 
-export function doubleToString(v: number, d = 8): string {
+function doubleToString(v: number, d = 8): string {
   v = num(v);
   if (!Number.isFinite(v)) return special(v);
   if (d < 0) return fixExp(v.toExponential(Math.min(16, -d)));
   return v.toFixed(Math.min(16, Math.max(0, Math.trunc(d))));
 }
-export const normalizeDouble = (v: number, d: number) => {
+const normalizeDouble = (v: number, d: number) => {
   v = num(v); d = Math.max(0, Math.min(8, Math.trunc(num(d))));
   if (!Number.isFinite(v)) return v;
   const s = Math.sign(v), r = Number(Math.round(Number(Math.abs(v) + 'e' + d)) + 'e-' + d);
@@ -70,13 +70,13 @@ export const normalizeDouble = (v: number, d: number) => {
 const leadNum = (s: string) => { const m = String(s).trim().match(/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/); return m ? parseFloat(m[0]) : 0 };
 const leadInt = (s: string) => { const t = String(s).trim(), m = t.match(/^[+-]?0[xX][0-9a-fA-F]+/) ?? t.match(/^[+-]?\d+/); return m ? Number(m[0].replace(/^([+-]?)0[xX]/, (_, g) => g + '0x')) || parseInt(m[0]) : 0 };
 
-export function colorToString(c: number, names = false): string {
+function colorToString(c: number, names = false): string {
   c = num(c);
   if (c === -1 || c === 0xffffffff) return names ? 'clrNONE' : 'CLR_NONE';
   if (names) { const n = colorName(c); if (n) return 'clr' + n }
   return `${c & 255},${(c >> 8) & 255},${(c >> 16) & 255}`;
 }
-export function stringToColor(s: string): number {
+function stringToColor(s: string): number {
   s = String(s).trim();
   const m = s.match(/^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$/);
   if (m) return (+m[1] & 255) | ((+m[2] & 255) << 8) | ((+m[3] & 255) << 16);
@@ -97,7 +97,7 @@ function decode(b: number[], cp: number): string {
 /** Logical slice of an MqlArray. */
 const items = (a: MqlArray, start = 0, count = -1) => { const n = a.size, e = count < 0 ? n : Math.min(n, start + count), r: unknown[] = []; for (let i = Math.max(0, start); i < e; i++) r.push(a.get(i)); return r };
 /** Write values into an array from logical index `start`, growing dynamic arrays. */
-export function writeArr(a: MqlArray, start: number, vs: unknown[]): number {
+function writeArr(a: MqlArray, start: number, vs: unknown[]): number {
   if (!a.fixed && a.size < start + vs.length) a.resize(start + vs.length);
   const n = Math.min(vs.length, a.size - start);
   for (let i = 0; i < n; i++) a.set(start + i, vs[i]);
@@ -176,4 +176,3 @@ export function installString(rt: Rt, env: Env) {
     CharArrayToStruct: () => false, StructToCharArray: () => false,
   });
 }
-export { items };

@@ -49,22 +49,22 @@ export function migrateOld(old: OldAlert[], drawings: Record<string, Drawing[]>,
   });
 }
 
-export const COND_LABEL: Record<Condition, string> = {
+const COND_LABEL: Record<Condition, string> = {
   crossing: 'Crossing', crossing_up: 'Crossing up', crossing_down: 'Crossing down', greater: 'Greater than', less: 'Less than',
   entering_channel: 'Entering channel', exiting_channel: 'Exiting channel', inside_channel: 'Inside channel', outside_channel: 'Outside channel',
   moving_up: 'Moving up', moving_down: 'Moving down', moving_up_pct: 'Moving up %', moving_down_pct: 'Moving down %',
 };
-export const FREQ_LABEL: Record<Frequency, string> = { once: 'Only once', once_per_bar: 'Once per bar', once_per_bar_close: 'Once per bar close', every_time: 'Every time', once_per_minute: 'Once per minute' };
+const FREQ_LABEL: Record<Frequency, string> = { once: 'Only once', once_per_bar: 'Once per bar', once_per_bar_close: 'Once per bar close', every_time: 'Every time', once_per_minute: 'Once per minute' };
 const LINE_CONDS: Condition[] = ['crossing', 'crossing_up', 'crossing_down', 'greater', 'less'];
 const CHANNEL_CONDS: Condition[] = ['entering_channel', 'exiting_channel', 'inside_channel', 'outside_channel'];
 const MOVING_CONDS: Condition[] = ['moving_up', 'moving_down', 'moving_up_pct', 'moving_down_pct'];
-export function conditionsFor(src: AlertSource): Condition[] {
+function conditionsFor(src: AlertSource): Condition[] {
   if (src.kind === 'script') return [];
   if (src.kind === 'drawing') return src.line2 ? [...LINE_CONDS, ...CHANNEL_CONDS] : LINE_CONDS;
   return [...LINE_CONDS, ...CHANNEL_CONDS, ...MOVING_CONDS];
 }
-export const isChannel = (c?: Condition) => !!c && CHANNEL_CONDS.includes(c);
-export const isMoving = (c?: Condition) => !!c && MOVING_CONDS.includes(c);
+const isChannel = (c?: Condition) => !!c && CHANNEL_CONDS.includes(c);
+const isMoving = (c?: Condition) => !!c && MOVING_CONDS.includes(c);
 
 /** Raw values of the dialog. Numbers stay strings so validation can tell "empty" from "0". */
 export interface AlertForm {
@@ -124,7 +124,7 @@ export function validateAlert(f: AlertForm, now = Date.now()): { input: AlertInp
 }
 
 const fmtN = (v?: number) => (v == null ? '' : String(+v.toPrecision(10)));
-export function describeSource(s: AlertSource): string {
+function describeSource(s: AlertSource): string {
   if (s.kind === 'price') return 'Price';
   if (s.kind === 'indicator') return `Indicator plot ${s.plot + 1}`;
   if (s.kind === 'drawing') return s.line2 ? 'Channel drawing' : s.line.type === 'hline' ? `Horizontal line ${fmtN(s.line.price)}` : 'Trend line';
@@ -153,7 +153,7 @@ export const BUILTIN_PINE: Record<string, string> = Object.fromEntries(Object.en
   atr: 'plot(ta.atr(14), "ATR")', obv: 'plot(ta.obv, "OBV")',
 }).map(([k, body]) => [k, `//@version=5\nindicator("${k}")\n${body}\n`]));
 
-export const PLACEHOLDERS = ['ticker', 'exchange', 'interval', 'close', 'open', 'high', 'low', 'volume', 'time', 'timenow', 'plot_0', 'strategy.order.action', 'strategy.order.contracts', 'strategy.order.price', 'strategy.position_size'];
+const PLACEHOLDERS = ['ticker', 'exchange', 'interval', 'close', 'open', 'high', 'low', 'volume', 'time', 'timenow', 'plot_0', 'strategy.order.action', 'strategy.order.contracts', 'strategy.order.price', 'strategy.position_size'];
 
 // ---------- client state ----------
 /** What the active chart offers as alert sources; main.ts builds it. */

@@ -18,7 +18,7 @@ export let serverMode = false;
 export function setServerMode(on: boolean) { serverMode = on }
 
 /** Random id of this tab: sent in `sync.hello` and as `x-ct-client`, so the server doesn't echo our own writes back. */
-export const clientId = cid;
+const clientId = cid;
 
 /** Call to the server API (JSON body, or a Blob sent as is); throws Error(message) on failure (with `.status` when the server answered). */
 export async function api<T>(path: string, init: { method?: string; body?: unknown; keepalive?: boolean; role?: Role } = {}): Promise<T> {
@@ -36,9 +36,9 @@ export const apiTrade: typeof api = (path, init) => api(path, { ...init, role: '
 
 // ---------- which keys sync ----------
 /** Keys the running app applies live when another device or the server changes them (the server writes `acct` for forward-test fills). */
-export const HOT_KEYS = new Set(['acct']);
+const HOT_KEYS = new Set(['acct']);
 /** Per-device UI state: never sent to the server. */
-export const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx']);
+const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx']);
 const KEY_RE = /^[A-Za-z0-9_.-]{1,64}$/;   // same as server/state.ts
 export const isSynced = (key: string) => KEY_RE.test(key) && !LOCAL_KEYS.has(key);
 
@@ -113,7 +113,7 @@ async function send(key: string, attempt: number) {
  * Another device changed this key since we last saw it. Never overwrite it: take the server's version (which the server sent
  * along), drop our queued edit for the key and tell the user. Edits made after the conflict are based on the new revision.
  */
-export function conflict(key: string, server?: { rev?: number; value?: unknown }) {
+function conflict(key: string, server?: { rev?: number; value?: unknown }) {
   if (!server || typeof server.rev !== 'number') return;
   pending.delete(key);
   revs.set(key, server.rev);
@@ -133,7 +133,7 @@ export async function flushNow(keepalive = false) {
 export type SyncStatus = 'synced' | 'saving' | 'offline';
 const statusFns = new Set<(s: SyncStatus) => void>();
 export function onSyncStatus(fn: (s: SyncStatus) => void) { statusFns.add(fn); fn(syncStatus()) }
-export const syncStatus = (): SyncStatus => (!online || failing ? 'offline' : pending.size || busy.size ? 'saving' : 'synced');
+const syncStatus = (): SyncStatus => (!online || failing ? 'offline' : pending.size || busy.size ? 'saving' : 'synced');
 function status() { const s = syncStatus(); statusFns.forEach(f => f(s)) }
 
 // ---------- incoming ----------
@@ -200,7 +200,7 @@ function connect(again: boolean) {
 }
 
 /** Toast with an optional button (stays until clicked when it has one). Uses the app's #toast box. */
-export function note(msg: string, action?: { label: string; run: () => void }, ms = 6000) {
+function note(msg: string, action?: { label: string; run: () => void }, ms = 6000) {
   const box = document.getElementById('toast'); if (!box) return;
   const d = document.createElement('div'); d.textContent = msg;
   if (action) {

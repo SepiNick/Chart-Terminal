@@ -4,8 +4,8 @@
 import type { Ctx, Skill } from './types.ts';
 
 export interface Down { sym: string; sector: string; tier: string; peak: string; trough: string; days: number; depth: number }
-export const tier = (cap: number | null) => cap == null ? 'Unknown' : cap >= 200e9 ? 'Mega' : cap >= 10e9 ? 'Large' : cap >= 2e9 ? 'Mid' : 'Small';
-export function peaksTroughs(c: number[], w = 20) {
+const tier = (cap: number | null) => cap == null ? 'Unknown' : cap >= 200e9 ? 'Mega' : cap >= 10e9 ? 'Large' : cap >= 2e9 ? 'Mid' : 'Small';
+function peaksTroughs(c: number[], w = 20) {
   const p: number[] = [], t: number[] = [];
   for (let i = w; i < c.length - w; i++) { const win = c.slice(i - w, i + w + 1); if (c[i] === Math.max(...win)) p.push(i); if (c[i] === Math.min(...win)) t.push(i) }
   return { p, t };
@@ -24,7 +24,7 @@ export function downtrends(dates: string[], c: number[], w = 20, minDepth = 5, m
   return out;
 }
 /** numpy.percentile (linear interpolation). */
-export function percentile(v: number[], q: number) { const s = [...v].sort((a, b) => a - b), k = (s.length - 1) * q / 100, f = Math.floor(k); return f + 1 < s.length ? s[f] + (s[f + 1] - s[f]) * (k - f) : s[f] }
+function percentile(v: number[], q: number) { const s = [...v].sort((a, b) => a - b), k = (s.length - 1) * q / 100, f = Math.floor(k); return f + 1 < s.length ? s[f] + (s[f + 1] - s[f]) * (k - f) : s[f] }
 const mean1 = (v: number[]) => Math.round(v.reduce((a, b) => a + b, 0) / v.length * 10) / 10;
 export function stats(d: { days: number }[]) {
   if (!d.length) return { n: 0, median: 0, mean: 0, p25: 0, p75: 0, p90: 0 };

@@ -38,7 +38,7 @@ export const typeDefaults = (p: Partial<TypeOpts> = {}): TypeOpts => ({
 export interface XBar extends Bar { yang?: boolean; flip?: number; pnf?: 'X' | 'O'; boxes?: number; box?: number }
 
 /** Resolve a box/range size: positive number as-is, else last ATR, else mean bar range, else 1% of price. */
-export function resolveBox(bars: Bar[], v: number | 'atr' | undefined, len = 14): number {
+function resolveBox(bars: Bar[], v: number | 'atr' | undefined, len = 14): number {
   if (typeof v === 'number' && v > 0) return v;
   const a = atr(bars, Math.min(len, Math.max(bars.length, 1))).at(-1);
   if (a) return a;

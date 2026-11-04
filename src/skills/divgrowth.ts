@@ -14,7 +14,7 @@ export function rsi(p: number[], n = 14, dp = 2) {
   for (let i = n; i < g.length; i++) { ag = (ag * (n - 1) + g[i]) / n; al = (al * (n - 1) + l[i]) / n }
   return al === 0 ? 100 : pyRoundN(100 - 100 / (1 + ag / al), dp);
 }
-export const cagr = (a: number, b: number, y: number) => (a <= 0 || b <= 0 || y <= 0 ? null : pyRoundN(((b / a) ** (1 / y) - 1) * 100, 2));
+const cagr = (a: number, b: number, y: number) => (a <= 0 || b <= 0 || y <= 0 ? null : pyRoundN(((b / a) ** (1 / y) - 1) * 100, 2));
 /** Calendar-year dividend sums (the current year left out): CAGR over the last 4 full years, consistency, streak. */
 export function dividendGrowth(divs: { date: string; dividend: number }[], year = new Date().getUTCFullYear()) {
   if (divs.length < 4) return null;

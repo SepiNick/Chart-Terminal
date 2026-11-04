@@ -28,8 +28,8 @@ import type { PineValue } from './pine/types.ts';
 import { showMenu } from './menu.ts';
 
 export type { ChartType } from './charttypes.ts';
-export interface ScriptRef { id: string; inputs: Record<string, PineValue>; hidden?: boolean }
-export type ScaleSide = 'right' | 'left' | 'none';
+interface ScriptRef { id: string; inputs: Record<string, PineValue>; hidden?: boolean }
+type ScaleSide = 'right' | 'left' | 'none';
 export interface PaneCfg { symbol: string; tf: string; type: ChartType; ind: string[]; compare?: string[]; scripts?: ScriptRef[]; of?: OFCfg; scales?: Record<string, ScaleSide> }
 export interface ScriptRun { id: string; name: string; out?: Outputs; error?: ScriptError; ms: number; view?: ScriptView; tester?: TesterData }
 export interface Alert { id: number; sym: string; price: number; dir: 'up' | 'down'; on: boolean; drawingId?: number; note?: string }

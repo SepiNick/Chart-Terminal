@@ -59,7 +59,7 @@ function workerOf(s: Slot): Worker {
   return w;
 }
 
-export interface EngineReq { key: string; source: ScriptSource; sym: string; tf: string; inputs: Record<string, unknown> }
+interface EngineReq { key: string; source: ScriptSource; sym: string; tf: string; inputs: Record<string, unknown> }
 function call<T>(op: 'fills' | 'out', x: EngineReq, bars: Bar[]): Promise<T> {
   const s = pool()[slotOf(x.key)], w = workerOf(s), n = ++seq, first = !s.loaded.has(x.key);
   if (first && s.loaded.size >= MAX_JOBS) { restart(s, 'Too many scripts; engine restarted'); return call(op, x, bars) }

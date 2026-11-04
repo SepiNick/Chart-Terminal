@@ -46,7 +46,7 @@ export function balance(j: Journal, account = j.account ?? '', until = Infinity)
 export const transfersOf = (accs: JAccount[], account: string) => accs.filter(a => !account || a.id === account).flatMap(a => a.transfers);
 
 // ---------- sessions (UTC hours, the way FX session tables are usually given) ----------
-export const SESSIONS = [{ name: 'Tokyo', from: 0, to: 8 }, { name: 'London', from: 8, to: 16 }, { name: 'New York', from: 13, to: 22 }, { name: 'Sydney', from: 22, to: 24 }];
+const SESSIONS = [{ name: 'Tokyo', from: 0, to: 8 }, { name: 'London', from: 8, to: 16 }, { name: 'New York', from: 13, to: 22 }, { name: 'Sydney', from: 22, to: 24 }];
 export const sessionOf = (t: number) => { const h = new Date(t * 1000).getUTCHours(); return SESSIONS.filter(s => h >= s.from && h < s.to).map(s => s.name) };
 
 // ---------- dashboard ----------

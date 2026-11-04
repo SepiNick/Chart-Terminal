@@ -4,7 +4,7 @@
 // argument lists close cleanly; the parser joins adjacent '>' '>' into a shift.
 import type { Diagnostic } from '../contract.ts';
 
-export interface Hole { toks: Tok[]; align: Tok[] | null; fmt: string | null }
+interface Hole { toks: Tok[]; align: Tok[] | null; fmt: string | null }
 export interface Tok {
   t: 'id' | 'num' | 'str' | 'char' | 'interp' | 'op' | 'eof';
   v: string;              // identifier/operator text, decoded string/char, or number source
@@ -38,7 +38,7 @@ function evalCond(s: string, defs: Map<string, boolean>): boolean {
   return toks.length ? or() : true;
 }
 
-export function preprocess(src: string, file: string, errors: Diagnostic[]): string {
+function preprocess(src: string, file: string, errors: Diagnostic[]): string {
   const lines = src.split('\n'), defs = new Map<string, boolean>();
   const st: { on: boolean; taken: boolean }[] = [];
   const active = () => st.every(s => s.on);

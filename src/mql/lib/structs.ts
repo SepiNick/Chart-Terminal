@@ -2,7 +2,7 @@
 // (CObject, CArray*, CString) implemented from their public documentation.
 import { MqlArray, MqlError, type Rt } from '../contract.ts';
 
-export class MqlDateTime { year = 1970; mon = 1; day = 1; hour = 0; min = 0; sec = 0; day_of_week = 4; day_of_year = 0 }
+class MqlDateTime { year = 1970; mon = 1; day = 1; hour = 0; min = 0; sec = 0; day_of_week = 4; day_of_year = 0 }
 export class MqlRates { time = 0; open = 0; high = 0; low = 0; close = 0; tick_volume = 0; spread = 0; real_volume = 0 }
 export class MqlTick { time = 0; bid = 0; ask = 0; last = 0; volume = 0; time_msc = 0; flags = 0; volume_real = 0 }
 export class MqlParam { type = 0; integer_value = 0; double_value = 0; string_value = '' }
@@ -26,7 +26,7 @@ export function copy<T>(x: T): T {
   return x;
 }
 
-export class CObject {
+class CObject {
   m_prev: CObject | null = null; m_next: CObject | null = null;
   Prev(n?: CObject | null) { if (n === undefined) return this.m_prev; this.m_prev = n; return n }
   Next(n?: CObject | null) { if (n === undefined) return this.m_next; this.m_next = n; return n }
@@ -77,12 +77,12 @@ class CArrayBase<T> extends CObject {
   }
   protected blank(): T { return 0 as T }
 }
-export class CArrayDouble extends CArrayBase<number> { Type() { return 87 } }
-export class CArrayInt extends CArrayBase<number> { Type() { return 82 } }
-export class CArrayLong extends CArrayBase<number> { Type() { return 84 } }
-export class CArrayString extends CArrayBase<string> { Type() { return 89 } protected blank() { return '' } }
+class CArrayDouble extends CArrayBase<number> { Type() { return 87 } }
+class CArrayInt extends CArrayBase<number> { Type() { return 82 } }
+class CArrayLong extends CArrayBase<number> { Type() { return 84 } }
+class CArrayString extends CArrayBase<string> { Type() { return 89 } protected blank() { return '' } }
 
-export class CArrayObj extends CObject {
+class CArrayObj extends CObject {
   m_data: (CObject | null)[] = []; m_free_mode = true; m_sort_mode = -1;
   Type() { return 0x7778 }
   FreeMode(m?: boolean) { if (m === undefined) return this.m_free_mode; this.m_free_mode = m; return true }
@@ -106,7 +106,7 @@ export class CArrayObj extends CObject {
   IsSorted(mode = 0) { return this.m_sort_mode === mode }
 }
 
-export class CString extends CObject {
+class CString extends CObject {
   m_string = '';
   Str() { return this.m_string } Len() { return this.m_string.length }
   Copy(r: { v: string }) { r.v = this.m_string }

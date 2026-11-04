@@ -3,7 +3,7 @@
 import { equityFromTrades } from './metrics.ts';
 import type { Bar, TesterData, Trade } from './types.ts';
 
-export type RangePreset = 'all' | '30d' | '90d' | 'ytd' | '1y' | 'custom';
+type RangePreset = 'all' | '30d' | '90d' | 'ytd' | '1y' | 'custom';
 /** The user's choice; custom dates are 'YYYY-MM-DD' (UTC, both days inclusive). */
 export interface RangeSel { preset: RangePreset; from?: string; to?: string }
 /** Unix-second bounds, both inclusive; null = open. */
@@ -46,7 +46,7 @@ export function sliceReport(d: TesterData, bars: Bar[], b: Bounds): { data: Test
   return { bars: sb, data: { trades, equity: equityFromTrades(trades, sb, d.initialCapital), initialCapital: d.initialCapital, openPL: atEnd ? d.openPL : 0, openCount: atEnd ? d.openCount : 0 } };
 }
 
-export interface MonthCell { pct: number; pl: number }
+interface MonthCell { pct: number; pl: number }
 export interface YearRow { year: number; months: (MonthCell | null)[]; total: MonthCell }
 /** Equity change per calendar month (UTC): % of the previous month's closing equity (initial capital for the first). */
 export function monthlyReturns(d: TesterData, bars: Bar[]): YearRow[] {

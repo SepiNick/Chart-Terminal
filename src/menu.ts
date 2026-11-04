@@ -5,7 +5,7 @@ import { esc } from './store.ts';
 export interface MenuItem { label?: string; icon?: string; iconHtml?: string; hint?: string; checked?: boolean; selected?: boolean; disabled?: boolean; sep?: boolean; head?: string; action?: () => void; sub?: MenuItem[] }
 
 let open: HTMLElement[] = [];
-export function closeMenus() { open.forEach(m => m.remove()); open = [] }
+function closeMenus() { open.forEach(m => m.remove()); open = [] }
 document.addEventListener('mousedown', e => { if (!open.some(m => m.contains(e.target as Node))) closeMenus() });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus() });
 

@@ -5,7 +5,7 @@ import { pyRoundN } from './types.ts';
 export interface Fact { start?: string; end: string; val: number; fy?: number; fp?: string; form?: string; filed?: string; accn?: string; frame?: string }
 export interface Facts { cik?: number | string; entityName?: string; facts?: Record<string, Record<string, { units?: Record<string, Fact[]> }>> }
 export interface Q { value: number; start: string; end: string; derived: boolean; fy?: number; fp?: string; form?: string; filed?: string; concept?: string }
-export const CONCEPTS: Record<string, string[]> = {
+const CONCEPTS: Record<string, string[]> = {
   revenue: ['RevenueFromContractWithCustomerExcludingAssessedTax', 'Revenues', 'RevenuesNetOfInterestExpense', 'RevenueFromContractWithCustomerIncludingAssessedTax', 'SalesRevenueNet', 'SalesRevenueGoodsNet', 'SalesRevenueServicesNet'],
   cost_of_revenue: ['CostOfGoodsAndServicesSold', 'CostOfRevenue', 'CostOfGoodsSold'],
   gross_profit: ['GrossProfit'],
@@ -33,7 +33,7 @@ export function periods(facts: Fact[], forms = ['10-Q', '10-K', '20-F', '40-F'])
   }
   return new Map([...latest].map(([k, f]) => [k, { ...f, fy: first.get(k)!.fy, fp: first.get(k)!.fp, firstFiled: first.get(k)!.filed }]));
 }
-export function quarterly(facts: Fact[], deriveQ4 = true) {
+function quarterly(facts: Fact[], deriveQ4 = true) {
   const q = new Map<string, Q>(), years: Fact[] = [];
   for (const f of periods(facts).values()) {
     const d = day(f.end) - day(f.start!);
@@ -58,15 +58,15 @@ export function series(cf: Facts, key: string, deriveQ4 = true) {
   }
   return { s: merged, used };
 }
-export function yoyMatch(s: Map<string, Q>, end: string, days = 365, slack = 10) {
+function yoyMatch(s: Map<string, Q>, end: string, days = 365, slack = 10) {
   const t = day(end) - days; let best: [number, string] | null = null;
   for (const e of s.keys()) { const g = Math.abs(day(e) - t); if (g <= slack && (!best || g < best[0])) best = [g, e] }
   return best ? s.get(best[1])! : null;
 }
 const r1 = (x: number) => pyRoundN(x, 1), r2 = (x: number) => pyRoundN(x, 2);
-export const pctChg = (a: number | null | undefined, b: number | null | undefined) => (a == null || b == null || b === 0 ? null : r1(100 * (a - b) / Math.abs(b)));
+const pctChg = (a: number | null | undefined, b: number | null | undefined) => (a == null || b == null || b === 0 ? null : r1(100 * (a - b) / Math.abs(b)));
 const margin = (p: number | null | undefined, w: number | null | undefined) => (p == null || !w ? null : r1(100 * p / w));
-export interface Row { end: string; start?: string; fiscal: string; derived: boolean; revenue: number | null; gross_profit: number | null; operating_income: number | null; net_income: number | null; eps_diluted: number | null; gross_margin: number | null; operating_margin: number | null; net_margin: number | null; revenue_yoy: number | null; net_income_yoy: number | null; eps_yoy: number | null; filed?: string; form?: string }
+interface Row { end: string; start?: string; fiscal: string; derived: boolean; revenue: number | null; gross_profit: number | null; operating_income: number | null; net_income: number | null; eps_diluted: number | null; gross_margin: number | null; operating_margin: number | null; net_margin: number | null; revenue_yoy: number | null; net_income_yoy: number | null; eps_yoy: number | null; filed?: string; form?: string }
 export function analyse(cf: Facts, quarters = 6) {
   const s: Record<string, Map<string, Q>> = {}, concepts: Record<string, string[]> = {};
   for (const k of Object.keys(CONCEPTS)) { const r = series(cf, k); s[k] = r.s; concepts[k] = r.used }

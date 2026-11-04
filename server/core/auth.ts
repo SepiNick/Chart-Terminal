@@ -48,7 +48,7 @@ export function createSession(req: IncomingMessage, user: User = PRIVATE_USER): 
   return token;
 }
 /** Bearer device token for `user` (labelled, at most MAX_DEVICES per user). Same random 256-bit token and hash-at-rest as a session. */
-export const MAX_DEVICES = 10;
+const MAX_DEVICES = 10;
 export function createDevice(req: IncomingMessage, label: string, user: User = PRIVATE_USER): string {
   if (!U) db.prepare('DELETE FROM sessions WHERE device IS NOT NULL AND last_seen < ?').run(Date.now() - SESSION_DAYS * 86400_000);   // dead tokens must not hold the quota
   const n = U ? U.countDevices(user.id) : (db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE device IS NOT NULL').get() as { n: number }).n;
@@ -73,7 +73,7 @@ export function userOfToken(t: string, kind?: 'cookie' | 'device'): User | null 
   return PRIVATE_USER;
 }
 /** `Authorization: Bearer <token>` (a device token). Never read from a URL. */
-export function bearerToken(req: IncomingMessage): string | null {
+function bearerToken(req: IncomingMessage): string | null {
   const m = /^Bearer ([\w-]{20,128})$/i.exec(String(req.headers.authorization ?? ''));
   return m ? m[1] : null;
 }

@@ -8,7 +8,7 @@ export interface Rules { cashBufferPct: number; maxPositionPct: number; maxOrder
 export const RULES: Rules = { cashBufferPct: 10, maxPositionPct: 25, maxOrder: 2000, minOrder: 5, fractional: true, blocked: [] };
 
 /** Proportional to weight; a slice over the cap is pinned at the cap and the rest is shared over the others, repeated. */
-export function capped(weights: Record<string, number>, money_: number, cap: number) {
+function capped(weights: Record<string, number>, money_: number, cap: number) {
   const alloc: Record<string, number> = {}, capd = new Set<string>(), active = new Map(Object.entries(weights));
   let left = money_;
   while (active.size) {

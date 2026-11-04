@@ -9,7 +9,7 @@ export interface Ctx { bar(i: number): Bar; o: number[][]; x: F }
 export interface Spec { outs: number; step(c: Ctx, i: number): void; begin?: number[]; shift?: number[] }
 
 /** Applied price, MQL4 numbering (PRICE_CLOSE=0 … PRICE_WEIGHTED=6). */
-export function price(b: Bar, ap: number): number {
+function price(b: Bar, ap: number): number {
   switch (ap) {
     case 1: return b.open; case 2: return b.high; case 3: return b.low;
     case 4: return (b.high + b.low) / 2; case 5: return (b.high + b.low + b.close) / 3; case 6: return (b.high + b.low + 2 * b.close) / 4;
@@ -42,10 +42,10 @@ export class Calc {
 
 const g = (a: number[], i: number) => (i >= 0 ? a[i] ?? NaN : NaN);
 const sum = (x: F, n: number, i: number) => { let s = 0; for (let j = i - n + 1; j <= i; j++) s += x(j); return s };
-export const smaAt = (x: F, n: number, i: number) => (i < n - 1 || n < 1 ? NaN : sum(x, n, i) / n);
+const smaAt = (x: F, n: number, i: number) => (i < n - 1 || n < 1 ? NaN : sum(x, n, i) / n);
 const lwmaAt = (x: F, n: number, i: number) => { if (i < n - 1 || n < 1) return NaN; let s = 0, w = 0; for (let k = 0; k < n; k++) { s += x(i - k) * (n - k); w += n - k } return s / w };
 /** One MA step for method m (0 SMA, 1 EMA, 2 SMMA, 3 LWMA); `o` is the MA's own output (for recursive methods). */
-export function maAt(m: number, n: number, x: F, o: number[], i: number): number {
+function maAt(m: number, n: number, x: F, o: number[], i: number): number {
   if (m === 1) { const v = x(i), p = g(o, i - 1), k = 2 / (n + 1); return Number.isNaN(v) ? NaN : Number.isNaN(p) ? v : v * k + p * (1 - k) }
   if (m === 2) { const p = g(o, i - 1); return Number.isNaN(p) ? smaAt(x, n, i) : (p * (n - 1) + x(i)) / n }
   if (m === 3) return lwmaAt(x, n, i);

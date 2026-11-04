@@ -15,11 +15,11 @@ const KEYWORDS: [string, RegExp][] = [
   ['analyst_upgrade', /\b(upgrade[sd]?|price target|initiates coverage|overweight|buy rating)\b/], ['product_launch', /\b(launch|unveil|new product|commercialization)\b/],
   ['short_squeeze', /\b(short squeeze|squeeze|short interest)\b/], ['story_theme', /\b(ai|artificial intelligence|crypto|bitcoin|nuclear|uranium|space|robotics|ev|defense)\b/],
 ];
-export const BASE: Record<string, number> = { guidance_raise: 95, fda_approval: 94, earnings: 88, m_and_a: 84, regulatory_approval: 82, major_contract: 76, major_partnership: 72, product_launch: 66, short_squeeze: 58, analyst_upgrade: 54, story_theme: 50, unknown: 35 };
+const BASE: Record<string, number> = { guidance_raise: 95, fda_approval: 94, earnings: 88, m_and_a: 84, regulatory_approval: 82, major_contract: 76, major_partnership: 72, product_launch: 66, short_squeeze: 58, analyst_upgrade: 54, story_theme: 50, unknown: 35 };
 const EP_TYPE: Record<string, string> = { earnings: 'EARNINGS_EP', guidance_raise: 'GUIDANCE_EP', m_and_a: 'M_AND_A_EP', fda_approval: 'FDA_EP', regulatory_approval: 'REGULATORY_EP', major_contract: 'CONTRACT_EP', major_partnership: 'PARTNERSHIP_EP', analyst_upgrade: 'ANALYST_EP', product_launch: 'PRODUCT_EP', short_squeeze: 'SQUEEZE_EP', story_theme: 'STORY_EP', unknown: 'UNCLASSIFIED_EP' };
 const GRADE: Record<string, number> = { A: 8, B: 4, C: 0, D: -4 };
-export const normCat = (raw: unknown) => { const t = String(raw ?? '').trim().toLowerCase().replace(/-/g, '_').replace(/ /g, '_'); return !t ? 'unknown' : ALIASES[t] ?? (t in BASE ? t : 'unknown') };
-export function classify(type: string | undefined, text: string) {
+const normCat = (raw: unknown) => { const t = String(raw ?? '').trim().toLowerCase().replace(/-/g, '_').replace(/ /g, '_'); return !t ? 'unknown' : ALIASES[t] ?? (t in BASE ? t : 'unknown') };
+function classify(type: string | undefined, text: string) {
   const e = normCat(type); if (e !== 'unknown') return e;
   const t = text.toLowerCase(); for (const [k, re] of KEYWORDS) if (re.test(t)) return k;
   return 'unknown';
@@ -27,7 +27,7 @@ export function classify(type: string | undefined, text: string) {
 export interface EpEvent { symbol: string; date?: string; catalyst?: string; headline?: string; grade?: string; cap?: number }
 type Rec = Record<string, number | null | undefined>;
 const avgPos = (v: number[]) => { const c = v.filter(x => x > 0); return c.length ? c.reduce((a, b) => a + b, 0) / c.length : null };
-export function stats(bars: Bar[], date?: string): Rec {
+function stats(bars: Bar[], date?: string): Rec {
   if (!bars.length) return {};
   let idx = date ? bars.findIndex(b => b.date === date) : -1;
   if (date && idx < 0) idx = bars.findIndex(b => b.date >= date);
@@ -83,8 +83,8 @@ function liquidity(r: Rec) {
   return s;
 }
 const riskScore = (r: Rec) => { const k = val(r.risk_pct_to_low); return k == null ? 2 : k <= 4 ? 5 : k <= 7 ? 3.5 : k <= 10 ? 1.5 : 0 };
-export const rating = (s: number) => s >= 90 ? 'A' : s >= 80 ? 'A-' : s >= 70 ? 'B' : s >= 55 ? 'C' : 'D';
-export function state(r: Rec, s: number, cat: string, maxRisk = 10) {
+const rating = (s: number) => s >= 90 ? 'A' : s >= 80 ? 'A-' : s >= 70 ? 'B' : s >= 55 ? 'C' : 'D';
+function state(r: Rec, s: number, cat: string, maxRisk = 10) {
   const dg = val(r.day_gain_pct), gap = val(r.gap_pct), vr = ratioOf(r), cl = val(r.close_location_pct), risk = val(r.risk_pct_to_low), reasons: string[] = [];
   const move = (dg != null && dg >= 4) || (gap != null && gap >= 4), vol = vr == null || vr >= 1.5 || (r.volume ?? 0) >= 3e5, weak = cl != null && cl < 40, wide = risk != null && risk > maxRisk;
   if (weak) reasons.push('weak_close_location'); if (wide) reasons.push('risk_too_wide_for_day1'); if (!move) reasons.push('price_move_not_confirmed'); if (!vol) reasons.push('volume_not_confirmed');

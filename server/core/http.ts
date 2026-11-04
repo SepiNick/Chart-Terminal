@@ -111,7 +111,7 @@ const DEVICE_AUTH = new Set(['/api/auth/login', '/api/auth/register', '/api/auth
 const slow = (s: number, msg: string) => Object.assign(new HttpError(429, msg), { retryAfter: s });
 
 /** CSRF. Private: a request with an Origin must match Host (curl, tests and the app send none or a matching one). Public: browsers only. */
-export function csrfOk(req: IncomingMessage): boolean {
+function csrfOk(req: IncomingMessage): boolean {
   if (!isPublic) return sameOrigin(req);
   const o = req.headers.origin, fetchSite = req.headers['sec-fetch-site'];
   const origin = o ? sameOrigin(req) : fetchSite === 'same-origin';

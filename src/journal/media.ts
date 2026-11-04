@@ -18,7 +18,7 @@ function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T
 }
 const localBlob = (id: string) => tx<Blob | undefined>('readonly', s => s.get(id)).catch(() => undefined);
 /** POST a blob to the server → its new id. Errors carry `.status` when the server answered. */
-export async function uploadBlob(blob: Blob): Promise<string> {
+async function uploadBlob(blob: Blob): Promise<string> {
   const r = await serverFetch('/api/media', { method: 'POST', body: blob, headers: { 'content-type': blob.type || 'application/octet-stream' } });
   const j = await r.json().catch(() => ({})) as { id?: string; error?: string };
   if (!r.ok || !j.id) throw Object.assign(Error(j.error ?? `Upload failed (${r.status})`), { status: r.status });

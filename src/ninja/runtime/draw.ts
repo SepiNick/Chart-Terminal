@@ -37,7 +37,7 @@ function textFixed(owner: any, tag: string, text: string, position?: string, ...
   return store(owner, { type: 'text', tag: String(tag), Tag: String(tag), t1: last?.time ?? 0, p1: last?.close ?? 0, text: String(text), position, color: css(a.find(isBrush)) ?? TEXT });
 }
 
-export const Draw = {
+const Draw = {
   Line: tool('line', 2), Ray: tool('ray', 2), ExtendedLine: tool('ray', 2), ArrowLine: tool('line', 2),
   Rectangle: tool('rect', 2), Ellipse: tool('rect', 2),
   HorizontalLine: tool('hline', 0), VerticalLine: tool('vline', 0),

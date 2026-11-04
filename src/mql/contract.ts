@@ -17,8 +17,8 @@ export interface CompiledProgram {
   /** Assign an input/extern variable before OnInit. */
   setInput(name: string, value: unknown): void;
 }
-export type Handler = 'OnInit' | 'OnDeinit' | 'OnTick' | 'OnCalculate' | 'OnStart' | 'OnTimer' | 'OnTrade' | 'OnTradeTransaction' | 'OnChartEvent' | 'OnTester' | 'OnBookEvent' | 'init' | 'deinit' | 'start';
-export interface InputDef { name: string; type: string; def: unknown; comment?: string; group?: string; options?: { name: string; value: number }[] }
+type Handler = 'OnInit' | 'OnDeinit' | 'OnTick' | 'OnCalculate' | 'OnStart' | 'OnTimer' | 'OnTrade' | 'OnTradeTransaction' | 'OnChartEvent' | 'OnTester' | 'OnBookEvent' | 'init' | 'deinit' | 'start';
+interface InputDef { name: string; type: string; def: unknown; comment?: string; group?: string; options?: { name: string; value: number }[] }
 
 export interface CompileResult { ok: boolean; js?: string; errors: Diagnostic[]; warnings: Diagnostic[]; dialect: Dialect }
 export interface Diagnostic { file: string; line: number; col: number; msg: string }

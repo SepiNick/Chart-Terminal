@@ -46,7 +46,7 @@ export function initDom(h: DomHost) {
 const save = () => store.set('domCfg', cfg);
 
 /** Below the market a buy rests as a limit, above it as a stop (and the reverse for sells). */
-export const ladderKind = (side: 'buy' | 'sell', price: number, last: number) => ((side === 'buy') === (price < last) ? 'limit' : 'stop');
+const ladderKind = (side: 'buy' | 'sell', price: number, last: number) => ((side === 'buy') === (price < last) ? 'limit' : 'stop');
 function trade(side: 'buy' | 'sell', price: number) {
   const b = activeBroker();
   if (!b) return host.limit(side, price);

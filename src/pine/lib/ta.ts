@@ -20,7 +20,7 @@ const nz = (x: number | undefined, d = 0) => (x === undefined || Number.isNaN(x)
 
 // ---- stateful kernels (o = sub-state object) ----
 /** Push x; return the last n values (oldest first) or null while warming up. */
-export function win(o: O, x: number, n: number, k = 'w'): number[] | null {
+function win(o: O, x: number, n: number, k = 'w'): number[] | null {
   n = len(n);
   const w: Window = (o[k] ??= new Window());
   w.push(x, (o[k + '#'] = Math.max(o[k + '#'] ?? 1, n)));

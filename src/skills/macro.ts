@@ -6,19 +6,19 @@ import { pct, pyRoundN, type Ctx, type Skill } from './types.ts';
 
 export interface D { date: string; close: number }
 export interface Rate { date: string; year10: number; year2: number }
-export type Cross = { type: 'golden_cross' | 'death_cross' | 'converging' | 'none'; bars_ago: number | null; gap_pct: number | null };
+type Cross = { type: 'golden_cross' | 'death_cross' | 'converging' | 'none'; bars_ago: number | null; gap_pct: number | null };
 const r3 = (x: number) => pyRoundN(x, 3);
 
 /** Last trading day of each month (the first one met in a newest-first series). */
-export function monthly(d: D[]): D[] {
+function monthly(d: D[]): D[] {
   const m = new Map<string, D>();
   for (const b of d) if (b.date && b.close !== 0 && !m.has(b.date.slice(0, 7))) m.set(b.date.slice(0, 7), { date: b.date, close: b.close });
   return [...m.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
 }
-export function ratio(a: D[], b: D[]) { const l = new Map(b.map(x => [x.date.slice(0, 7), x.close])); return a.filter(x => l.has(x.date.slice(0, 7)) && l.get(x.date.slice(0, 7)) !== 0).map(x => x.close / l.get(x.date.slice(0, 7))!) }
+function ratio(a: D[], b: D[]) { const l = new Map(b.map(x => [x.date.slice(0, 7), x.close])); return a.filter(x => l.has(x.date.slice(0, 7)) && l.get(x.date.slice(0, 7)) !== 0).map(x => x.close / l.get(x.date.slice(0, 7))!) }
 const sma = (v: number[], n: number) => v.length < n ? null : v.slice(0, n).reduce((s, x) => s + x, 0) / n;
-export const roc = (v: number[], n: number) => v.length <= n || v[n] === 0 ? null : (v[0] - v[n]) / v[n] * 100;
-export function crossover(v: number[], s = 6, l = 12): Cross {
+const roc = (v: number[], n: number) => v.length <= n || v[n] === 0 ? null : (v[0] - v[n]) / v[n] * 100;
+function crossover(v: number[], s = 6, l = 12): Cross {
   if (v.length < l + 3) return { type: 'none', bars_ago: null, gap_pct: null };
   const pairs: [number, number][] = [];
   for (let o = 0; o < Math.min(v.length, l + 12) - l + 1; o++) { const a = sma(v.slice(o), s), b = sma(v.slice(o), l); if (a != null && b != null) pairs.push([a, b]) }
@@ -31,7 +31,7 @@ export function crossover(v: number[], s = 6, l = 12): Cross {
   }
   return { type: Math.abs(gap) < 1 ? 'converging' : 'none', bars_ago: null, gap_pct: r3(gap) };
 }
-export function transition(c: Cross, rs: number | null, rl: number | null, ss: number | null, sl: number | null) {
+function transition(c: Cross, rs: number | null, rl: number | null, ss: number | null, sl: number | null) {
   let s = 0; const cross = c.type === 'golden_cross' || c.type === 'death_cross';
   if (cross) s += c.bars_ago != null && c.bars_ago <= 2 ? 40 : c.bars_ago != null && c.bars_ago <= 5 ? 30 : 20;
   else if (c.type === 'converging') s += Math.trunc(Math.max(0, 1 - Math.abs(c.gap_pct ?? 0)) * 25);
@@ -42,7 +42,7 @@ export function transition(c: Cross, rs: number | null, rl: number | null, ss: n
   return Math.min(100, Math.max(0, s + al * 10));
 }
 /** Crossover direction unless it is 3+ months old and 3-month momentum disagrees ("reversing"). */
-export function direction(c: Cross, r: number | null, pos: string, neg: string, neutral: string): [string, string] {
+function direction(c: Cross, r: number | null, pos: string, neg: string, neutral: string): [string, string] {
   const cd = c.type === 'golden_cross' ? pos : c.type === 'death_cross' ? neg : null, md = r != null && r > 0 ? pos : r != null && r < 0 ? neg : null;
   if (cd) { if (c.bars_ago != null && c.bars_ago >= 3 && md && md !== cd) return [md, 'reversing']; return [cd, md === cd ? 'confirmed' : md ? 'fading' : 'N/A'] }
   return md ? [md, 'N/A'] : [neutral, 'N/A'];
@@ -91,7 +91,7 @@ export function yieldCurve(rates: Rate[] | null, shy: D[], tlt: D[]): Comp {
   return none;
 }
 const rets = (c: number[]) => c.slice(0, -1).flatMap((x, i) => c[i + 1] !== 0 ? [(x - c[i + 1]) / c[i + 1]] : []);
-export function corr(a: number[], b: number[], w: number) {
+function corr(a: number[], b: number[], w: number) {
   if (a.length < w || b.length < w) return null;
   const x = a.slice(0, w), y = b.slice(0, w), mx = x.reduce((s, v) => s + v, 0) / w, my = y.reduce((s, v) => s + v, 0) / w;
   const cov = x.reduce((s, v, i) => s + (v - mx) * (y[i] - my), 0) / w, sx = Math.sqrt(x.reduce((s, v) => s + (v - mx) ** 2, 0) / w), sy = Math.sqrt(y.reduce((s, v) => s + (v - my) ** 2, 0) / w);
@@ -108,17 +108,17 @@ export const credit = (h: D[], l: D[]) => ratioComp(h, l, 'easing', 'tightening'
 export const sizeFactor = (i: D[], s: D[]) => ratioComp(i, s, 'small_cap_leading', 'large_cap_leading', 'neutral');
 export const sectors = (y: D[], p: D[]) => ratioComp(y, p, 'risk_on', 'risk_off', 'neutral');
 
-export const WEIGHTS = { concentration: 0.25, yield_curve: 0.2, credit_conditions: 0.15, size_factor: 0.15, equity_bond: 0.15, sector_rotation: 0.1 };
+const WEIGHTS = { concentration: 0.25, yield_curve: 0.2, credit_conditions: 0.15, size_factor: 0.15, equity_bond: 0.15, sector_rotation: 0.1 };
 export type K = keyof typeof WEIGHTS;
-export const LABELS: Record<K, string> = { concentration: 'Concentration (RSP/SPY)', yield_curve: 'Yield curve (10Y−2Y)', credit_conditions: 'Credit (HYG/LQD)', size_factor: 'Size (IWM/SPY)', equity_bond: 'Equity-bond (SPY/TLT)', sector_rotation: 'Sectors (XLY/XLP)' };
-export const REGIMES: Record<string, [string, string]> = {
+const LABELS: Record<K, string> = { concentration: 'Concentration (RSP/SPY)', yield_curve: 'Yield curve (10Y−2Y)', credit_conditions: 'Credit (HYG/LQD)', size_factor: 'Size (IWM/SPY)', equity_bond: 'Equity-bond (SPY/TLT)', sector_rotation: 'Sectors (XLY/XLP)' };
+const REGIMES: Record<string, [string, string]> = {
   concentration: ['Concentration', 'Focus on mega-cap tech/growth leaders. Underweight small-caps and value.'],
   broadening: ['Broadening', 'Add small/mid-cap exposure, equal-weight strategies, value and cyclical rotation.'],
   contraction: ['Contraction', 'Raise cash; short-duration Treasuries as base, TIPS if inflation shows, extend duration only once the stock-bond correlation turns negative; Staples and Healthcare.'],
   inflationary: ['Inflationary', 'Real assets, commodities, energy, short-duration bonds and TIPS; reduce long duration.'],
   transitional: ['Transitional', 'Diversify more, reposition gradually, avoid concentrated bets, check weekly.'],
 };
-export const ZONES: [number, string][] = [[20, 'Stable (No Transition)'], [40, 'Early Signal (Monitoring)'], [60, 'Transition Zone (Preparing)'], [80, 'Active Transition (Repositioning)'], [Infinity, 'Confirmed Transition (Completing)']];
+const ZONES: [number, string][] = [[20, 'Stable (No Transition)'], [40, 'Early Signal (Monitoring)'], [60, 'Transition Zone (Preparing)'], [80, 'Active Transition (Repositioning)'], [Infinity, 'Confirmed Transition (Completing)']];
 export const compositeOf = (c: Record<K, Comp>) => pyRoundN((Object.keys(WEIGHTS) as K[]).reduce((s, k) => s + c[k].score * WEIGHTS[k], 0), 1);
 export function classify(c: Record<K, Comp>) {
   const d = (k: K) => (c[k].available ? c[k].direction : 'unknown'), [co, yc, cr, sz, eb, se] = (['concentration', 'yield_curve', 'credit_conditions', 'size_factor', 'equity_bond', 'sector_rotation'] as K[]).map(d);

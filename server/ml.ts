@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { HttpError, bad, route } from './core/http.ts';
 
 export const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'ml', 'engine.py');
-export const TASKS = ['regime', 'patterns', 'journal'];
+const TASKS = ['regime', 'patterns', 'journal'];
 const candidates = () => process.env.CT_PYTHON ? [[process.env.CT_PYTHON]] : process.platform === 'win32' ? [['python'], ['py', '-3'], ['python3']] : [['python3'], ['python']];
 
 function runOne(cmd: string[], input: string) {

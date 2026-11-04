@@ -17,7 +17,7 @@ export function iso(s: string): [number, number, number] {
 }
 const monday = (y: number, w: number) => { const j4 = Date.UTC(y, 0, 4), wd = new Date(j4).getUTCDay() || 7; return new Date(j4 - (wd - 1) * 864e5 + (w - 1) * 7 * 864e5).toISOString().slice(0, 10) };
 const r2 = (x: number) => pyRoundN(x, 2);
-export function weekly(daily: PB[], earnings?: string): Wk[] {
+function weekly(daily: PB[], earnings?: string): Wk[] {
   if (!daily.length) return [];
   const asc = [...daily].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)), ek = earnings ? iso(earnings) : null, groups = new Map<string, PB[]>();
   for (const d of asc) { const [y, w] = iso(d.date), k = `${y}-${String(w).padStart(2, '0')}`; if (ek && y === ek[0] && w === ek[1] && d.date < earnings!) continue; groups.set(k, [...(groups.get(k) ?? []), d]) }
@@ -27,7 +27,7 @@ export function weekly(daily: PB[], earnings?: string): Wk[] {
     return { weekStart: monday(y, w), year: y, week: w, open: r2(o), high: r2(Math.max(...ds.map(x => x.high))), low: r2(Math.min(...ds.map(x => x.low))), close: r2(c), volume: ds.reduce((a, x) => a + (x.volume || 0), 0), green: c >= o, partial: (k === latestKey && latestPartial) || (!!ek && y === ek[0] && w === ek[1] && ds.length < 5), days: ds.length };
   }).reverse();
 }
-export function redCandle(w: Wk[], eIdx: number | null) {
+function redCandle(w: Wk[], eIdx: number | null) {
   for (let i = 0; i < Math.min(eIdx ?? w.length - 1, w.length); i++) {
     const c = w[i]; if (c.green) continue;
     const rg = c.high - c.low, wick = rg > 0 ? (Math.min(c.open, c.close) - c.low) / rg * 100 : 0, sv: number[] = [];
@@ -37,7 +37,7 @@ export function redCandle(w: Wk[], eIdx: number | null) {
   }
   return null;
 }
-export function pattern(w: Wk[], earnings: string, watch = 5) {
+function pattern(w: Wk[], earnings: string, watch = 5) {
   const [ey, ew] = iso(earnings), eIdx = w.findIndex(c => c.year === ey && c.week === ew), r = { weeks: 0, eIdx: eIdx < 0 ? null : eIdx, red: null as ReturnType<typeof redCandle>, breakout: false, stage: 'MONITORING' };
   if (!w.length) return r;
   r.weeks = eIdx >= 0 ? eIdx : Math.max(0, Math.floor((D(w[0].weekStart).getTime() - D(earnings).getTime()) / 864e5 / 7));

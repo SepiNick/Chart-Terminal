@@ -26,7 +26,7 @@ export const GROUPS: { id: GroupId; name: string; icon: string }[] = [
 ];
 
 /** Sections of each group's flyout, in TradingView's order. Tools not listed here are shown last under "More". */
-export const SECTIONS: Partial<Record<GroupId, { name: string; ids: string[] }[]>> = {
+const SECTIONS: Partial<Record<GroupId, { name: string; ids: string[] }[]>> = {
   lines: [
     { name: 'Lines', ids: ['trend', 'ray', 'infoline', 'extended', 'trendangle', 'hline', 'hray', 'vline', 'crossline'] },
     { name: 'Channels', ids: ['parallel', 'regression', 'flattop', 'disjoint'] },

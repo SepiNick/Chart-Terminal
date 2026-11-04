@@ -4,7 +4,7 @@ import { type Builtin, type PineValue, type PineTuple, arg, num } from '../types
 export const FORMAT_CONSTS: Record<string, PineValue> = { mintick: 'mintick', percent: 'percent', volume: 'volume', price: 'price', inherit: 'inherit' };
 
 /** DecimalFormat-like pattern: '#.##', '#.00', '0.000', '#,###.##', '#.##%', with literal prefix/suffix. */
-export function fmtPattern(x: number, pat: string): string {
+function fmtPattern(x: number, pat: string): string {
   if (Number.isNaN(x)) return 'NaN';
   const m = pat.match(/^([^#0,.]*)([#0,.]+)(.*)$/);
   if (!m) return pat;
@@ -53,7 +53,7 @@ const msgArg = (v: PineValue | undefined, type: string, style: string): string =
 };
 
 /** MessageFormat subset: {0}, {1,number,#.##}, {0,number,integer|percent|currency}; '' = quote, '...' = literal. */
-export function msgFormat(f: string, args: PineValue[]): string {
+function msgFormat(f: string, args: PineValue[]): string {
   let out = '', i = 0;
   while (i < f.length) {
     const c = f[i];

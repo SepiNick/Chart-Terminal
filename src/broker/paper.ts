@@ -31,7 +31,7 @@ export function fromOrder(o: Omit<Order, 'id'>): OrderReq {
   if (o.type === 'trailing_stop') r.trail = o.trail;
   return r;
 }
-export function toBrokerOrder(o: Order): BrokerOrder {
+function toBrokerOrder(o: Order): BrokerOrder {
   const t = (o.ts ?? 0) * 1000, limit = o.type === 'limit' || o.type === 'stop_limit';
   return {
     id: String(o.id), sym: o.sym, side: o.side, kind: o.type, qty: o.qty, filled: 0,

@@ -26,3 +26,17 @@ android/app/build/
 .env.*
 .claude/settings.local.json
 server/.claude/
+
+# build outputs and scratch
+release/
+tmp/
+*.tmp
+*.apk
+*.aab
+android/.idea/
+android/captures/
+android/app/release/
+.DS_Store
+Thumbs.db
+graphify-out/
+.impeccable/hook.cache.json

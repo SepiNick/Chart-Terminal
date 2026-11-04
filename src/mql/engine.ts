@@ -40,8 +40,8 @@ export function compileMql(mainPath: string, files: Record<string, string>, stac
   return r;
 }
 
-export type MqlKind = 'expert' | 'indicator' | 'script';
-export type TickModel = 'open' | 'ohlc' | 'close';
+type MqlKind = 'expert' | 'indicator' | 'script';
+type TickModel = 'open' | 'ohlc' | 'close';
 export interface MqlRunOpts {
   dialect: Dialect; symbol: string; tfSec: number; digits: number; spreadPoints: number;
   inputs?: Record<string, unknown>; model?: TickModel; account?: Partial<Env['account']>;
@@ -75,7 +75,7 @@ function buffersFor(type: number): [number, boolean] {
   }
 }
 
-export function detectKind(p: CompiledProgram, dialect: Dialect): MqlKind {
+function detectKind(p: CompiledProgram, dialect: Dialect): MqlKind {
   const h = p.handlers, props = p.props;
   if (h.OnCalculate || props.indicator_chart_window || props.indicator_separate_window || props.indicator_buffers != null) return 'indicator';
   if (h.OnTick) return 'expert';

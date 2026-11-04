@@ -6,7 +6,7 @@ import { HttpError, bad, route } from './core/http.ts';
 /** Swappable for tests. */
 export const deps = { fetch: (url: string, init?: RequestInit) => fetch(url, init) };
 // LM Studio takes the next free port when 1234 is busy, so 1234-1239 are all accepted (only the first two are probed).
-export const DEFAULTS = ['http://127.0.0.1:11434/v1', 'http://127.0.0.1:1234/v1', 'http://127.0.0.1:1235/v1'];
+const DEFAULTS = ['http://127.0.0.1:11434/v1', 'http://127.0.0.1:1234/v1', 'http://127.0.0.1:1235/v1'];
 const LMS_PORTS = ['1234', '1235', '1236', '1237', '1238', '1239'];
 /** A loopback http(s) base URL ending in /v1 (trailing slash trimmed), or an error. */
 export function baseUrl(raw?: string | null) {

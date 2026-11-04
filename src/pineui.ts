@@ -34,7 +34,7 @@ let editor: PineEditor | null = null;
 let host: PineHost;
 const save = () => store.set('scripts', scripts);
 setInstalledScripts(() => Object.values(scripts).filter(s => langOf(s) === 'pine').map(s => s.src));   // Pine `import` resolves libraries here
-export const langOf = (s: Script | undefined): Lang => s?.lang ?? 'pine';
+const langOf = (s: Script | undefined): Lang => s?.lang ?? 'pine';
 const isMql = (l: Lang) => l === 'mql4' || l === 'mql5' || l === 'mqh';
 const isCode = (l: Lang) => l !== 'pine';   // file-named (MQL or C#) rather than titled by indicator()
 const langFromName = (name: string): Lang => /\.mq4$/i.test(name) ? 'mql4' : /\.mq5$/i.test(name) ? 'mql5' : /\.mqh$/i.test(name) ? 'mqh' : /\.cs$/i.test(name) ? 'ninja' : 'pine';
@@ -64,7 +64,7 @@ function mqlFiles(override?: { id: string; src: string }): Record<string, string
   for (const s of Object.values(scripts)) if (isMql(langOf(s))) files[s.name] = override?.id === s.id ? override.src : s.src;
   return files;
 }
-export function compileMqlScript(id: string, override?: string): CompileResult {
+function compileMqlScript(id: string, override?: string): CompileResult {
   const s = scripts[id];
   const files = mqlFiles(override != null ? { id, src: override } : undefined);
   const key = s.name + '\u0000' + JSON.stringify(files);
@@ -146,7 +146,7 @@ export const compileById = (id: string) => compileMqlScript(id);
 // ---------- NinjaScript (C#) compilation: every installed .cs file is compiled together ----------
 const ntCache = new Map<string, NtCompileResult>();
 /** First Indicator/Strategy class declared in a .cs source — the one a chart runs. */
-export const mainClassOf = (src: string) => src.match(/class\s+(\w+)\s*:\s*(?:[\w.]*\.)?(Indicator|Strategy)\b/)?.[1];
+const mainClassOf = (src: string) => src.match(/class\s+(\w+)\s*:\s*(?:[\w.]*\.)?(Indicator|Strategy)\b/)?.[1];
 export function compileNinjaScripts(override?: { id: string; src: string }): NtCompileResult {
   const files: Record<string, string> = {};
   for (const s of Object.values(scripts)) if (langOf(s) === 'ninja') files[s.name] = override?.id === s.id ? override.src : s.src;

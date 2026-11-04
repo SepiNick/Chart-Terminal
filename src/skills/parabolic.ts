@@ -27,8 +27,8 @@ export function metrics(bars: Bar[]) {
   const liq = adv == null || adv <= 0 ? 0 : Math.log10(adv) <= 7 ? 0 : Math.log10(adv) >= 8.5 ? 10 : 10 * (Math.log10(adv) - 7) / 1.5;
   return { close, d10, d20, d50, ext10: pct(d10), ext20: pct(d20), ext50: pct(d50), atr14: a14, extAtr, r3: ret(c, 3), r5: ret(c, 5), r10: ret(c, 10), r15: ret(c, 15), streak, accel, expansion, adv, vr, liq };
 }
-export const W = { ma_extension: 0.3, acceleration: 0.25, volume_climax: 0.2, range_expansion: 0.15, liquidity: 0.1 };
-export function components(m: ReturnType<typeof metrics>) {
+const W = { ma_extension: 0.3, acceleration: 0.25, volume_climax: 0.2, range_expansion: 0.15, liquidity: 0.1 };
+function components(m: ReturnType<typeof metrics>) {
   return {
     ma_extension: clamp(0.5 * lin(m.ext20 || 0, 20, 120) + 0.5 * lin(m.extAtr || 0, 3, 10)),
     acceleration: clamp(0.4 * lin(m.r5 || 0, 20, 100) + 0.2 * lin(m.streak || 0, 2, 5) + 0.2 * lin(m.accel || 0, 1, 2) + 0.2 * lin(m.r3 || 0, 10, 50)),
@@ -52,7 +52,7 @@ export function sizeRecipe(account: number, riskBps = 50, maxPos = 10, maxShort 
   return { risk: pyRoundN(risk, 2), maxValue: pyRoundN(mpv, 2), ok };
 }
 /** SEC Rule 201: a ≥ 10% drop from the prior close triggers the uptick rule for that day and the next. */
-export const ssr = (prevClose: number, price: number) => (prevClose - price) / prevClose * 100 >= 10;
+const ssr = (prevClose: number, price: number) => (prevClose - price) / prevClose * 100 >= 10;
 
 export const parabolicSkill: Skill = {
   id: 'parabolic-short-trade-planner', name: 'Parabolic shorts', group: 'Screeners', from: 'parabolic-short-trade-planner',

@@ -36,7 +36,7 @@ export const FEEDS = [
   { source: 'Decrypt', url: 'https://decrypt.co/feed' },
   { source: 'The Block', url: 'https://www.theblock.co/rss.xml' },
 ];
-export interface NewsItem { title: string; link: string; source: string; t: number }
+interface NewsItem { title: string; link: string; source: string; t: number }
 const decode = (s: string) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n)).trim();
 /** Items of an RSS 2.0 (or Atom) document: title, http(s) link, time. Anything else is dropped. */
 export function parseRss(xml: string, source: string): NewsItem[] {
@@ -121,7 +121,7 @@ export const treasury = () => cached('fred|treasury', 6 * 60 * 60_000, async () 
 route('GET', '/api/treasury', () => treasury());
 // Every US-listed stock with sector, industry, market cap, price and volume from Nasdaq's public screener (no key):
 // the universe for the stock skills (downtrends, scanners, fundamentals).
-export interface UsStock { sym: string; name: string; sector: string; industry: string; cap: number; price: number; volume: number; chg: number; country: string }
+interface UsStock { sym: string; name: string; sector: string; industry: string; cap: number; price: number; volume: number; chg: number; country: string }
 const usd = (s: string) => Number(String(s ?? '').replace(/[$,%]/g, ''));
 export const usStocks = () => cached('nasdaq|stocks', 6 * 60 * 60_000, async () => {
   const j = await getJson('https://api.nasdaq.com/api/screener/stocks?tableonly=true&download=true') as { data?: { rows?: Record<string, string>[] } };

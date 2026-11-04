@@ -21,7 +21,7 @@ interface Ord { id: number; name: string; entry: boolean; long: boolean; qty: nu
 interface Br { mode: string; value: number }
 const DEF_NAME = (entry: boolean, long: boolean) => (entry ? (long ? 'Buy' : 'Sell short') : long ? 'Sell' : 'Buy to cover');
 
-export class NtBroker {
+class NtBroker {
   s: any; ctx: BarsCtx; comm: number; cap: number;
   ents: Ent[] = []; ords: Ord[] = []; trades: Trade[] = []; execs: NonNullable<NtResult['executions']> = []; equity: number[] = [];
   sl = new Map<string, Br>(); tp = new Map<string, Br>(); tr = new Map<string, Br>();

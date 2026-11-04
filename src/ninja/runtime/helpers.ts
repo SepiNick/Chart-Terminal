@@ -123,7 +123,7 @@ function customNum(v: number, fmt: string): string {
   return neg && /[1-9]/.test(num) ? '-' + out : out;
 }
 
-export function fmtNum(v: number, f?: string): string {
+function fmtNum(v: number, f?: string): string {
   if (Number.isNaN(v)) return 'NaN';
   if (!Number.isFinite(v)) return v > 0 ? 'Infinity' : '-Infinity';
   if (!f) return Number.isInteger(v) && Math.abs(v) < 1e21 ? v.toFixed(0) : general(v);
