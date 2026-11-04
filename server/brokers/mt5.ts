@@ -15,7 +15,7 @@ export function mt5Adapter(token: string): Adapter {
     canEdit: false,
     upnlInBalance: true,   // the bridge reports equity
     async balances() {
-      const a = await mt5Call<{ demo: boolean; netting: boolean }>('/account');
+      const a = await call<{ demo: boolean; netting: boolean }>('/account');
       if (!a.demo) throw Error('MetaTrader 5 is logged in to a REAL account: refused (demo accounts only)');
       if (!a.netting) throw Error('Use a netting demo account in MetaTrader 5 (hedging is not supported)');
       return call<Balance[]>('/balances');
