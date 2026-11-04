@@ -13,7 +13,7 @@ export const FA: Record<string, string> = {
   'Symbol search (start typing on the chart)': 'جستجوی نماد (روی نمودار شروع به تایپ کنید)', 'Compare or add symbol': 'مقایسه یا افزودن نماد', 'All intervals': 'همه‌ی بازه‌ها',
   'Chart type': 'نوع نمودار', 'Indicators (/)': 'اندیکاتورها (/)', 'Indicator & chart templates': 'قالب اندیکاتور و نمودار', 'Create alert (Alt+A)': 'ساخت هشدار (Alt+A)',
   'Bar replay': 'بازپخش کندل', 'Footprint, order flow and liquidity heatmap': 'فوت‌پرینت، اردرفلو و نقشه‌ی نقدینگی', 'Undo (Ctrl+Z)': 'بازگشت (Ctrl+Z)', 'Redo (Ctrl+Y)': 'جلو (Ctrl+Y)',
-  'Chart layout': 'چیدمان نمودار', 'Sync across charts': 'همگام‌سازی نمودارها', 'Save / load layouts': 'ذخیره / بارگذاری چیدمان', 'Server & notifications': 'سرور و اعلان‌ها',
+  'Chart layout': 'چیدمان نمودار', 'Sync across charts': 'همگام‌سازی نمودارها', 'Save / load layouts': 'ذخیره / بارگذاری چیدمان', 'Server & notifications': 'سرور و اعلان‌ها', 'Diagnostics': 'عیب‌یابی', 'Collect report': 'جمع‌آوری گزارش', 'Copy': 'کپی',
   'Server and notifications': 'سرور و اعلان‌ها', 'Chart settings': 'تنظیمات نمودار', 'Fullscreen': 'تمام‌صفحه', 'Snapshot': 'عکس از نمودار', 'Theme': 'پوسته',
   // replay
   '✂ Select bar': '✂ انتخاب کندل', 'Select bar': 'انتخاب کندل', 'Start from date': 'شروع از تاریخ', 'Random bar': 'کندل تصادفی', 'First available date': 'اولین تاریخ موجود',
@@ -22,6 +22,7 @@ export const FA: Record<string, string> = {
   // bottom bar and tabs
   'Go to date (Alt+G)': 'رفتن به تاریخ (Alt+G)', 'Timezone (change in Chart settings › Symbol)': 'منطقه‌ی زمانی (در تنظیمات نمودار › نماد)', 'Percent scale (Alt+P)': 'مقیاس درصدی (Alt+P)',
   'Log scale (Alt+L)': 'مقیاس لگاریتمی (Alt+L)', 'Auto scale': 'مقیاس خودکار', 'log': 'لگاریتمی', 'auto': 'خودکار', 'Drag to resize': 'برای تغییر اندازه بکشید', 'Collapse': 'جمع کردن',
+  'Repaint check': 'بررسی ریپینت', 'Run the script with and without the data after each bar: a value that changes was using the future (lookahead)': 'اسکریپت را یک بار با داده‌ی بعد از هر کندل و یک بار بدون آن اجرا می‌کند: مقداری که عوض شود از آینده استفاده کرده است (lookahead)',
   'Pine Editor': 'ویرایشگر Pine', 'Strategy Tester': 'تستر استراتژی', 'Positions': 'پوزیشن‌ها', 'Orders': 'سفارش‌ها', 'History': 'تاریخچه',
   'Untitled': 'بدون‌عنوان', '⤓ Install': '⤓ نصب', '⤒ Export': '⤒ خروجی', 'Save': 'ذخیره', 'Add to chart': 'افزودن به نمودار', 'Save (Ctrl+S)': 'ذخیره (Ctrl+S)',
   'Open, create or install scripts': 'باز کردن، ساختن یا نصب اسکریپت', 'Download as .pine': 'دانلود به‌صورت .pine',
@@ -40,7 +41,7 @@ export const FA: Record<string, string> = {
   // trade ticket
   'Account': 'حساب', 'Buy': 'خرید', 'Sell': 'فروش', 'Market': 'بازار', 'Limit': 'لیمیت', 'Stop': 'استاپ', 'Stop‑limit': 'استاپ‌لیمیت', 'Trailing': 'تریلینگ',
   'Stop price': 'قیمت استاپ', 'Limit price': 'قیمت لیمیت', 'Trail by': 'فاصله‌ی تریل', 'Size': 'حجم', 'Quantity': 'مقدار', 'Take profit': 'حد سود', 'Stop loss': 'حد ضرر',
-  'Reduce-only': 'فقط کاهشی', 'OCO with a second order': 'OCO با سفارش دوم', 'Reset paper account': 'بازنشانی حساب تمرینی', 'units (qty)': 'واحد (مقدار)', 'quote amount': 'مبلغ',
+  'Reduce-only': 'فقط کاهشی', 'Exit plan': 'برنامه‌ی خروج', 'OCO with a second order': 'OCO با سفارش دوم', 'Reset paper account': 'بازنشانی حساب تمرینی', 'units (qty)': 'واحد (مقدار)', 'quote amount': 'مبلغ',
   '% of available': 'درصد از موجودی', '% equity risked to SL': 'درصد سرمایه در ریسک تا حد ضرر', '% of price': 'درصد قیمت', 'price units': 'واحد قیمت',
   // DOM
   'Time & Sales': 'ریز معاملات', 'merge': 'ادغام',

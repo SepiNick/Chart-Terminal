@@ -88,6 +88,7 @@
           <label class="btn" title="Install .pine / .mq4 / .mq5 / .mqh / .cs (NinjaScript) files — several at once">⤓ Install<input type="file" id="pnImport" accept=".pine,.txt,.pinescript,.mq4,.mq5,.mqh,.cs" multiple hidden></label>
           <button id="pnExport" title="Download as .pine">⤒ Export</button>
           <button id="pnSave" title="Save (Ctrl+S)">Save</button>
+          <button id="pnRepaint" title="Run the script with and without the data after each bar: a value that changes was using the future (lookahead)">Repaint check</button>
           <button id="pnAdd" class="on">Add to chart</button>
         </div>
         <div class="pine-main"><div id="pnEditor"></div><div id="pnConsole"></div></div>
@@ -132,6 +133,7 @@
       <label class="field" id="tQtyRow">Quantity <input id="tQty" type="number" step="any" min="0" value="0.01"></label>
       <label class="field"><span><input type="checkbox" id="tTpOn"> Take profit</span><input id="tTp" type="number" step="any"></label>
       <label class="field"><span><input type="checkbox" id="tSlOn"> Stop loss</span><input id="tSl" type="number" step="any"></label>
+      <label class="field" id="tPlanRow">Exit plan <input id="tPlan" placeholder="sl 2%; tp 1R 50%, 3R 50%; be 1; trail 1% 2" spellcheck="false" autocomplete="off" title="A stop and a ladder of targets that manage themselves: sl 98 or sl 2% · tp 1R 50%, 3R 50% (price, R multiple or %, then its share) · be 1 (stop to breakeven after target 1) · trail 1% 2 (trail after target 2). Paper account only."></label>
       <label class="tcheck"><input type="checkbox" id="tReduce"> Reduce-only</label>
       <label class="tcheck"><input type="checkbox" id="tOcoOn"> OCO with a second order</label>
       <label class="field" id="tOcoRow">Other leg (same side and size; one fill cancels the other) <span><select id="tOcoKind" aria-label="Other leg type"><option value="limit">Limit</option><option value="stop">Stop</option></select><input id="tOcoPx" type="number" step="any" placeholder="Price"></span></label>
@@ -349,6 +351,12 @@
     </form>
   </div>
   <form method="dialog" class="row"><span class="grow"></span><button value="ok">Close</button></form>
+  <form class="srv" id="sDiag" onsubmit="return false">
+    <h4>Diagnostics</h4>
+    <p class="hint muted">When a chart stays empty or something breaks: collect a report with your browser, the server, a quick check of every data source and the latest errors. Keys, tokens, passwords, e-mail and IP addresses are removed. Nothing is sent anywhere; copy the text to where you ask for help.</p>
+    <div class="row"><button type="button" id="diagRun">Collect report</button><button type="button" id="diagCopy" hidden>Copy</button><span class="st" id="diagSt" aria-live="polite"></span></div>
+    <textarea id="diagOut" readonly rows="12" spellcheck="false" hidden style="width:100%;font:12px ui-monospace,monospace;direction:ltr"></textarea>
+  </form>
 </dialog>
 <div id="toast"></div>
 <script type="module" src="/src/boot.ts"></script>

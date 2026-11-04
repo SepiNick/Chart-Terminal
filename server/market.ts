@@ -15,6 +15,7 @@ import { fxMarkets, yahooBars, yahooDividends, yahooTicker } from './yahoo.ts';
 import { isPublic } from './core/mode.ts';
 import { limits } from './core/quota.ts';
 import { IRAN } from './iran/index.ts';
+import { probeIran, timed } from './iran/probe.ts';
 
 // The MetaTrader bridge client is a private-server feature: a public server never loads it, and 'mt5' is just an unknown exchange there.
 const MT5 = isPublic ? null : await import('./mt5.ts');
@@ -185,6 +186,11 @@ onWs('sub', (c, m) => onMarket(c, m));
 onWs('unsub', (c, m) => onMarket(c, m));
 onWsClose(c => [...mineOf(c)].forEach(k => drop(c, k)));
 
+// Diagnostics: one small request per local data source (Yahoo, the Iranian sources, MetaTrader), with timing.
+route('GET', '/api/diag/sources', async () => {
+  const extra = [timed('fx (Yahoo)', async () => { const r = await yahooBars('EURUSD', '1d', undefined, 3); return `${r.bars.length} bars` }), ...(MT5 ? [timed('mt5 bridge', async () => `${(await MT5.mt5Markets()).length} symbols`)] : [])];
+  return { at: Date.now(), sources: await probeIran(Object.keys(IRAN), extra) };
+});
 route('GET', '/api/health', () => ({ ok: true, exchanges: cx.exchangeIds().length }), { public: true });
 for (const p of ['/api/exchanges', '/api/markets', '/api/bars', '/api/tickers', '/api/trades', '/api/calendar']) route('GET', p, c => marketRoute(c.url));
 route('GET', '/api/dividends', c => { const s = (c.url.searchParams.get('sym') ?? '').toUpperCase(); if (!/^[A-Z0-9.]{1,12}$/.test(s)) throw new HttpError(400, 'sym: a ticker'); return yahooDividends(s) });

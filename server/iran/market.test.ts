@@ -42,3 +42,15 @@ test('data.aggregate keeps Monday weeks by default', async () => {
   assert.deepEqual(aggregate(bars, 604800).map(b => new Date(b.time * 1000).toISOString().slice(0, 10)), ['2026-11-02', '2026-11-09']);
   assert.deepEqual(aggregate(bars, 604800, 172800).map(b => new Date(b.time * 1000).toISOString().slice(0, 10)), ['2026-10-31', '2026-11-07']);
 });
+
+test('probeIran: one timed line per enabled source; a failure is reported, not thrown', async () => {
+  const { probeIran } = await import('./probe.ts');
+  deps.fetch = async url => {
+    if (url.includes('nobitex') || url.includes('udf')) return new Response(JSON.stringify({ s: 'ok', t: [1_700_000_000], o: [1_600_000], h: [1_600_000], l: [1_600_000], c: [1_600_000], v: [1] }));
+    throw Error('connection refused');
+  };
+  const r = await probeIran(['nobitex', 'tgju']);
+  assert.deepEqual(r.map(x => [x.source, x.ok]), [['nobitex', true], ['tgju', false]]);
+  assert.match(r[0].detail, /1 bars/);
+  assert.match(r[1].detail, /connection refused/);
+});

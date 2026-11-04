@@ -27,7 +27,7 @@ const CLASS: Record<string, 'U-id' | 'U-list' | 'G' | 'AUTH' | 'ADMIN' | 'PUB'> 
   'GET /api/notify/push/key': 'PUB', 'POST /api/notify/push/subscribe': 'U-list', 'POST /api/notify/push/unsubscribe': 'U-list', 'GET /api/notify/settings': 'U-list', 'PUT /api/notify/settings': 'U-list', 'POST /api/notify/test': 'U-list', 'GET /api/notify/log': 'U-list',
   'GET /api/alerts': 'U-list', 'POST /api/alerts': 'U-list', 'GET /api/alerts/log': 'U-list', 'DELETE /api/alerts/log': 'U-list', 'POST /api/alerts/log/import': 'U-list', 'PUT /api/alerts/:id': 'U-id', 'DELETE /api/alerts/:id': 'U-id',
   'POST /api/share/snapshot': 'U-list', 'GET /s/:id': 'PUB', 'POST /api/share/layout': 'U-list', 'GET /api/share/layout/:id': 'U-id', 'GET /api/share': 'U-list', 'DELETE /api/share/:id': 'U-id',
-  'GET /api/exchanges': 'G', 'GET /api/markets': 'G', 'GET /api/bars': 'G', 'GET /api/tickers': 'G', 'GET /api/trades': 'G', 'GET /api/calendar': 'G', 'GET /api/dividends': 'G', 'GET /api/derivs/:kind': 'G',
+  'GET /api/exchanges': 'G', 'GET /api/markets': 'G', 'GET /api/bars': 'G', 'GET /api/tickers': 'G', 'GET /api/trades': 'G', 'GET /api/calendar': 'G', 'GET /api/dividends': 'G', 'GET /api/diag/sources': 'G', 'GET /api/derivs/:kind': 'G',
   'GET /api/news': 'G', 'GET /api/dex': 'G', 'GET /api/coins': 'G', 'GET /api/global': 'G', 'GET /api/global/history': 'G', 'GET /api/breadth': 'G', 'GET /api/uptrend': 'G', 'GET /api/treasury': 'G', 'GET /api/us-stocks': 'G',
   'GET /api/sec/facts': 'G', 'GET /api/sec/submissions': 'G', 'GET /api/sec/cik': 'G', 'GET /api/sec/frame': 'G', 'GET /api/sec/file': 'G', 'GET /api/sec/earnings': 'G', 'GET /api/sec/tickers': 'G',
 };
