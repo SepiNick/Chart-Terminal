@@ -12,7 +12,8 @@ import type { WorkerMsg } from './tester/worker.ts';
 import type { Metrics, OptResult, ParamSpec, TesterData, Trade, WalkForwardResult } from './tester/types.ts';
 import type { PineValue } from './pine/types.ts';
 import { $, calcPrec, esc, store, toast } from './store.ts';
-import { api, onServer, serverMode, wsSend } from './sync.ts';
+import { api, apiTrade, onServer, serverMode, wsSend } from './sync.ts';
+import { gate } from './servers.ts';
 import { sourceFor } from './pineui.ts';
 import { scriptSig } from './scriptsig.ts';
 
@@ -436,7 +437,7 @@ onServer('forward', m => { srvList = m.list as SrvFwd[]; if (tab === 'fwd') forw
 const sent = new Map<string, { key: string; at: number }>();
 let listing = false;
 function serverForward() {
-  if (!srvList && !listing) { listing = true; api<SrvFwd[]>('/api/forward').then(l => { srvList ??= l }).catch(() => {}).finally(() => { listing = false }) }
+  if (!srvList && !listing && gate('forward').on) { listing = true; apiTrade<SrvFwd[]>('/api/forward').then(l => { srvList ??= l }).catch(() => {}).finally(() => { listing = false }) }
   if (!cur || !srvList?.length) return;
   const src = sourceFor(cur.run.id, cur.p.prec), last = cur.p.vb().at(-1);
   if (!src || !last) return;
@@ -452,7 +453,8 @@ function serverForward() {
 const CHANNELS = ['push', 'telegram', 'email', 'webhook'];
 const fwdOpts = { qty: 1, channels: ['push'] };   // kept across the re-renders live ticks cause
 function serverForwardView(el: HTMLElement) {
-  if (!srvList) { api<SrvFwd[]>('/api/forward').then(l => { srvList = l; forwardView() }).catch(e => { el.innerHTML = `<span class="dn">${esc((e as Error).message)}</span>` }); el.innerHTML = '<span class="muted">Loading…</span>'; return }
+  if (!gate('forward').on) { el.innerHTML = `<span class="muted">${esc(gate('forward').why)}</span>`; return }
+  if (!srvList) { apiTrade<SrvFwd[]>('/api/forward').then(l => { srvList = l; forwardView() }).catch(e => { el.innerHTML = `<span class="dn">${esc((e as Error).message)}</span>` }); el.innerHTML = '<span class="muted">Loading…</span>'; return }
   el.innerHTML = `${cur ? `<div class="row wrap">
       <label>Size multiplier <input type="number" id="fwdQty" value="${esc(fwdOpts.qty)}" min="0" step="any" style="width:70px"></label>
       <span class="muted">Notify:</span> ${CHANNELS.map(c => `<label><input type="checkbox" data-fch="${c}"${fwdOpts.channels.includes(c) ? " checked" : ""}> ${c}</label>`).join(" ")}
@@ -470,7 +472,7 @@ function serverForwardView(el: HTMLElement) {
     const src = sourceFor(cur.run.id, cur.p.prec);
     if (!src) { toast('Save the script first'); return }
     try {
-      await api('/api/forward', { body: { name: cur.run.name, sym: cur.p.cfg.symbol, tf: cur.p.cfg.tf, ...src, inputs: baseInputs(), qtyMult: fwdOpts.qty, channels: fwdOpts.channels } });
+      await apiTrade('/api/forward', { body: { name: cur.run.name, sym: cur.p.cfg.symbol, tf: cur.p.cfg.tf, ...src, inputs: baseInputs(), qtyMult: fwdOpts.qty, channels: fwdOpts.channels } });
       toast('Forward test started on the server (paper account)');
     } catch (e) { toast(`Could not start: ${(e as Error).message}`) }
   });
@@ -481,7 +483,7 @@ function serverForwardView(el: HTMLElement) {
   el.querySelector<HTMLElement>('#fwdStop')?.addEventListener('click', () => { fwd = null; saveFwd(); forwardView() });
   el.querySelectorAll<HTMLElement>('[data-fdel]').forEach(b => b.addEventListener('click', () => {
     if (!confirm('Stop this forward test? Its log is deleted; paper fills stay in the account.')) return;
-    api(`/api/forward/${encodeURIComponent(b.dataset.fdel!)}`, { method: 'DELETE' }).then(() => { if (srvLog?.id === b.dataset.fdel) srvLog = null; toast('Forward test stopped') }).catch(e => toast((e as Error).message));
+    apiTrade(`/api/forward/${encodeURIComponent(b.dataset.fdel!)}`, { method: 'DELETE' }).then(() => { if (srvLog?.id === b.dataset.fdel) srvLog = null; toast('Forward test stopped') }).catch(e => toast((e as Error).message));
   }));
   el.querySelectorAll<HTMLElement>('[data-flog]').forEach(b => b.addEventListener('click', () => {
     const id = b.dataset.flog!;

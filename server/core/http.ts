@@ -9,9 +9,9 @@ import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { authenticate, userOfToken } from './auth.ts';
+import { authenticate, protocolToken, userOfToken } from './auth.ts';
 import { HttpError, bad } from './errors.ts';
-import { clientIp, isHttps, isPublic } from './mode.ts';
+import { CORS_ORIGINS, clientIp, isHttps, isPublic } from './mode.ts';
 import { limits } from './quota.ts';
 import { ANON, userDb, type User } from './userdb.ts';
 
@@ -23,6 +23,8 @@ export interface Ctx {
   body: unknown;            // parsed JSON (or Buffer for raw routes)
   secure: boolean;          // request came over HTTPS
   session: string | null;   // session token (null only on public routes)
+  bearer: boolean;          // authenticated by a Bearer device token (no cookie, no CSRF check)
+  crossSite: boolean;       // device login/register/recover from another origin: the handler must hand out a token, never a cookie
   user: User;               // the caller (ANON on public routes without a session)
   readonly db: DatabaseSync;   // the caller's own database; there is no handle to anyone else's
 }
@@ -105,6 +107,7 @@ const BUDGET = (Number(process.env.CT_BODY_BUDGET_MB) || 64) * 1024 * 1024;
 let inBytes = 0;
 const inBytesBy = new Map<string, number>();   // per principal: one account or address may hold at most a quarter of the budget
 const MUST_CHANGE_OK = new Set(['/api/auth/password', '/api/auth/logout']);
+const DEVICE_AUTH = new Set(['/api/auth/login', '/api/auth/register', '/api/auth/recover']);
 const slow = (s: number, msg: string) => Object.assign(new HttpError(429, msg), { retryAfter: s });
 
 /** CSRF. Private: a request with an Origin must match Host (curl, tests and the app send none or a matching one). Public: browsers only. */
@@ -118,11 +121,24 @@ export function csrfOk(req: IncomingMessage): boolean {
 export async function handle(req: IncomingMessage, res: ServerResponse, listenerSecure: boolean) {
   const url = new URL(req.url ?? '/', 'http://local');
   const secure = isHttps(req, listenerSecure);
-  const c: Ctx = { req, res, url, params: {}, body: undefined, secure, session: null, user: ANON, get db() { return userDb(this.user.id) } };
+  const c: Ctx = { req, res, url, params: {}, body: undefined, secure, session: null, bearer: false, crossSite: false, user: ANON, get db() { return userDb(this.user.id) } };
   const ip = clientIp(req);
   let counted = 0;
   try {
     if (!allowedHost(req, url.pathname)) throw new HttpError(421, 'Unknown host');
+    // CORS (off unless CT_CORS_ORIGINS): only the exact listed origin is echoed, never credentials (cookies do not cross origins).
+    if (CORS_ORIGINS.size) {
+      res.setHeader('vary', 'Origin');
+      const o = req.headers.origin;
+      if (typeof o === 'string' && CORS_ORIGINS.has(o)) {
+        res.setHeader('access-control-allow-origin', o);
+        res.setHeader('access-control-expose-headers', 'retry-after');
+        if (req.method === 'OPTIONS') {
+          res.writeHead(204, { 'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS', 'access-control-allow-headers': 'authorization, content-type, x-ct-client', 'access-control-max-age': '600', ...SECURITY_HEADERS }).end();
+          return;
+        }
+      }
+    }
     const r = routes.find(x => x.method === req.method && x.re.test(url.pathname));
     if (!r) {
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'Not found');
@@ -130,14 +146,23 @@ export async function handle(req: IncomingMessage, res: ServerResponse, listener
       throw new HttpError(404, 'Not found');
     }
     const a = authenticate(req, secure);
-    if (a) { c.session = a.token; c.user = a.user }
+    if (a) { c.session = a.token; c.user = a.user; c.bearer = a.bearer }
     if (isPublic && (!a || r.public)) {   // anonymous callers: per-IP bucket, and a stricter one for the login/register family
       const w = take('ip:' + ip, 5, 30) || (url.pathname.startsWith('/api/auth/') ? take('auth:' + ip, 1, 60) : 0);
       if (w) throw slow(w, 'Too many requests');
     }
     if (!r.public && !a) throw new HttpError(401, 'Login required');
     // CSRF: state-changing requests must come from our own pages (cookies are SameSite=Strict too).
-    if (req.method !== 'GET' && req.method !== 'HEAD' && !csrfOk(req)) throw new HttpError(403, 'Cross-site request blocked');
+    // A Bearer header cannot be sent by a cross-site form, so token requests skip the Origin check but still need x-ct-client.
+    const xct = /^[\w-]{8,64}$/.test(String(req.headers['x-ct-client'] ?? ''));
+    if (a?.bearer && !xct) throw new HttpError(403, 'Missing client header');
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !a?.bearer && !csrfOk(req)) {
+      // The one cross-origin door: device login/register/recover from a listed origin (or a non-browser client). The handler refuses it without `device`.
+      const o = req.headers.origin;
+      const ok = req.method === 'POST' && DEVICE_AUTH.has(url.pathname) && xct && (typeof o === 'string' ? CORS_ORIGINS.has(o) : !req.headers['sec-fetch-site']);
+      if (!ok) throw new HttpError(403, 'Cross-site request blocked');
+      c.crossSite = true;
+    }
     if (a?.user.mustChange && !MUST_CHANGE_OK.has(url.pathname) && !r.public) throw Object.assign(new HttpError(403, 'Change your password first'), { code: 'must_change' });
     if (isPublic && a) {
       const L = limits(a.user.id), w = take('u:' + a.user.id, L.rps, L.burst);
@@ -233,10 +258,12 @@ export function broadcastTo(userId: number, msg: unknown, except?: WsClient) {
 /** Close sockets matching `pred` (sign-out, password change, disabled account). */
 export function closeClients(pred: (c: WsClient) => boolean, code = 4001, reason = 'Signed out') { for (const c of clients) if (pred(c)) c.ws.close(code, reason) }
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: isPublic ? 1024 : 1024 * 1024 });
+const wss = new WebSocketServer({ noServer: true, handleProtocols: ps => [...ps].find(p => p.startsWith('ct.')) ?? false, maxPayload: isPublic ? 1024 : 1024 * 1024 });
 export function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-  if (!req.url?.startsWith('/ws') || !allowedHost(req) || !sameOrigin(req) || (isPublic && !req.headers.origin)) { socket.destroy(); return }   // browsers always send Origin
-  const a = authenticate(req, isHttps(req, false));
+  if (!req.url?.startsWith('/ws') || !allowedHost(req)) { socket.destroy(); return }
+  const a = authenticate(req, isHttps(req, false), protocolToken(req));   // token: subprotocol `ct.<token>`, never a query string
+  // Cookie auth keeps the Origin check (cross-site WebSocket hijacking); a token cannot be sent by a foreign page on its own.
+  if (!a?.bearer && (!sameOrigin(req) || (isPublic && !req.headers.origin))) { socket.destroy(); return }   // browsers always send Origin
   if (!a) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return }
   if (isPublic) {
     const mine = [...clients].filter(x => x.userId === a.user.id).length;

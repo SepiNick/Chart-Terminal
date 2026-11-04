@@ -1,6 +1,7 @@
 // Pictures and voice notes for journal entries. Server mode: stored on the server (/api/media); offline, or when an
 // upload can't reach the server, kept in this browser's IndexedDB and uploaded at the next server-mode start.
 import { serverMode } from '../sync.ts';
+import { serverFetch } from '../servers.ts';
 
 const DB = 'ct-journal-media', STORE = 'blobs';
 let dbp: Promise<IDBDatabase> | null = null;
@@ -18,7 +19,7 @@ function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T
 const localBlob = (id: string) => tx<Blob | undefined>('readonly', s => s.get(id)).catch(() => undefined);
 /** POST a blob to the server → its new id. Errors carry `.status` when the server answered. */
 export async function uploadBlob(blob: Blob): Promise<string> {
-  const r = await fetch('/api/media', { method: 'POST', body: blob, headers: { 'content-type': blob.type || 'application/octet-stream' }, credentials: 'same-origin' });
+  const r = await serverFetch('/api/media', { method: 'POST', body: blob, headers: { 'content-type': blob.type || 'application/octet-stream' } });
   const j = await r.json().catch(() => ({})) as { id?: string; error?: string };
   if (!r.ok || !j.id) throw Object.assign(Error(j.error ?? `Upload failed (${r.status})`), { status: r.status });
   return j.id;
@@ -41,7 +42,7 @@ export async function mediaUrl(id: string): Promise<string | null> {
 export async function delMedia(id: string) {
   await tx('readwrite', s => s.delete(id)).catch(() => {});
   const u = urls.get(id); if (u) { URL.revokeObjectURL(u); urls.delete(id) }
-  if (serverMode) await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' }).catch(() => {});
+  if (serverMode) await serverFetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
 }
 
 type MediaHolder = { trades?: { media?: { id: string }[] }[] };

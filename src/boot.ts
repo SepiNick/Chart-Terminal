@@ -3,24 +3,20 @@
 import { api, hydrate, localKeys, localSnapshot, queueState, setServerMode, startSync, type ServerState } from './sync.ts';
 import { store } from './store.ts';
 import { accountMenu, dialog, injectStyle, loginScreen, setupScreen } from './login.ts';
+import { accountScreen, mustChangeScreen } from './accountscreens.ts';
+import { applyGates, offlineBanner } from './serversui.ts';
+import { parseStatus, recordStatus, serverFetch, setToken, syncServer, type ServerStatus } from './servers.ts';
 import { uploadLocalMedia } from './journal/media.ts';
 
-type Status = { setup: boolean; loggedIn: boolean };
-async function authStatus(): Promise<Status | null> {
+async function authStatus(): Promise<ServerStatus | null> {
   try {
-    const r = await fetch('/api/auth/status', { credentials: 'same-origin' });
-    const j = r.ok ? await r.json() as Status : null;
-    return typeof j?.loggedIn === 'boolean' ? j : null;   // Vite without the server answers 5xx; static hosting answers HTML
+    const r = await serverFetch('/api/auth/status');
+    const st = r.ok ? parseStatus(await r.json()) : null;   // Vite without the server answers 5xx; static hosting answers HTML
+    if (st) recordStatus(syncServer().id, st);
+    return st;
   } catch { return null }
 }
 
-function offlineBanner() {
-  injectStyle();
-  const d = document.createElement('div'); d.className = 'ct-banner';
-  d.innerHTML = 'Offline — changes stay on this device<button title="Hide">✕</button>';
-  d.querySelector('button')!.onclick = () => d.remove();
-  document.body.append(d);
-}
 
 function downloadBackup() {
   const a = document.createElement('a');
@@ -60,9 +56,12 @@ async function boot() {
   const theme = () => { const t = store.get<{ theme?: string }>('settings', {}).theme; if (t) document.documentElement.dataset.theme = t };
   theme();
   const st = await authStatus();
-  if (!st) offlineBanner();
+  if (!st) offlineBanner(syncServer().name);
   else {
-    if (st.setup) await setupScreen(); else if (!st.loggedIn) await loginScreen();
+    let me = st.user;
+    if (!st.loggedIn) setToken(syncServer().id, undefined);   // a stale token
+    if (st.mode === 'public') { if (!st.loggedIn) me = await accountScreen(st); if (me?.mustChange) await mustChangeScreen(me.name) }
+    else if (st.setup) await setupScreen(); else if (!st.loggedIn) await loginScreen();
     let state = await api<ServerState>('/api/state');
     if (!Object.keys(state).length && localKeys().length) { await offerUpload(); state = await api<ServerState>('/api/state') }
     hydrate(state); theme();
@@ -72,6 +71,7 @@ async function boot() {
     if (j) queueState('journal', j);
   }
   await import('./main.ts');
+  applyGates();
   if (st) accountMenu();
 }
 

@@ -1,6 +1,7 @@
 // Client side of the server connection (docs/phase5-contracts.md §3): one event WebSocket with server messages fanned
 // out by `type`, the queue that pushes `store.set` writes to the server, and the localStorage <-> server helpers boot uses.
 // Imports nothing from the app so every module (store.ts included) can use it.
+import { clientId as cid, serverFetch, serverSocket, syncServer, tradeServer, type Role } from './servers.ts';
 type Handler = (msg: Record<string, unknown>) => void;
 const handlers = new Map<string, Set<Handler>>();
 
@@ -17,18 +18,21 @@ export let serverMode = false;
 export function setServerMode(on: boolean) { serverMode = on }
 
 /** Random id of this tab: sent in `sync.hello` and as `x-ct-client`, so the server doesn't echo our own writes back. */
-export const clientId = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
+export const clientId = cid;
 
 /** Call to the server API (JSON body, or a Blob sent as is); throws Error(message) on failure (with `.status` when the server answered). */
-export async function api<T>(path: string, init: { method?: string; body?: unknown; keepalive?: boolean } = {}): Promise<T> {
-  const headers: Record<string, string> = { 'x-ct-client': clientId }, blob = init.body instanceof Blob;
+export async function api<T>(path: string, init: { method?: string; body?: unknown; keepalive?: boolean; role?: Role } = {}): Promise<T> {
+  const headers: Record<string, string> = {}, blob = init.body instanceof Blob;
   if (init.body !== undefined) headers['content-type'] = blob ? (init.body as Blob).type : 'application/json';
-  const r = await fetch(path, { method: init.method ?? (init.body === undefined ? 'GET' : 'POST'), headers, body: init.body === undefined ? undefined : blob ? init.body as Blob : JSON.stringify(init.body), credentials: 'same-origin', keepalive: init.keepalive });
+  const r = await serverFetch(path, { method: init.method ?? (init.body === undefined ? 'GET' : 'POST'), headers, body: init.body === undefined ? undefined : blob ? init.body as Blob : JSON.stringify(init.body), keepalive: init.keepalive }, init.role);
   if (r.status === 204) return undefined as T;
   const j = await r.json().catch(() => ({ error: `Server error ${r.status}` }));
   if (!r.ok) throw Object.assign(Error((j as { error?: string }).error ?? String(r.status)), { status: r.status, data: j });
   return j as T;
 }
+
+/** Same as api, but to the trading server only (brokers, forward tests, AI/ML); throws when none is connected, never uses the sync server. */
+export const apiTrade: typeof api = (path, init) => api(path, { ...init, role: 'trade' });
 
 // ---------- which keys sync ----------
 /** Keys the running app applies live when another device or the server changes them (the server writes `acct` for forward-test fills). */
@@ -166,9 +170,18 @@ export function startSync() {
   onServer('state', m => applyRemote(String(m.key), m.value, Number(m.rev) || 0));
   addEventListener('pagehide', () => void flushNow(true));
   connect(false);
+  if (tradeServer() && tradeServer() !== syncServer()) tradeEvents(1000);   // broker pushes come from the trading server
+}
+/** Event socket of a separate trading server: same message fan-out, no state sync. */
+function tradeEvents(wait: number) {
+  let ws: WebSocket;
+  try { ws = serverSocket('/ws', 'trade') } catch { return }
+  ws.onopen = () => { wait = 1000 };
+  ws.onmessage = e => { let m: unknown; try { m = JSON.parse(String(e.data)) } catch { return } if (m && typeof (m as { type?: unknown }).type === 'string') dispatchServer(m as Record<string, unknown>) };
+  ws.onclose = () => { setTimeout(() => tradeEvents(wait), wait); wait = Math.min(wait * 2, 30_000) };
 }
 function connect(again: boolean) {
-  const ws = (sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`));
+  const ws = (sock = serverSocket('/ws'));
   let opened = false;
   ws.onopen = () => {
     opened = true; online = true; wait = 1000; status();
@@ -179,7 +192,7 @@ function connect(again: boolean) {
   ws.onclose = async () => {
     online = false; status();
     if (!opened) {   // refused before opening: maybe the session ended (password changed on another device)
-      const st = await fetch('/api/auth/status').then(r => r.json() as Promise<{ loggedIn?: boolean }>).catch(() => null);
+      const st = await serverFetch('/api/auth/status').then(r => r.json() as Promise<{ loggedIn?: boolean }>).catch(() => null);
       if (st && !st.loggedIn) return signedOut();
     }
     setTimeout(() => connect(true), wait); wait = Math.min(wait * 2, 30_000);
