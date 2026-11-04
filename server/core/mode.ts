@@ -16,6 +16,17 @@ export const TRUST_PROXY = ['1', 'true', 'yes'].includes((process.env.CT_TRUST_P
 const norm = (ip: string) => ip.replace(/^::ffff:/i, '').toLowerCase();
 const PROXY_IPS = new Set(['127.0.0.1', '::1', ...(process.env.CT_PROXY_IPS ?? '').split(',').map(s => norm(s.trim())).filter(Boolean)]);
 export const REGISTRATION: 'invite' | 'open' | 'closed' = (['invite', 'open', 'closed'] as const).find(x => x === (process.env.CT_REGISTRATION ?? '').toLowerCase()) ?? 'invite';
+/**
+ * CT_CORS_ORIGINS: exact origins (scheme://host[:port], comma-separated) that may call this server cross-origin with a
+ * Bearer device token. Off by default. `*`, `null` and anything that is not a bare origin stop the server at start-up.
+ */
+export const CORS_ORIGINS: ReadonlySet<string> = new Set((process.env.CT_CORS_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean).map(s => {
+  let o = ''; try { o = new URL(s).origin } catch {}
+  if (!o || s.includes('*') || o === 'null' || o !== s) throw Error(`CT_CORS_ORIGINS: "${s}" is not an exact origin like https://app.example.com (wildcards and "null" are refused)`);
+  return s;
+}));
+/** Shown to clients that connect to several servers (GET /api/auth/status). */
+export const SERVER_NAME = (process.env.CT_SERVER_NAME ?? '').replace(/[^\P{Cc}]/gu, '').trim().slice(0, 60);
 export const publicUrl = (): URL | null => { try { return process.env.CT_PUBLIC_URL ? new URL(process.env.CT_PUBLIC_URL) : null } catch { return null } };
 /** Cookies get `Secure` (and in public mode the `__Host-` prefix) when the site is served over HTTPS. */
 export const publicHttps = () => isPublic && publicUrl()?.protocol === 'https:';

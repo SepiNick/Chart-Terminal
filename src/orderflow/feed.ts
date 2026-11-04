@@ -1,6 +1,7 @@
 // Live trades and order book. Binance symbols talk to Binance's public mirror directly (CORS-enabled);
 // EXCH:SYMBOL symbols go through the local data server (CCXT). FX symbols have no order flow.
 import { isRemote, serverJson, splitSym } from '../data.ts';
+import { serverSocket as openSocket } from '../servers.ts';
 import type { BookSnap, Print } from './model.ts';
 import { api, serverMode } from '../sync.ts';
 
@@ -139,7 +140,7 @@ const remoteSubs = new Map<string, (d: unknown) => void>();
 let ws: WebSocket | null = null;
 function serverSocket() {
   if (ws && ws.readyState <= 1) return ws;
-  const s = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  const s = openSocket('/ws');
   ws = s;
   s.onopen = () => remoteSubs.forEach((_, k) => { const [kind, exchange, symbol] = k.split('|'); s.send(JSON.stringify({ op: 'sub', kind, exchange, symbol })) });
   s.onmessage = e => { const m = JSON.parse(e.data); if (m.kind) remoteSubs.get(`${m.kind}|${m.exchange}|${m.symbol}`)?.(m.data) };

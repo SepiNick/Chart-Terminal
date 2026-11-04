@@ -23,6 +23,8 @@ migration('users/1', `
   CREATE TABLE push_endpoints (endpoint TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users ON DELETE CASCADE);
   CREATE TABLE share_index (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users ON DELETE CASCADE);`);
 
+migration('users/2', `ALTER TABLE sessions ADD COLUMN device TEXT`);   // non-NULL = a Bearer device token (label); NULL = a browser cookie session
+
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const SESSION_MS = (Number(process.env.CT_SESSION_DAYS) > 0 ? Number(process.env.CT_SESSION_DAYS) : 30) * 86400_000, IDLE_MS = 14 * 86400_000, MAX_SESSIONS = 20;
 export const UNIFORM_LOGIN_ERROR = 'Wrong username or password';
@@ -157,26 +159,34 @@ function allow(key: string, max: number, windowMs: number): boolean {
 }
 
 // ---------- sessions ----------
-export function createSession(userId: number, req: IncomingMessage): string {
+/** `device` = label: the row is a Bearer device token (never pruned by the cookie-session cap, never listed with sessions). */
+export function createSession(userId: number, req: IncomingMessage, device: string | null = null): string {
   const token = randomBytes(32).toString('base64url'), now = Date.now();
-  db.prepare('INSERT INTO sessions (token_hash, user_id, created, last_seen, expires, agent, ip) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(sha(token), userId, now, now, now + SESSION_MS, String(req.headers['user-agent'] ?? '').slice(0, 200), clientIp(req));
-  db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash NOT IN (SELECT token_hash FROM sessions WHERE user_id = ? ORDER BY last_seen DESC LIMIT ?)').run(userId, userId, MAX_SESSIONS);
+  db.prepare('INSERT INTO sessions (token_hash, user_id, created, last_seen, expires, agent, ip, device) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(sha(token), userId, now, now, now + SESSION_MS, String(req.headers['user-agent'] ?? '').slice(0, 200), clientIp(req), device);
+  if (!device) db.prepare('DELETE FROM sessions WHERE user_id = ? AND device IS NULL AND token_hash NOT IN (SELECT token_hash FROM sessions WHERE user_id = ? AND device IS NULL ORDER BY last_seen DESC LIMIT ?)').run(userId, userId, MAX_SESSIONS);
   return token;
 }
 export const endSession = (token: string) => { db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sha(token)) };
-export function sessionUser(token: string): User | null {
+/** `kind` restricts what the token may be: a cookie never carries a device token and a Bearer header never a cookie session. */
+export function sessionUser(token: string, kind?: 'cookie' | 'device'): User | null {
   const h = sha(token), now = Date.now();
-  const r = db.prepare('SELECT s.last_seen, s.expires, u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?').get(h) as (Row & { last_seen: number; expires: number }) | undefined;
-  if (!r || r.expires < now || now - r.last_seen > IDLE_MS || r.status !== 'active') return null;
+  const r = db.prepare('SELECT s.last_seen, s.expires, s.device, u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?').get(h) as (Row & { last_seen: number; expires: number; device: string | null }) | undefined;
+  if (!r || (kind && (kind === 'device') !== (r.device !== null)) || r.expires < now || now - r.last_seen > IDLE_MS || r.status !== 'active') return null;
   if (now - r.last_seen > 60_000) db.prepare('UPDATE sessions SET last_seen = ? WHERE token_hash = ?').run(now, h);
   return toUser(r);
 }
 export const revokeUserSessions = (userId: number) => { db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId) };
-export const listSessions = (userId: number) => db.prepare('SELECT substr(token_hash, 1, 16) AS id, created, last_seen, agent, ip FROM sessions WHERE user_id = ? ORDER BY last_seen DESC').all(userId) as { id: string }[];
+export const listSessions = (userId: number) => db.prepare('SELECT substr(token_hash, 1, 16) AS id, created, last_seen, agent, ip FROM sessions WHERE user_id = ? AND device IS NULL ORDER BY last_seen DESC').all(userId) as { id: string }[];
 export function endSessionById(userId: number, id: string): boolean {
   if (!/^[0-9a-f]{16}$/.test(id)) return false;
-  return db.prepare('DELETE FROM sessions WHERE user_id = ? AND substr(token_hash, 1, 16) = ?').run(userId, id).changes > 0;
+  return db.prepare('DELETE FROM sessions WHERE user_id = ? AND device IS NULL AND substr(token_hash, 1, 16) = ?').run(userId, id).changes > 0;
+}
+export const countDevices = (userId: number) => (db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND device IS NOT NULL').get(userId) as { n: number }).n;
+export const listDevices = (userId: number) => db.prepare('SELECT substr(token_hash, 1, 16) AS id, device AS label, created, last_seen AS lastUsed, ip FROM sessions WHERE user_id = ? AND device IS NOT NULL ORDER BY last_seen DESC').all(userId) as { id: string }[];
+export function endDeviceById(userId: number, id: string): boolean {
+  if (!/^[0-9a-f]{16}$/.test(id)) return false;
+  return db.prepare('DELETE FROM sessions WHERE user_id = ? AND device IS NOT NULL AND substr(token_hash, 1, 16) = ?').run(userId, id).changes > 0;
 }
 export const sessionIdOf = (token: string) => sha(token).slice(0, 16);
 

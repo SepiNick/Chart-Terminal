@@ -3,9 +3,9 @@
 // Keys never pass through here after the one POST in ui.ts; the server keeps them.
 import type { AccountInput, Broker, BrokerAccount, BrokerOrder, BrokerState, GuardianReport, Guard, OrderPatch, OrderReq } from './types.ts';
 import { registerBroker, unregisterBroker } from './registry.ts';
-import { api, onServer } from '../sync.ts';
+import { apiTrade, onServer } from '../sync.ts';
 
-export type Api = typeof api;
+export type Api = typeof apiTrade;
 const enc = encodeURIComponent;
 
 export class RemoteBroker implements Broker {
@@ -13,7 +13,7 @@ export class RemoteBroker implements Broker {
   private st: BrokerState | null = null;
   private subs = new Set<(s: BrokerState) => void>();
   private call: Api;
-  constructor(account: BrokerAccount, call: Api = api) { this.account = account; this.call = call }
+  constructor(account: BrokerAccount, call: Api = apiTrade) { this.account = account; this.call = call }
 
   state() { return this.st }
   /** Replace the state; a push older than what we have is ignored (a slow GET must not undo a newer WS update). */
@@ -52,7 +52,7 @@ const remotes = new Map<string, RemoteBroker>();
 let wired = false;
 
 /** Make the registry match the server's list: new accounts registered, deleted ones unregistered, the rest updated. */
-export function syncAccounts(list: BrokerAccount[], call: Api = api) {
+export function syncAccounts(list: BrokerAccount[], call: Api = apiTrade) {
   if (!wired) {
     wired = true;
     onServer('broker', m => remotes.get(String(m.account))?.push(m.state as BrokerState));
@@ -67,26 +67,26 @@ export function syncAccounts(list: BrokerAccount[], call: Api = api) {
   }
 }
 /** Load the exchange accounts from the server (server mode only). */
-export async function loadAccounts(call: Api = api) { const list = await call<BrokerAccount[]>('/api/broker/accounts'); syncAccounts(list, call); return list }
+export async function loadAccounts(call: Api = apiTrade) { const list = await call<BrokerAccount[]>('/api/broker/accounts'); syncAccounts(list, call); return list }
 export const remoteAccounts = () => [...remotes.values()].map(b => b.account);
 
 // ---------- account management (ui.ts) ----------
 /** The keys go to the server in this one request and are never sent back. */
-export async function addAccount(input: AccountInput, call: Api = api) {
+export async function addAccount(input: AccountInput, call: Api = apiTrade) {
   const a = await call<BrokerAccount>('/api/broker/accounts', { method: 'POST', body: input });
   await loadAccounts(call).catch(() => {});
   return a;
 }
-export async function deleteAccount(id: string, call: Api = api) {
+export async function deleteAccount(id: string, call: Api = apiTrade) {
   await call<void>(`/api/broker/accounts/${enc(id)}`, { method: 'DELETE' });
   if (remotes.delete(id)) unregisterBroker(id);
 }
-export async function saveAccount(id: string, patch: { label?: string; guard?: Partial<Guard> }, call: Api = api) {
+export async function saveAccount(id: string, patch: { label?: string; guard?: Partial<Guard> }, call: Api = apiTrade) {
   const a = await call<BrokerAccount>(`/api/broker/accounts/${enc(id)}`, { method: 'PUT', body: patch });
   const b = remotes.get(id); if (b) { b.account = a; registerBroker(b) }
   return a;
 }
-export async function checkAccount(id: string, call: Api = api) {
+export async function checkAccount(id: string, call: Api = apiTrade) {
   const r = await call<GuardianReport>(`/api/broker/accounts/${enc(id)}/check`, { method: 'POST' });
   await loadAccounts(call).catch(() => {});   // the check may have activated it
   return r;

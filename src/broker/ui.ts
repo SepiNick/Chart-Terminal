@@ -6,6 +6,7 @@ import { activeBroker, allBrokers, onBrokers, setActiveBroker } from './registry
 import { addAccount, checkAccount, deleteAccount, loadAccounts, saveAccount, tripReset } from './remote.ts';
 import { dialog, injectStyle } from '../login.ts';
 import { serverMode } from '../sync.ts';
+import { gate } from '../servers.ts';
 import { $, esc, toast } from '../store.ts';
 
 const EXCHANGES: { id: Exclude<BrokerId, 'paper'>; name: string; markets: Market[]; pass?: boolean; keys: string }[] = [
@@ -36,7 +37,7 @@ export function initAccountsUI() {
   const s = document.createElement('style'); s.textContent = CSS; document.head.append(s);
   onBrokers(() => { unsub(); unsub = activeBroker()?.onChange(() => renderAccounts()) ?? (() => {}); renderAccounts() });
   $('#s-accts').onclick = onClick;
-  if (serverMode) loadAccounts().catch(e => toast(`Exchange accounts: ${(e as Error).message}`));
+  if (serverMode && gate('trading').on) loadAccounts().catch(e => toast(`Exchange accounts: ${(e as Error).message}`));
 }
 
 /** Draw the panel (cheap; called on every state change of the active account while visible). */

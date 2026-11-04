@@ -5,6 +5,7 @@ import type { ChartPane } from '../chart.ts';
 import { $, esc, store, toast } from '../store.ts';
 import { chartContext, journalContext, SYSTEM, writePine, type JT, type Msg } from './assistant.ts';
 import { tfSeconds } from '../data.ts';
+import { serverFetch } from '../servers.ts';
 
 export interface AiHost { active(): ChartPane; trades(): JT[]; openPine(src: string): void }
 let host: AiHost, busy = false, found = '';   // found: the server the last status check reached (Ollama or LM Studio)
@@ -12,7 +13,7 @@ const log: (Msg & { code?: string; note?: string })[] = [];
 const cfg = { model: store.get<string>('aiModel', ''), url: store.get<string>('aiUrl', ''), lang: store.get<string>('aiLang', 'auto') };
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), j = await r.json().catch(() => ({}));
+  const r = await serverFetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }, 'trade'), j = await r.json().catch(() => ({}));
   if (!r.ok) throw Error((j as { error?: string }).error ?? String(r.status));
   return j as T;
 }
@@ -78,7 +79,7 @@ export async function refreshAi() {
   const sel = $<HTMLSelectElement>('#aiModel'), st = $('#aiStatus');
   st.textContent = 'checking…';
   try {
-    const s = await fetch(`/api/ai/status${cfg.url ? `?url=${encodeURIComponent(cfg.url)}` : ''}`).then(r => r.json()) as { url: string; online: boolean; models: string[]; model: string | null; error?: string };
+    const s = await serverFetch(`/api/ai/status${cfg.url ? `?url=${encodeURIComponent(cfg.url)}` : ''}`, {}, 'trade').then(r => r.json()) as { url: string; online: boolean; models: string[]; model: string | null; error?: string };
     if (s.error) throw Error(s.error);
     found = s.online ? s.url : '';
     if (!cfg.model || !s.models.includes(cfg.model)) cfg.model = s.models.includes(s.model ?? '') ? s.model! : s.models[0] ?? '';

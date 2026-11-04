@@ -20,7 +20,7 @@ const A = await signup(b, 'alice-a'), Bu = await signup(b, 'bob-b');
 // AUTH: login family · ADMIN: admin role + password · PUB: public by design (capability link, health, push key)
 const CLASS: Record<string, 'U-id' | 'U-list' | 'G' | 'AUTH' | 'ADMIN' | 'PUB'> = {
   'GET /api/health': 'PUB', 'GET /api/auth/status': 'AUTH', 'POST /api/auth/register': 'AUTH', 'POST /api/auth/login': 'AUTH', 'POST /api/auth/logout': 'AUTH',
-  'POST /api/auth/password': 'AUTH', 'POST /api/auth/recover': 'AUTH', 'POST /api/auth/recovery-codes': 'AUTH', 'GET /api/auth/sessions': 'U-list', 'DELETE /api/auth/sessions/:id': 'U-id',
+  'POST /api/auth/password': 'AUTH', 'POST /api/auth/recover': 'AUTH', 'POST /api/auth/recovery-codes': 'AUTH', 'GET /api/auth/devices': 'U-list', 'DELETE /api/auth/devices/:id': 'U-id', 'GET /api/auth/sessions': 'U-list', 'DELETE /api/auth/sessions/:id': 'U-id',
   'POST /api/admin/invites': 'ADMIN', 'POST /api/admin/users': 'ADMIN',
   'POST /api/media': 'U-list', 'GET /api/media/:id': 'U-id', 'DELETE /api/media/:id': 'U-id',
   'GET /api/state': 'U-list', 'PUT /api/state/:key': 'U-list', 'DELETE /api/state/:key': 'U-list',
@@ -67,6 +67,9 @@ test('A plants a marker in every per-user feature', async () => {
   const l = await a.json('POST', '/api/share/layout', { name: MA, layout: { panes: [{ symbol: MA }] } }); ids.layout = l.body.id;
   assert.equal((await a.json('POST', '/api/notify/test', { channel: 'popup' })).status, 200);
   ids.session = (await a.json('GET', '/api/auth/sessions')).body[0].id;
+  const dv = await a.json('POST', '/api/auth/login', { name: 'alice-a', password: PASS, device: MA });
+  assert.equal(dv.status, 200); assert.ok(dv.body.token);
+  ids.device = (await a.json('GET', '/api/auth/devices')).body[0].id;
   assert.ok(Object.values(ids).every(Boolean));
 });
 
@@ -91,6 +94,7 @@ test('B sees none of it through any route; foreign ids are 404, not 403', async 
   assert.equal((await A.c.call('GET', `/api/media/${ids.media}`)).status, 200, 'A data intact');
   assert.equal((await A.c.json('GET', '/api/alerts')).body.length, 1);
   assert.equal((await A.c.json('GET', '/api/auth/sessions')).body.length, 1);
+  assert.equal((await A.c.json('GET', '/api/auth/devices')).body.length, 1, 'A device intact');
   for (const p of ['/api/state', '/api/alerts', '/api/alerts/log', '/api/notify/settings', '/api/notify/log', '/api/share']) leakCheck(p, JSON.stringify((await c.json('GET', p)).body));
   assert.deepEqual((await c.json('GET', '/api/alerts')).body, []);
   assert.deepEqual((await c.json('GET', '/api/notify/settings')).body.push.subscriptions, []);

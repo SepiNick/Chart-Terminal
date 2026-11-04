@@ -1,8 +1,11 @@
 // Sign-in screens (first password, login) and the account menu in the top bar. Built at runtime so index.html stays
 // the app's markup; styled with the app's CSS variables.
 import { api, flushNow, onSyncStatus, type SyncStatus } from './sync.ts';
+import { deviceLabel, gate, isSameOrigin, setToken, syncServer } from './servers.ts';
 import { releasePushOnServer } from './push.ts';
 import { esc, toast } from './store.ts';
+import { codesOf } from './authrules.ts';
+import { openServers } from './serversui.ts';
 
 const CSS = `
 .ct-auth{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:16px}
@@ -23,21 +26,22 @@ export function injectStyle() { if (styled) return; styled = true; const s = doc
 const isThisPc = () => ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 
 /** Full-screen form; resolves when `submit` resolves (errors from it are shown under the inputs). */
-function screen(html: string, submit: (f: HTMLFormElement) => Promise<void>): Promise<void> {
+export function screen(html: string, submit: (f: HTMLFormElement) => Promise<void>, extra = '', btnLabel = 'Continue'): Promise<string> {
   injectStyle();
   const wrap = document.createElement('div'); wrap.className = 'ct-auth';
-  wrap.innerHTML = `<form novalidate>${html}<div class="ct-err" role="alert"></div><button class="on">Continue</button></form>`;
+  wrap.innerHTML = `<form novalidate>${html}<div class="ct-err" role="alert"></div><button class="on">${btnLabel}</button>${extra}</form>`;
   document.body.append(wrap);
   const f = wrap.querySelector('form')!, err = f.querySelector('.ct-err')!, btn = f.querySelector<HTMLButtonElement>('button.on')!;
   f.querySelector<HTMLInputElement>('input')?.focus();
   return new Promise(res => {
+    f.onclick = e => { const go = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go; if (go) { e.preventDefault(); wrap.remove(); res(go) } };
     f.onsubmit = async e => {
       e.preventDefault(); err.textContent = ''; btn.disabled = true;
-      try { await submit(f); wrap.remove(); res() } catch (x) { err.textContent = (x as Error).message } finally { btn.disabled = false }
+      try { await submit(f); wrap.remove(); res('done') } catch (x) { err.textContent = (x as Error).message } finally { btn.disabled = false }
     };
   });
 }
-const val = (f: HTMLFormElement, name: string) => (f.elements.namedItem(name) as HTMLInputElement).value;
+export const val = (f: HTMLFormElement, name: string) => (f.elements.namedItem(name) as HTMLInputElement).value;
 
 export function setupScreen() {
   return screen(`<h2>Set a password</h2>
@@ -52,11 +56,19 @@ export function setupScreen() {
   });
 }
 
+/** Auth call; on a server other than the one serving the page it asks for a device token (no cookie) and keeps it. */
+export async function authPost<T = { ok: true }>(path: string, body: Record<string, unknown>): Promise<T> {
+  const s = syncServer(), remote = !isSameOrigin(s);
+  const j = await api<T & { token?: string }>(path, { body: remote ? { ...body, device: deviceLabel() } : body });
+  if (remote && j.token) setToken(s.id, j.token);
+  return j;
+}
+
 export function loginScreen() {
   return screen(`<h2>Chart Terminal</h2><p class="muted">Sign in to your server.</p>
     <input type="password" name="pw" placeholder="Password" autocomplete="current-password">`, async f => {
     const pw = val(f, 'pw'); if (!pw) throw Error('Enter your password');
-    await api('/api/auth/login', { body: { password: pw } });   // the server's message covers wrong password and lockout
+    await authPost('/api/auth/login', { password: pw });   // the server's message covers wrong password and lockout
   });
 }
 
@@ -88,7 +100,7 @@ export function accountMenu() {
     const r = b.getBoundingClientRect();
     m.style.top = `${r.bottom + 4}px`; m.style.right = `${Math.max(4, innerWidth - r.right)}px`;
     m.innerHTML = `<div class="ctx-i muted" style="pointer-events:none">Signed in · ${esc(LABEL[st])}</div><hr>
-      <div class="ctx-i" data-a="accts">Exchange accounts…</div><div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div><hr>
+      ${gate('trading').on ? '<div class="ctx-i" data-a="accts">Exchange accounts…</div>' : ''}<div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div>${syncServer().mode === 'public' ? '<div class="ctx-i" data-a="codes">New recovery codes…</div>' : ''}<div class="ctx-i" data-a="servers">Servers…</div><hr>
       <div class="ctx-i" data-a="logout">Log out</div>`;
     document.body.append(m);
     const off = () => { m.remove(); removeEventListener('pointerdown', out, true) };
@@ -101,16 +113,31 @@ export function accountMenu() {
       if (a === 'sessions') void sessions();
       if (a === 'shares') void shares();
       if (a === 'password') changePassword();
+      if (a === 'servers') openServers();
+      if (a === 'codes') newCodes();
       if (a === 'logout') void logout();
     };
   };
 }
 async function logout() {
   await flushNow();
-  const mode = await fetch('/api/auth/status').then(r => r.json()).then(j => j.mode).catch(() => 'private');
-  if (mode === 'public') await releasePushOnServer().catch(() => {});   // someone else may sign in on this browser next
+  const s = syncServer();
+  if (s.mode === 'public') await releasePushOnServer().catch(() => {});   // someone else may sign in on this browser next
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
+  setToken(s.id, undefined);
   location.reload();
+}
+function newCodes() {
+  dialog('New recovery codes', `<p class="muted">The old codes stop working. Enter your password to get a fresh set.</p>
+    <div class="form"><label>Password</label><input type="password" name="pw" autocomplete="current-password"></div>
+    <div class="ct-err"></div><div class="row"><span class="grow"></span><button type="button" data-x>Cancel</button><button class="on">Create</button></div>`, (f, close) => {
+    f.querySelector<HTMLButtonElement>('[data-x]')!.onclick = close;
+    f.onsubmit = async e => {
+      e.preventDefault();
+      try { const j = await api('/api/auth/recovery-codes', { body: { password: val(f, 'pw') } }); close(); const { recoveryCodesScreen } = await import('./accountscreens.ts'); await recoveryCodesScreen(codesOf(j), ''); }
+      catch (x) { f.querySelector('.ct-err')!.textContent = (x as Error).message }
+    };
+  });
 }
 function changePassword() {
   dialog('Change password', `<div class="form">
@@ -123,7 +150,8 @@ function changePassword() {
     f.onsubmit = async e => {
       e.preventDefault();
       const err = f.querySelector('.ct-err')!, pw = val(f, 'pw');
-      err.textContent = pw.length < 8 ? 'Use at least 8 characters' : pw !== val(f, 'pw2') ? 'The new passwords don’t match' : '';
+      const min = syncServer().mode === 'public' ? 10 : 8;
+      err.textContent = pw.length < min ? `Use at least ${min} characters` : pw !== val(f, 'pw2') ? 'The new passwords don’t match' : '';
       if (err.textContent) return;
       try { await api('/api/auth/password', { body: { current: val(f, 'cur'), password: pw } }); close(); toast('Password changed — other devices are signed out', 5000) }
       catch (x) { err.textContent = (x as Error).message }
@@ -153,20 +181,21 @@ async function shares() {
   });
 }
 async function sessions() {
-  type S = { id: string; created: number; last_seen: number; agent: string | null; ip: string | null; current: boolean };
+  type S = { label?: string; id: string; created: number; last_seen?: number; lastUsed?: number; agent: string | null; ip: string | null; current: boolean };
   let list: S[];
-  try { list = await api<S[]>('/api/auth/sessions') } catch (e) { return toast((e as Error).message) }
+  let base = '/api/auth/devices';
+  try { list = await api<S[]>(base).catch(e => { if ((e as { status?: number }).status !== 404) throw e; base = '/api/auth/sessions'; return api<S[]>(base) }) } catch (e) { return toast((e as Error).message) }
   const t = (ms: number) => new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const device = (a: string | null) => !a ? 'Unknown' : /iPhone|iPad/.test(a) ? 'iPhone / iPad' : /Android/.test(a) ? 'Android' : /Windows/.test(a) ? 'Windows' : /Mac OS/.test(a) ? 'Mac' : /Linux/.test(a) ? 'Linux' : a.slice(0, 40);
   dialog('Devices & sessions', `<table><tr><th>Device</th><th>Address</th><th>Last active</th><th></th></tr>
     ${list.map(s => `<tr title="${esc(`${s.agent ?? ''}
-Signed in ${t(s.created)}`)}"><td>${esc(device(s.agent))}${s.current ? ' <span class="muted">(this device)</span>' : ''}</td><td>${esc(s.ip ?? '')}</td><td>${esc(t(s.last_seen))}</td>
+Signed in ${t(s.created)}`)}"><td>${esc(s.label || device(s.agent))}${s.current ? ' <span class="muted">(this device)</span>' : ''}</td><td>${esc(s.ip ?? '')}</td><td>${esc(t(s.last_seen ?? s.lastUsed ?? s.created))}</td>
       <td>${s.current ? '' : `<button type="button" data-end="${esc(s.id)}" style="white-space:nowrap">Sign out</button>`}</td></tr>`).join('')}</table>
     <p class="muted">To sign every other device out at once, change the password.</p>
     <div class="row"><span class="grow"></span><button class="on">Close</button></div>`, (f, close) => {
     f.onsubmit = e => { e.preventDefault(); close() };
     f.querySelectorAll<HTMLButtonElement>('[data-end]').forEach(b => b.onclick = async () => {
-      try { await api(`/api/auth/sessions/${encodeURIComponent(b.dataset.end!)}`, { method: 'DELETE' }); b.closest('tr')!.remove(); toast('Device signed out') }
+      try { await api(`${base}/${encodeURIComponent(b.dataset.end!)}`, { method: 'DELETE' }); b.closest('tr')!.remove(); toast('Device signed out') }
       catch (e) { toast((e as Error).message) }
     });
   });
