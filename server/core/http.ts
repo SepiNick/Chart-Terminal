@@ -154,7 +154,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, listener
         const declared = req.headers['content-length'] === undefined ? NaN : Number(req.headers['content-length']);
         if (declared > limit) throw Object.assign(new HttpError(413, 'Body too large'), { closeConn: true });
         held = Number.isFinite(declared) ? declared : limit;
-        const who = c.user ? `u${c.user.id}` : `ip${ip}`, mine = inBytesBy.get(who) ?? 0;
+        const who = c.user.id > 0 ? `u${c.user.id}` : `ip${ip}`, mine = inBytesBy.get(who) ?? 0;
         if (inBytes + held > BUDGET || mine + held > BUDGET / 4) throw Object.assign(new HttpError(503, 'The server is busy receiving other uploads. Try again in a moment'), { retryAfter: 2, closeConn: true });
         inBytes += held; inBytesBy.set(who, mine + held); heldBy = who;
       }
