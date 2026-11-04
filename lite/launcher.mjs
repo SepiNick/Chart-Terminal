@@ -1,6 +1,7 @@
 // Chart Terminal lite launcher: runs the bundled server in the background and opens the UI in the system browser's
 // app-mode window (Edge/Chrome/Chromium) with its own profile. The server keeps running after the window closes.
 // Usage: node launcher.mjs [--no-window] [--status] [--stop] [--foreground]
+import { createHash, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -23,13 +24,17 @@ const F = n => join(DATA, n);   // port.txt: last port; server.json: {pid,port};
 
 const readJson = f => { try { return JSON.parse(readFileSync(f, 'utf8')) } catch { return null } };
 const alive = pid => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } };
-async function answers(port) {
-  try { return (await fetch(`http://127.0.0.1:${port}/api/auth/status`, { signal: AbortSignal.timeout(1500) })).ok } catch { return false }
+async function answers(port, token) {
+  const nonce = randomBytes(16).toString('hex');
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/lite/ping?nonce=${nonce}`, { signal: AbortSignal.timeout(1500) });
+    return r.ok && token && (await r.json()).proof === createHash('sha256').update(`${token}:${nonce}`).digest('hex');
+  } catch { return false }
 }
 /** The running server's port, or 0. */
 async function running() {
   const s = readJson(F('server.json'));
-  return s?.port && alive(s.pid) && await answers(s.port) ? s.port : 0;
+  return s?.port && alive(s.pid) && await answers(s.port, s.token) ? s.port : 0;
 }
 /** A free loopback port: `want` if it is free (same port = same origin = localStorage survives), else any. */
 const freePort = want => new Promise((ok, fail) => {
@@ -49,22 +54,22 @@ async function stop() {
 async function startServer(foreground = false) {
   let saved = 0;
   try { saved = Number(readFileSync(F('port.txt'), 'utf8')) || 0 } catch {}
-  const port = await freePort(saved);
+  const token = randomBytes(24).toString('hex'), port = await freePort(saved);
   if (port !== saved) writeFileSync(F('port.txt'), String(port));
   const log = foreground ? 'inherit' : openSync(F('server.log'), 'w');
   const child = spawn(process.execPath, [join(HERE, 'server', 'index.js')], {
     detached: !foreground, windowsHide: true, stdio: foreground ? 'inherit' : ['ignore', log, log], cwd: HERE,
-    env: { ...process.env, PORT: String(port), CT_DATA_DIR: join(DATA, 'data'), CT_DIST_DIR: join(HERE, 'dist') },
+    env: { ...process.env, CT_LAUNCH_TOKEN: token, PORT: String(port), CT_DATA_DIR: join(DATA, 'data'), CT_DIST_DIR: join(HERE, 'dist') },
   });
   let exited = false; child.once('exit', () => { exited = true });
-  writeFileSync(F('server.json'), JSON.stringify({ pid: child.pid, port }));
+  writeFileSync(F('server.json'), JSON.stringify({ pid: child.pid, port, token }), { mode: 0o600 });
   if (foreground) {   // systemd / always-on mode: stay attached, pass stop signals on, exit with the server
     for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => child.kill(sig));
     child.once('exit', code => { rmSync(F('server.json'), { force: true }); process.exit(code ?? 0) });
     return port;
   }
   child.unref(); closeSync(log);
-  for (let i = 0; i < 300 && !exited; i++) { if (await answers(port)) return port; await sleep(100) }
+  for (let i = 0; i < 300 && !exited; i++) { if (await answers(port, token)) return port; await sleep(100) }
   rmSync(F('server.json'), { force: true });
   let tail = ''; try { tail = readFileSync(F('server.log'), 'utf8').slice(-1500) } catch {}
   die(`the server did not start.\n${tail}`);

@@ -1,6 +1,6 @@
 // Chart Terminal desktop shell: starts the bundled server on a free 127.0.0.1 port with the data in the user's app-data
 // folder, then shows the app in a window from that server (same origin, so login cookies, /api and /ws work as usual).
-const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, shell, utilityProcess } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, shell, utilityProcess, session } = require('electron');
 const { createServer } = require('node:net');
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
@@ -58,7 +58,7 @@ function createWindow(main = true) {
     title: 'Chart Terminal', icon: join(__dirname, 'build', 'icon.png'),
     // The page only talks HTTP to its own server; the preload only adds window.prompt(). It keeps running when the
     // window is hidden in the tray (live prices, alert notifications), so it is not throttled in the background.
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'), backgroundThrottling: false },
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'), backgroundThrottling: false, devTools: !app.isPackaged },
   });
   if (main) {
     win = w;
@@ -158,7 +158,13 @@ app.on('second-instance', showMain);
 // Without the tray, closing the last window stops the server too (alerts, forward tests, recording).
 app.on('window-all-closed', () => { if (!tray || !settings().tray) app.quit() });
 
+// Default-deny for web permissions (camera, microphone, geolocation, ...): the app needs notifications, fullscreen and copying only.
+const ALLOWED_PERMISSIONS = new Set(['notifications', 'fullscreen', 'clipboard-sanitized-write']);
+app.on('web-contents-created', (_e, wc) => wc.on('will-attach-webview', ev => ev.preventDefault()));
+
 app.whenReady().then(async () => {
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => cb(ALLOWED_PERMISSIONS.has(permission) && sameOrigin(details?.requestingUrl || wc.getURL())));
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => ALLOWED_PERMISSIONS.has(permission) && sameOrigin(origin || wc?.getURL() || ''));
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);   // the app has its own menus; keep the macOS app menu
   try { await startServer() } catch (e) { dialog.showErrorBox('Chart Terminal', e.message); app.quit(); return }
   try { createTray() } catch (e) { console.error('No tray:', e.message) }   // some Linux desktops have none

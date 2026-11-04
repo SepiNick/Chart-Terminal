@@ -18,3 +18,11 @@ android/local.properties
 android/.gradle/
 android/build/
 android/app/build/
+
+*.db
+*.pem
+*.key
+*.p12
+.env.*
+.claude/settings.local.json
+server/.claude/
