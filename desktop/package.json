@@ -91,5 +91,8 @@
       "icon": "build/icon.png",
       "maintainer": "Chart Terminal"
     }
+  },
+  "overrides": {
+    "undici": "7.30.1"
   }
 }

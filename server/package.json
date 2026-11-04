@@ -17,5 +17,8 @@
     "@types/nodemailer": "^8.0.2",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1"
+  },
+  "overrides": {
+    "undici": "7.30.1"
   }
 }
