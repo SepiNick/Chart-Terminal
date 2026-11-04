@@ -37,6 +37,7 @@ import { chartEvents, initMarket, renderDetails, renderMarket } from './market/u
 import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
 import { initSkills, renderSkills } from './skills/ui.ts';
 import { initAi, refreshAi } from './ai/panel.ts';
+import { registerServiceWorker } from './push.ts';
 import { rMultiple } from './journal.ts';
 
 // ---------- layouts (grid arrangements) ----------
@@ -1228,3 +1229,4 @@ if (serverMode && sharedLayout) {
 }
 
 if (import.meta.env.DEV) Object.assign(window, { __ct: { panes: () => panes, st, history } }); // debugging handle, dev server only
+void registerServiceWorker().catch(() => {});   // at startup, so Chrome on Android offers 'Install app' without push being enabled first

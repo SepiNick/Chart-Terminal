@@ -9,7 +9,7 @@ export const DATA_DIR = process.env.CT_DATA_DIR ?? join(dirname(fileURLToPath(im
 mkdirSync(DATA_DIR, { recursive: true });
 
 export const db = new DatabaseSync(process.env.CT_DB ?? join(DATA_DIR, 'chart-terminal.db'));
-db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
+db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA journal_size_limit = 33554432;');   // WAL file shrinks back to 32 MB after a checkpoint
 db.exec('CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, at INTEGER NOT NULL)');
 
 /** Run `sql` once, recorded under `name` (use a module prefix, e.g. 'alerts/1'). */

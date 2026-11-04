@@ -1,14 +1,13 @@
 // CCXT adapter for the exchange testnets: Binance spot, Binance USDⓈ-M futures, Bybit, OKX demo trading.
 // One CCXT pro instance per account (REST + WebSocket), forced into sandbox mode; every REST request and WebSocket
 // connection is checked against the testnet allow-list (safety.ts) before it leaves the process.
-import ccxtNs from 'ccxt';
+import { ccxtLib } from '../ccxtlib.ts';
 import type { BrokerFill, BrokerOrder, BrokerPosition, Market, OrderKind } from '../../src/broker/types.ts';
 import { symOf } from '../ccxt.ts';
 import type { Adapter, Native } from './adapter.ts';
 import { parseSym } from './adapter.ts';
 import { assertTestnetUrl, urlLeaves } from './safety.ts';
 
-const ccxt = ((ccxtNs as unknown as { exchanges?: string[] }).exchanges ? ccxtNs : (ccxtNs as unknown as { default: typeof ccxtNs }).default);
 // Loose view of a CCXT instance: only what this file calls.
 type Fn = (...a: unknown[]) => Promise<unknown>;
 export interface Cx {
@@ -25,7 +24,7 @@ export type CcxtBroker = 'binance' | 'binanceusdm' | 'bybit' | 'okx';
 export interface Keys { apiKey: string; secret: string; passphrase?: string }
 
 /** How an account's CCXT instance is made (tests swap in a fake). */
-export const make = { exchange: (id: string, opts: object): Cx => new (ccxt.pro as unknown as Record<string, new (o: object) => Cx>)[id](opts) };
+export const make = { exchange: (id: string, opts: object): Cx => new (ccxtLib().pro as unknown as Record<string, new (o: object) => Cx>)[id](opts) };
 
 /**
  * Sandbox mode + allow-list on every base URL, every REST request and every WebSocket. Returns the hosts.

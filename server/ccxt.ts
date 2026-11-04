@@ -1,27 +1,26 @@
 // Crypto data for every CCXT exchange. Symbols use EXCH:BASE_QUOTE (spot) and EXCH:BASE_QUOTE.P (perpetual)
 // so they stay free of characters the chart's spread-expression parser treats as operators.
-import ccxtNs from 'ccxt';
+import { ccxtLib, EXCHANGE_IDS } from './ccxtlib.ts';
 import { tfSeconds } from '../src/data.ts';
 import type { Bar } from '../src/data.ts';
 
 // The package's default export shape differs between its CJS and ESM builds.
-const ccxt = ((ccxtNs as unknown as { exchanges?: string[] }).exchanges ? ccxtNs : (ccxtNs as unknown as { default: typeof ccxtNs }).default);
-type Exchange = InstanceType<typeof ccxt.Exchange>;
+type Exchange = InstanceType<ReturnType<typeof ccxtLib>['Exchange']>;
 export interface Market { sym: string; ccxt: string; base: string; quote: string; type: string; active: boolean }
 
 const rest = new Map<string, Exchange>(), pro = new Map<string, Exchange>();
 const marketCache = new Map<string, { at: number; list: Market[]; map: Map<string, Market> }>();
 
-export const exchangeIds = (): string[] => ccxt.exchanges;
-export const isExchange = (id: string) => ccxt.exchanges.includes(id);
+export const exchangeIds = (): string[] => [...EXCHANGE_IDS];
+export const isExchange = (id: string) => EXCHANGE_IDS.includes(id);
 
 function restOf(id: string): Exchange {
   let x = rest.get(id);
-  if (!x) { x = new (ccxt as unknown as Record<string, new (o: object) => Exchange>)[id]({ enableRateLimit: true, timeout: 15000 }); rest.set(id, x) }
+  if (!x) { x = new (ccxtLib() as unknown as Record<string, new (o: object) => Exchange>)[id]({ enableRateLimit: true, timeout: 15000 }); rest.set(id, x) }
   return x;
 }
 function proOf(id: string): Exchange | null {
-  const P = (ccxt.pro as unknown as Record<string, (new (o: object) => Exchange) | undefined>)[id];
+  const P = (ccxtLib().pro as unknown as Record<string, (new (o: object) => Exchange) | undefined>)[id];
   if (!P) return null;
   let x = pro.get(id);
   if (!x) { x = new P({ enableRateLimit: true }); pro.set(id, x) }
@@ -53,6 +52,7 @@ export async function markets(id: string): Promise<{ list: Market[]; map: Map<st
   }
   const entry = { at: Date.now(), list, map };
   marketCache.set(id, entry);
+  if (marketCache.size > 12) marketCache.delete(marketCache.keys().next().value!);   // one big market list per exchange
   return entry;
 }
 async function resolve(id: string, sym: string): Promise<{ x: Exchange; m: Market }> {

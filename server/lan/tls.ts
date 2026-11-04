@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import { X509Certificate, randomUUID, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { networkInterfaces } from 'node:os';
+import { hostname, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
 export const CA_NAME = 'Chart Terminal Local CA';
@@ -29,14 +29,22 @@ export function lanIps(ifaces: Ifaces = networkInterfaces()): string[] {
   const ips = Object.values(ifaces).flat().filter(a => a && a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')).map(a => a!.address);
   return [...new Set(ips)].sort();
 }
-export const sanList = (ips: string[]) => ['DNS:localhost', 'IP:127.0.0.1', ...ips.filter(ip => ip !== '127.0.0.1').map(ip => 'IP:' + ip)];
+/** This machine's mDNS name (e.g. laptop.local) when the hostname is a plain label; phones may or may not resolve it. */
+export function lanNames(host: string = hostname()): string[] {
+  const h = host.toLowerCase().split('.')[0];
+  return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(h) ? [h + '.local'] : [];
+}
+export const sanList = (ips: string[], names: string[] = []) => ['DNS:localhost', ...names.map(n => 'DNS:' + n), 'IP:127.0.0.1', ...ips.filter(ip => ip !== '127.0.0.1').map(ip => 'IP:' + ip)];
 
 /** IPv4 SANs of an existing certificate (from Node's "DNS:x, IP Address:y" format). */
 export const certIps = (c: X509Certificate) => [...(c.subjectAltName ?? '').matchAll(/IP Address:([\d.]+)/g)].map(m => m[1]).filter(ip => ip !== '127.0.0.1').sort();
 
+const certNames = (c: X509Certificate) => [...(c.subjectAltName ?? '').matchAll(/DNS:([^,\s]+)/g)].map(m => m[1]).filter(n => n !== 'localhost').sort();
+
 /** Regenerate when there is no certificate, the IP set changed, it expires within 30 days, or the CA was replaced. */
-export function needsNewCert(cert: X509Certificate | null, ips: string[], ca: X509Certificate, now = Date.now()): boolean {
+export function needsNewCert(cert: X509Certificate | null, ips: string[], ca: X509Certificate, now = Date.now(), names: string[] = []): boolean {
   if (!cert) return true;
+  if (certNames(cert).join() !== [...names].sort().join()) return true;
   if (certIps(cert).join() !== [...ips].sort().join()) return true;
   if (Date.parse(cert.validTo) - now < 30 * 86400_000) return true;
   return !cert.checkIssued(ca);
@@ -49,7 +57,7 @@ export const caFingerprint = (ca: X509Certificate) => ca.fingerprint256;
 export function readCa(dir: string): X509Certificate | null { return readCert(join(dir, 'ca.crt')) }
 
 /** Make sure `dir` holds a CA and a server certificate for the current IPs; returns what the HTTPS server needs. */
-export function ensureCerts(dir: string, ips: string[] = lanIps(), openssl = findOpenssl()): Certs {
+export function ensureCerts(dir: string, ips: string[] = lanIps(), openssl = findOpenssl(), names: string[] = lanNames()): Certs {
   mkdirSync(dir, { recursive: true });
   const f = (n: string) => join(dir, n);
   const run = (args: string[]) => {
@@ -65,10 +73,10 @@ export function ensureCerts(dir: string, ips: string[] = lanIps(), openssl = fin
       '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign']);
     ca = readCa(dir)!;
   }
-  if (needsNewCert(readCert(f('server.crt')), ips, ca)) {
+  if (needsNewCert(readCert(f('server.crt')), ips, ca, Date.now(), names)) {
     writeFileSync(f('server.ext'), [
       'basicConstraints = CA:FALSE', 'keyUsage = critical,digitalSignature,keyEncipherment', 'extendedKeyUsage = serverAuth',
-      'subjectAltName = ' + sanList(ips).join(','), ''].join('\n'));
+      'subjectAltName = ' + sanList(ips, names).join(','), ''].join('\n'));
     run(['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-sha256', '-config', 'req.cnf', '-keyout', 'server.key', '-out', 'server.csr', '-subj', '/CN=Chart Terminal']);
     run(['x509', '-req', '-in', 'server.csr', '-CA', 'ca.crt', '-CAkey', 'ca.key', '-set_serial', '0x' + randomBytes(16).toString('hex'),
       '-days', String(SERVER_DAYS), '-sha256', '-extfile', 'server.ext', '-out', 'server.crt']);

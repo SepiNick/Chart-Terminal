@@ -18,7 +18,7 @@ function runOne(cmd: string[], input: string) {
 export async function run(task: string, body: Record<string, unknown>) {
   if (!TASKS.includes(task)) throw bad('Unknown ML task');
   const input = JSON.stringify({ ...body, task });
-  let last: (Error & { code?: string; stderr?: string }) | null = null;
+  let last = null as (Error & { code?: string; stderr?: string }) | null;
   for (const cmd of candidates()) {
     try {
       const out = JSON.parse(await runOne(cmd, input)) as { error?: string };
