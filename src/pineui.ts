@@ -131,6 +131,8 @@ function saveCurrent(): Script | null {
 }
 
 export const scriptById = (id: string) => scripts[id];
+/** Save `src` as a new Pine script and show it in the Pine Editor (used by the AI panel). */
+export function openNewScript(src: string) { const s = newScript(src); host.showTab('pine'); open(s.id); return s.id }
 /** A chart script as sources for the server (forward tests, MQL / NinjaScript alerts): the script plus every installed file of its language (#include / other classes). */
 export function sourceFor(id: string, prec: number): ScriptSource | null {
   const s = scripts[id]; if (!s) return null;

@@ -267,3 +267,7 @@ table.seas td{font-size:11px;text-align:right}
 /* skills panel */
 #s-skills{padding:6px;overflow:auto}#s-skills select#skPick{width:100%;margin:4px 0}#s-skills .form .field{display:flex;justify-content:space-between;gap:8px;margin:3px 0}
 #s-skills textarea{width:100%;font:12px var(--mono,monospace)}.skv{margin:8px 0;font-size:15px}
+
+#s-ai{padding:6px;display:flex;flex-direction:column;gap:5px}#s-ai textarea{width:100%;font:13px inherit;resize:vertical}#s-ai select,#s-ai input{min-width:0}
+.ai-log{flex:1;min-height:160px;overflow:auto;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.5}.ai-log>div{padding:6px 8px;border-radius:6px;unicode-bidi:plaintext}
+.ai-user{background:var(--hover,rgba(127,127,127,.12));align-self:flex-end;max-width:92%;white-space:pre-wrap}.ai-assistant{border:1px solid var(--border,rgba(127,127,127,.25))}.ai-log pre{overflow:auto;font:12px var(--mono,monospace);background:rgba(127,127,127,.1);padding:6px;border-radius:4px;text-align:left}.ai-log button{margin-top:4px}
