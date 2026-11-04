@@ -7,6 +7,7 @@ services:
     image: chart-terminal
     restart: unless-stopped
     expose: ["8787"]
+    networks: [web]
     environment:
       CT_MODE: public
       CT_HOST: 0.0.0.0
@@ -14,6 +15,7 @@ services:
       CT_PUBLIC_URL: https://${DOMAIN:?set DOMAIN}
       CT_ALLOWED_HOSTS: ${DOMAIN}
       CT_TRUST_PROXY: "1"
+      CT_PROXY_IPS: 172.30.0.2   # Caddy's fixed address below: only this peer may set X-Forwarded-For (per-client rate limits, https detection)
       CT_REGISTRATION: invite
       CT_ADMIN: ${CT_ADMIN:-admin}
     volumes:
@@ -22,12 +24,20 @@ services:
     image: caddy:2
     restart: unless-stopped
     ports: ["80:80", "443:443"]
+    networks:
+      web:
+        ipv4_address: 172.30.0.2
     environment:
       DOMAIN: ${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
     depends_on: [app]
+networks:
+  web:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 volumes:
   chart-terminal-data:
   caddy-data:
