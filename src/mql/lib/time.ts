@@ -4,7 +4,7 @@ import { num, setErr, secToTf, tfToSec, getter, val } from './util.ts';
 
 const D = (t: number) => new Date(Math.trunc(num(t)) * 1000);
 const p2 = (n: number) => String(n).padStart(2, '0');
-export function timeToString(t: number, flags = 3): string {
+function timeToString(t: number, flags = 3): string {
   const d = D(t), out: string[] = [];
   if (flags & 1) out.push(`${d.getUTCFullYear()}.${p2(d.getUTCMonth() + 1)}.${p2(d.getUTCDate())}`);
   if (flags & 4) out.push(`${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`);
@@ -12,7 +12,7 @@ export function timeToString(t: number, flags = 3): string {
   return out.join(' ');
 }
 /** Parses "yyyy.mm.dd [hh:mi[:ss]]", "yyyymmdd [hh:mi]" or "hh:mi[:ss]" (today); null if invalid. */
-export function parseTime(s: string, now: number): number | null {
+function parseTime(s: string, now: number): number | null {
   s = String(s).trim();
   let m = s.match(/^(\d{4})[.\-/]?(\d{1,2})[.\-/]?(\d{1,2})(?:[ T]+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
   if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] ?? 0), +(m[5] ?? 0), +(m[6] ?? 0)) / 1000;

@@ -6,7 +6,7 @@ import { MqlTick } from './structs.ts';
 import { nameOf } from './constants.ts';
 
 const QUOTES = ['USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'DAI', 'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'BTC', 'ETH', 'BNB', 'TRY', 'BRL'];
-export function currencies(sym: string): [string, string] {
+function currencies(sym: string): [string, string] {
   const s = sym.replace(/[^A-Za-z]/g, '').toUpperCase();
   if (s.length === 6 && !/USDT|USDC/.test(s)) return [s.slice(0, 3), s.slice(3)];
   for (const q of QUOTES) if (s.endsWith(q) && s.length > q.length) return [s.slice(0, -q.length), q];

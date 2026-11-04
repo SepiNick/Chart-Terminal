@@ -53,7 +53,7 @@ export interface ClassDecl {
 }
 export interface EnumDecl { k: 'enum'; pos: Pos; name: string; items: { pos: Pos; name: string; value: Expr | null }[] }
 export interface TypedefDecl { k: 'typedef'; pos: Pos; name: string; t: TypeRef | null; fn: { ret: TypeRef; params: Param[] } | null }
-export interface GlobalVars { k: 'vars'; pos: Pos; list: VarDecl[] }
+interface GlobalVars { k: 'vars'; pos: Pos; list: VarDecl[] }
 export type Decl = FuncDecl | ClassDecl | EnumDecl | TypedefDecl | GlobalVars;
 
 export class MqlSyntaxError extends Error {

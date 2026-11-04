@@ -7,10 +7,10 @@ import { burst, stockUniverse, toB, universeInputs, type B } from './burst.ts';
 
 const r2 = (x: number) => pyRoundN(x, 2);
 export interface Rec { id: string; sym: string; date: string; trigger: string; tags: string[]; rating: string; score: number; entry: number; stop: number; outcomes: Record<string, Out>; overall: string; matured: boolean }
-export interface Out { matured: boolean; fwd?: number; mfe?: number; mae?: number; stopHit?: boolean; tag?: string }
+interface Out { matured: boolean; fwd?: number; mfe?: number; mae?: number; stopHit?: boolean; tag?: string }
 /** The original's tags, read from the rounded fields a screener report carries. */
-export interface Cand { t: { tags: string[]; loc: number; v1: number }; soft: string[]; reasons: string[]; rating: string; b: { width: number; days: number; dry: boolean }; risk: number; breakdown: boolean; streak: number }
-export function setupTags(r: Cand) {
+interface Cand { t: { tags: string[]; loc: number; v1: number }; soft: string[]; reasons: string[]; rating: string; b: { width: number; days: number; dry: boolean }; risk: number; breakdown: boolean; streak: number }
+function setupTags(r: Cand) {
   const t = new Set<string>([...r.t.tags, ...r.soft.map(x => `soft_${x}`), ...r.reasons.map(x => `reject_${x}`)]);
   if (r.rating) t.add(`rating_${r.rating.replace('+', 'plus').replace('-', 'minus')}`);
   const cl = r2(r.t.loc), vr = r2(r.t.v1), bw = r2(r.b.width), rk = r2(r.risk);
@@ -22,9 +22,9 @@ export function setupTags(r: Cand) {
   if (r.b.dry) t.add('volume_dry_up'); if (r.breakdown) t.add('recent_4pct_breakdown'); if (r.streak >= 3) t.add('three_days_up_before_trigger');
   return [...t].sort();
 }
-export const outcomeTag = (f: number, mfe: number, mae: number, stop: boolean) => stop ? 'FAILED_STOP' : mfe >= 12 || f >= 8 ? 'STRONG_WINNER' : mfe >= 6 || f >= 4 ? 'WORKED' : f <= -2 ? 'FAILED_FADE' : mae <= -5 && f < 2 ? 'CHOPPY_FAILURE' : 'NEUTRAL';
+const outcomeTag = (f: number, mfe: number, mae: number, stop: boolean) => stop ? 'FAILED_STOP' : mfe >= 12 || f >= 8 ? 'STRONG_WINNER' : mfe >= 6 || f >= 4 ? 'WORKED' : f <= -2 ? 'FAILED_FADE' : mae <= -5 && f < 2 ? 'CHOPPY_FAILURE' : 'NEUTRAL';
 /** `asc` is oldest first. */
-export function window(rec: Pick<Rec, 'date' | 'entry' | 'stop'>, asc: B[], h: number): Out {
+function window(rec: Pick<Rec, 'date' | 'entry' | 'stop'>, asc: B[], h: number): Out {
   if (rec.entry <= 0) return { matured: false };
   const fut = asc.filter(b => b.date > rec.date); if (fut.length < h) return { matured: false };
   const w = fut.slice(0, h), c = w.at(-1)!, f = (c.close / rec.entry - 1) * 100, mfe = (Math.max(...w.map(b => b.high)) / rec.entry - 1) * 100, mae = (Math.min(...w.map(b => b.low)) / rec.entry - 1) * 100;
@@ -46,7 +46,7 @@ export function replay(sym: string, desc: B[], n: number, gate: 'allowed' | 'neu
 }
 const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
 const med = (v: number[]) => { const s = [...v].sort((a, b) => a - b), n = s.length; return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2 };
-export function summarize(recs: Rec[]) {
+function summarize(recs: Rec[]) {
   const m = recs.filter(r => r.matured), n = m.length;
   if (!n) return { n: 0, pending: recs.length, win: null as number | null, fail: null as number | null, strong: null as number | null, stop: null as number | null, avg3: null as number | null, avg5: null as number | null, med5: null as number | null, mfe5: null as number | null, mae5: null as number | null };
   const pc = (k: number) => pyRoundN(k / n * 100, 1), v = (h: string, f: 'fwd' | 'mfe' | 'mae') => m.map(r => r.outcomes[h]?.[f]).filter((x): x is number => x != null);

@@ -5,13 +5,13 @@ import type { Ctx, Skill } from './types.ts';
 import { barsMany, type Stock } from './vcp.ts';
 
 export interface B { date: string; open: number; high: number; low: number; close: number; volume: number }
-export const BURST_DEFAULTS = { minPrice: 5, minVolume: 100_000, four: 4, dollar: 0.9, nineM: 9_000_000, maxPrevGain: 2, minBase: 3, maxBase: 20, maxWidth: 15, maxAvgRange: 5, narrowPrev: 3, breakdownLook: 5, breakdown: 4, maxRisk: 10 };
+const BURST_DEFAULTS = { minPrice: 5, minVolume: 100_000, four: 4, dollar: 0.9, nineM: 9_000_000, maxPrevGain: 2, minBase: 3, maxBase: 20, maxWidth: 15, maxAvgRange: 5, narrowPrev: 3, breakdownLook: 5, breakdown: 4, maxRisk: 10 };
 type Opt = typeof BURST_DEFAULTS;
 const avg = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
 const chg = (n: number, o: number) => (o <= 0 ? 0 : (n / o - 1) * 100);
 const loc = (b: B) => (b.high - b.low <= 0 ? 50 : (b.close - b.low) / (b.high - b.low) * 100);
 
-export function base(bars: B[], o: Opt) {
+function base(bars: B[], o: Opt) {
   if (bars.length < o.minBase + 2) return { days: 0, width: 0, avgRange: 0, dry: false };
   let best: { days: number; width: number; avgRange: number; dry: boolean } | null = null;
   const longest = Math.min(o.maxBase, bars.length - 1);
@@ -28,7 +28,7 @@ export function base(bars: B[], o: Opt) {
   const p = bars.slice(1, 1 + Math.min(longest, Math.max(o.minBase, 1))), ref = p.length ? p[0].close : 1;
   return { days: 0, width: p.length ? (Math.max(...p.map(b => b.high)) - Math.min(...p.map(b => b.low))) / ref * 100 : 0, avgRange: avg(p.filter(b => b.close > 0).map(b => (b.high - b.low) / b.close * 100)), dry: false };
 }
-export function triggers(bars: B[], o: Opt) {
+function triggers(bars: B[], o: Opt) {
   const l = bars[0], p = bars[1], p2 = bars[2], gain = chg(l.close, p.close), dollar = l.close - l.open, range = l.high - l.low, prevGain = chg(p.close, p2.close);
   const priorMax = Math.max(...bars.slice(1, 4).map(b => b.high - b.low)), v20 = avg(bars.slice(1, 21).map(b => b.volume)), floor = l.volume >= o.minVolume, up = l.volume > p.volume, tags: string[] = [];
   if (gain >= o.four && up && floor) tags.push('4pct_breakout');
@@ -69,7 +69,7 @@ export function burst(bars: B[], gate: 'allowed' | 'neutral' | 'restrictive' = '
   return { state, rating, score: s, raw, reasons, soft, comps, t, b, risk, streak, breakdown, stop: l.low, entry: l.close, date: l.date };
 }
 const PRIORITY: Record<string, number> = { ACTIONABLE_DAY1: 0, MANUAL_REVIEW: 1, MANUAL_REVIEW_ONLY: 2, WATCH_ONLY: 3, REJECTED: 4 };
-export const sortBursts = <T extends { state: string; score: number }>(r: T[]) => [...r].sort((a, b) => (PRIORITY[a.state] ?? 9) - (PRIORITY[b.state] ?? 9) || b.score - a.score);
+const sortBursts = <T extends { state: string; score: number }>(r: T[]) => [...r].sort((a, b) => (PRIORITY[a.state] ?? 9) - (PRIORITY[b.state] ?? 9) || b.score - a.score);
 /** Newest-first daily bars, the last `n` sessions. */
 export const toB = (b: { time: number; open: number; high: number; low: number; close: number; volume: number }[], n = 80): B[] => b.filter(x => Math.min(x.open, x.high, x.low, x.close) > 0 && x.high >= x.low).slice(-n).reverse().map(x => ({ date: new Date(x.time * 1000).toISOString().slice(0, 10), open: x.open, high: x.high, low: x.low, close: x.close, volume: Math.trunc(x.volume) }));
 /** The US universe the Stockbee screens use: market cap, price and volume floors, largest first. */

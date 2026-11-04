@@ -6,7 +6,7 @@ import type { Ctx, Skill } from './types.ts';
 
 export interface IndexRow { doc_id: string; type: string; type_name: string; last: string; first: string; name: string; district: string; year: number; filed: string | null; url: string }
 const TXN_TYPES: Record<string, string> = { P: 'purchase', S: 'sale', 'S (partial)': 'partial sale', E: 'exchange' }, OWNERS: Record<string, string> = { SP: 'spouse', JT: 'joint', DC: 'dependent child', '': 'self' };
-export const iso = (mdy: string) => { const m = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*$/.exec(mdy ?? ''); if (!m) return null; const y = +m[3] < 100 ? +m[3] + 2000 : +m[3], d = new Date(Date.UTC(y, +m[1] - 1, +m[2])); return d.getUTCMonth() === +m[1] - 1 && d.getUTCDate() === +m[2] ? d.toISOString().slice(0, 10) : null };
+const iso = (mdy: string) => { const m = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*$/.exec(mdy ?? ''); if (!m) return null; const y = +m[3] < 100 ? +m[3] + 2000 : +m[3], d = new Date(Date.UTC(y, +m[1] - 1, +m[2])); return d.getUTCMonth() === +m[1] - 1 && d.getUTCDate() === +m[2] ? d.toISOString().slice(0, 10) : null };
 export function memberMatch(r: IndexRow, member: string) {
   const m = (member ?? '').trim().toLowerCase(); if (!m) return true;
   let last: string, first: string;
@@ -62,7 +62,7 @@ export function parsePtr(text: string, filed: string | null = null) {
   head.rows = rows.map(r => finish(r, head.filed));
   return head;
 }
-export function describe(r: Txn) {
+function describe(r: Txn) {
   let what = r.asset + (r.ticker ? ` (${r.ticker})` : '');
   if (r.option) what += `: ${r.option.exercised ? 'exercised ' : ''}${r.option.contracts} ${r.option.kind} options, $${r.option.strike} strike, expires ${r.option.expires}`; else if (r.shares) what += `: ${r.shares.toLocaleString('en-US')} shares`;
   return what;

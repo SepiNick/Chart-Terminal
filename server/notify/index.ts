@@ -188,7 +188,7 @@ function vapidSubject() {
 
 /** Push services a public server will talk to (the endpoint is chosen by the client, so it must not be an arbitrary URL). */
 const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)notify\.windows\.com$/, /(^|\.)push\.services\.mozilla\.com$/];
-export const pushHostOk = (endpoint: string) => { try { const u = new URL(endpoint); return u.protocol === 'https:' && !u.port && !u.username && PUSH_HOSTS.some(r => r.test(u.hostname)) } catch { return false } };
+const pushHostOk = (endpoint: string) => { try { const u = new URL(endpoint); return u.protocol === 'https:' && !u.port && !u.username && PUSH_HOSTS.some(r => r.test(u.hostname)) } catch { return false } };
 
 export async function sendPush(n: Notice): Promise<void> {
   const uid = n.userId ?? soleUser(), d = () => userDb(uid);

@@ -11,7 +11,7 @@ import './media.ts';
 userMigration('state/1', `CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL, rev INTEGER NOT NULL, updated INTEGER NOT NULL)`);
 
 export const KEY_RE = /^[A-Za-z0-9_.-]{1,64}$/;
-export interface StateRow { value: unknown; rev: number; updated: number }
+interface StateRow { value: unknown; rev: number; updated: number }
 
 export function stateGet<T>(key: string, uid = soleUser()): StateRow & { value: T } | null {
   const r = userDb(uid).prepare('SELECT value, rev, updated FROM state WHERE key = ?').get(key) as { value: string; rev: number; updated: number } | undefined;

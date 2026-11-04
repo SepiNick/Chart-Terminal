@@ -14,7 +14,7 @@ export function rsi(c: number[], n = 14) {
   g /= n; l /= n; for (let i = n + 1; i < c.length; i++) { const d = c[i] - c[i - 1]; g = (g * (n - 1) + Math.max(d, 0)) / n; l = (l * (n - 1) + Math.max(-d, 0)) / n }
   return l === 0 ? 100 : 100 - 100 / (1 + g / l);
 }
-export function atr(b: Bar[], n = 14) { if (b.length < n + 1) return null; const t = b.slice(1).map((x, i) => Math.max(x.high - x.low, Math.abs(x.high - b[i].close), Math.abs(x.low - b[i].close))); let a = t.slice(0, n).reduce((x, y) => x + y, 0) / n; for (const v of t.slice(n)) a = (a * (n - 1) + v) / n; return a }
+function atr(b: Bar[], n = 14) { if (b.length < n + 1) return null; const t = b.slice(1).map((x, i) => Math.max(x.high - x.low, Math.abs(x.high - b[i].close), Math.abs(x.low - b[i].close))); let a = t.slice(0, n).reduce((x, y) => x + y, 0) / n; for (const v of t.slice(n)) a = (a * (n - 1) + v) / n; return a }
 const pc = (a: number, b: number) => `${((a / b - 1) * 100).toFixed(2)}%`;
 const iso = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
 /** The chart as text: everything computed by the app, so the model never has to guess a number. */
@@ -51,7 +51,7 @@ export function journalContext(ts: JT[], n = 40) {
   ].join('\n');
 }
 export const SYSTEM = 'You are the analysis assistant inside a charting and trading app. Answer in the language the user writes in (Persian if they write Persian). Use only the numbers given in the context; if something is not there, say so instead of inventing it. Be concise and concrete. You never place orders and never give personal financial advice: describe the picture, the scenarios, the levels that would invalidate them, and the risks.';
-export const PINE_SYSTEM = 'You write TradingView Pine Script (version 5 or 6) for an app that runs a large Pine subset: indicator() and strategy(), input.*, ta.*, math.*, str.*, array.*, request.security, plot/plotshape/hline/fill/bgcolor, strategy.entry/exit/close, label/line/box. Always start with //@version=5 (or 6), declare indicator() or strategy(), and reply with ONE ```pine code block followed by two or three short lines explaining it. No placeholders, no external libraries.';
+const PINE_SYSTEM = 'You write TradingView Pine Script (version 5 or 6) for an app that runs a large Pine subset: indicator() and strategy(), input.*, ta.*, math.*, str.*, array.*, request.security, plot/plotshape/hline/fill/bgcolor, strategy.entry/exit/close, label/line/box. Always start with //@version=5 (or 6), declare indicator() or strategy(), and reply with ONE ```pine code block followed by two or three short lines explaining it. No placeholders, no external libraries.';
 /** The first fenced code block (```pine preferred), or null. */
 export function extractCode(text: string) {
   const all = [...text.matchAll(/```([\w-]*)\s*\n([\s\S]*?)```/g)];

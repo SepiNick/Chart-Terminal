@@ -2,6 +2,7 @@
   "name": "chart-terminal-desktop",
   "productName": "Chart Terminal",
   "private": true,
+  "engines": { "node": ">=24" },
   "version": "0.1.0",
   "description": "Chart Terminal desktop app",
   "author": "Chart Terminal",

@@ -3,7 +3,7 @@
 import type { Env, Rt } from '../contract.ts';
 import { num, str, setErr } from './util.ts';
 
-export const FILE_CONST = {
+const FILE_CONST = {
   FILE_READ: 1, FILE_WRITE: 2, FILE_BIN: 4, FILE_CSV: 8, FILE_TXT: 16, FILE_ANSI: 32, FILE_UNICODE: 64, FILE_SHARE_READ: 128, FILE_SHARE_WRITE: 256,
   FILE_REWRITE: 512, FILE_COMMON: 4096, SEEK_SET: 0, SEEK_CUR: 1, SEEK_END: 2, CP_ACP: 0, CP_UTF8: 65001,
 };

@@ -138,4 +138,3 @@ const svg = (inner: string) => `<svg class="ti" viewBox="0 0 28 28" width="28" h
 const escText = (s: string) => s.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 /** The icon for a tool, cursor or toolbar action; `fallback` (the tool's text glyph) when there is none. */
 export const iconSvg = (id: string, fallback = '') => svg(I[id] ?? T(14, 19, escText(fallback), 14));
-export const hasIcon = (id: string) => id in I;

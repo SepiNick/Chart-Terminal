@@ -12,13 +12,13 @@ export interface Order {
   reduceOnly?: boolean;
   ts?: number;                 // placed at (seconds); missing on accounts saved before phase 6
 }
-export interface Position { qty: number; avg: number }   // qty < 0 = short
+interface Position { qty: number; avg: number }   // qty < 0 = short
 export interface Fill { id: number; sym: string; side: Side; qty: number; px: number; fee: number; realized: number; ts: number; orderType: OrderType }
 export interface Account { cash: number; pos: Record<string, Position>; orders: Order[]; fills: Fill[]; nextId: number }
 /** Change a resting order: only the given fields; `null` removes a bracket TP/SL. */
 export interface OrderPatch { price?: number; stopPrice?: number; qty?: number; tp?: number | null; sl?: number | null }
 
-export const FEE = 0.001;
+const FEE = 0.001;
 export const newAccount = (cash = 10000): Account => ({ cash, pos: {}, orders: [], fills: [], nextId: 1 });
 const round = (x: number) => +x.toFixed(10);
 const dirOf = (o: { side: Side }) => (o.side === 'buy' ? 1 : -1);

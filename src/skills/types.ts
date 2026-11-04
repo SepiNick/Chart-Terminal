@@ -3,13 +3,13 @@
 // (src/skills/ui.ts) draws every form and result, so a skill is just its logic, which is what the tests check.
 import type { Bar } from '../data.ts';
 
-export type Group = 'Risk & sizing' | 'Portfolio' | 'Journal & review' | 'Market regime' | 'Screeners' | 'Fundamentals' | 'Options & futures';
+type Group = 'Risk & sizing' | 'Portfolio' | 'Journal & review' | 'Market regime' | 'Screeners' | 'Fundamentals' | 'Options & futures';
 export interface Input {
   key: string; label: string;
   type: 'number' | 'text' | 'select' | 'bool' | 'symbol' | 'symbols' | 'json';
   default?: unknown; options?: string[]; hint?: string; optional?: boolean;
 }
-export type Tone = 'up' | 'dn' | 'warn' | 'muted';
+type Tone = 'up' | 'dn' | 'warn' | 'muted';
 export interface Result {
   verdict?: { label: string; tone: Tone; detail?: string };
   kpis?: { label: string; value: string | number; tone?: Tone }[];

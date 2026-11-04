@@ -7,7 +7,7 @@ import { barsMany, type Stock } from './vcp.ts';
 
 export interface DB { date: string; open: number; close: number; volume: number }
 const idx = (p: DB[], d: string) => p.findIndex(b => b.date === d);
-export function gap(p: DB[], date: string, timing: string) {
+function gap(p: DB[], date: string, timing: string) {
   const i = idx(p, date); if (i < 0) return { pct: 0, score: 0 };
   const t = (timing || 'unknown').toLowerCase(); let base: number, g: number;
   if (t === 'bmo') { if (i + 1 >= p.length) return { pct: 0, score: 0 }; base = p[i + 1].close; g = p[i].open }
@@ -16,18 +16,18 @@ export function gap(p: DB[], date: string, timing: string) {
   const pct = (g / base - 1) * 100, a = Math.abs(pct);
   return { pct: pyRoundN(pct, 2), score: a >= 10 ? 100 : a >= 7 ? 85 : a >= 5 ? 70 : a >= 3 ? 55 : a >= 1 ? 35 : 15 };
 }
-export function trend(p: DB[], date: string) {
+function trend(p: DB[], date: string) {
   const i = idx(p, date); if (i < 0 || i + 20 >= p.length || p[i + 20].close === 0) return { pct: 0, score: 0 };
   const r = (p[i].close / p[i + 20].close - 1) * 100;
   return { pct: pyRoundN(r, 2), score: r >= 15 ? 100 : r >= 10 ? 85 : r >= 5 ? 70 : r >= 0 ? 50 : r >= -5 ? 30 : 15 };
 }
-export function volume(p: DB[], date: string) {
+function volume(p: DB[], date: string) {
   if (idx(p, date) < 0 || Math.min(20, p.length) < 5 || Math.min(60, p.length) < 20) return { ratio: 0, score: 0 };
   const v20 = p.slice(0, 20).map(b => b.volume), v60 = p.slice(0, 60).map(b => b.volume), a = v20.reduce((x, y) => x + y, 0) / v20.length, b = v60.reduce((x, y) => x + y, 0) / v60.length;
   if (b === 0) return { ratio: 0, score: 0 };
   const r = a / b; return { ratio: pyRoundN(r, 2), score: r >= 2 ? 100 : r >= 1.5 ? 80 : r >= 1.2 ? 60 : r >= 1 ? 40 : 20 };
 }
-export function maPos(p: DB[], n: 50 | 200) {
+function maPos(p: DB[], n: 50 | 200) {
   if (p.length < n) return { dist: 0, score: 0 };
   const ma = p.slice(0, n).reduce((a, b) => a + b.close, 0) / n; if (ma === 0) return { dist: 0, score: 0 };
   const d = (p[0].close / ma - 1) * 100;
@@ -40,7 +40,7 @@ export function analyzeEarnings(p: DB[], date: string, timing: string) {
 }
 /** Original's backtest filter: skip price < $30 and the gap ≥ 10% with score ≥ 85 paradox. */
 export const entryOk = (price: number, gapPct: number, score: number) => !(price < 30) && !(Math.abs(gapPct) >= 10 && score >= 85);
-export const GUIDE: Record<string, string> = { A: 'Consider entry on a pullback to gap support or a breakout continuation.', B: 'Monitor for follow-through buying; wait for a pullback or volume confirmation.', C: 'Mixed signals: wait for clearer price action.', D: 'Weak setup: avoid.' };
+const GUIDE: Record<string, string> = { A: 'Consider entry on a pullback to gap support or a breakout continuation.', B: 'Monitor for follow-through buying; wait for a pullback or volume confirmation.', C: 'Mixed signals: wait for clearer price action.', D: 'Weak setup: avoid.' };
 
 /** Latest item-2.02 8-K per symbol within `days` calendar days, `n` at a time. */
 export async function recentEarnings(ctx: Ctx, syms: string[], days: number, n = 6) {
@@ -48,7 +48,7 @@ export async function recentEarnings(ctx: Ctx, syms: string[], days: number, n =
   await Promise.all(Array.from({ length: n }, async () => { while (i < syms.length) { const s = syms[i++]; try { const e = (await ctx.json<{ date: string; timing: string }[]>(`/api/sec/earnings?q=${encodeURIComponent(s)}`)).find(x => x.date >= since); if (e) out.set(s, e) } catch { /* not an SEC filer */ } } }));
   return out;
 }
-export const toDB = (b: { time: number; open: number; close: number; volume: number }[], n = 250): DB[] => b.slice(-n).reverse().map(x => ({ date: new Date(x.time * 1000).toISOString().slice(0, 10), open: x.open, close: x.close, volume: x.volume }));
+const toDB = (b: { time: number; open: number; close: number; volume: number }[], n = 250): DB[] => b.slice(-n).reverse().map(x => ({ date: new Date(x.time * 1000).toISOString().slice(0, 10), open: x.open, close: x.close, volume: x.volume }));
 
 export const earnTradeSkill: Skill = {
   id: 'earnings-trade-analyzer', name: 'Earnings reactions', group: 'Fundamentals', from: 'earnings-trade-analyzer',

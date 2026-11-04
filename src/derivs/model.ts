@@ -102,7 +102,7 @@ export function cvdLine(deltas: Map<number, number>, times: number[], from: numb
 
 // ---------- estimated liquidation heatmap ----------
 export interface Level { t0: number; t1: number | null; px: number; long: boolean; size: number }   // size: quote notional
-export const TIERS: [number, number][] = [[5, 0.25], [10, 0.3], [25, 0.25], [50, 0.12], [100, 0.08]];
+const TIERS: [number, number][] = [[5, 0.25], [10, 0.3], [25, 0.25], [50, 0.12], [100, 0.08]];
 /**
  * ESTIMATE, not exchange data. Model:
  *  - When open interest rises between two bars, the new contracts ΔOI were opened around that bar's typical price

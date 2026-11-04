@@ -19,7 +19,7 @@ export const clientId = Array.from(globalThis.crypto.getRandomValues(new Uint8Ar
 
 // ---------- pure helpers ----------
 const LOOPBACK = /^(localhost|127(\.\d{1,3}){3}|\[::1\])$/i;
-export const isLoopbackHost = (host: string) => LOOPBACK.test(host.replace(/:\d+$/, '').replace(/^(\[::1\]):\d+$/, '$1'));
+const isLoopbackHost = (host: string) => LOOPBACK.test(host.replace(/:\d+$/, '').replace(/^(\[::1\]):\d+$/, '$1'));
 const LANISH = /^(localhost|127(\.\d{1,3}){3}|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|[^/:]+\.local|\[::1\])(:\d+)?(\/|$)/i;
 
 /** "my.server.com", "192.168.1.5:8787" or a full URL → "https://my.server.com" / "http://192.168.1.5:8787" (origin only). Throws a readable Error. */
@@ -34,7 +34,7 @@ export function normalizeBaseUrl(input: string): string {
   if (!u.hostname) throw Error('That is not a valid address');
   return u.origin;
 }
-export const originOf = () => (globalThis.location?.origin as string | undefined) ?? '';
+const originOf = () => (globalThis.location?.origin as string | undefined) ?? '';
 const protoOf = () => (globalThis.location?.protocol as string | undefined) ?? 'http:';
 export const isSameOrigin = (s: Pick<Server, 'baseUrl'>, origin = originOf()) => s.baseUrl === '' || s.baseUrl === origin;
 
@@ -86,7 +86,7 @@ export function mixedContentWarning(s: Pick<Server, 'baseUrl'>, pageProtocol = p
   return 'This address uses plain http, but this page is https: the browser will block it. Give the server https (see docs/lan-setup.md) or open the app from that server directly.';
 }
 
-export const NO_TRADE = 'No trading server is connected. Trading, forward tests and AI need your own private server (Settings → Servers).';
+const NO_TRADE = 'No trading server is connected. Trading, forward tests and AI need your own private server (Settings → Servers).';
 const WHY_PUBLIC = 'This public server never stores exchange keys; connect your own private server for trading.';
 /** Is a feature usable, and if not, one short reason. Pure: takes the servers explicitly. */
 export function gateFor(f: keyof Features, sync: Pick<Server, 'features' | 'mode'> | null, trade: Pick<Server, 'features' | 'mode'> | null): { on: boolean; why: string } {
@@ -141,7 +141,7 @@ export function tradeServer(): Server | null {
   const s = syncServer();
   return canBeTradeServer(s).ok ? s : null;
 }
-export const serverFor = (role: Role) => (role === 'trade' ? tradeServer() : syncServer());
+const serverFor = (role: Role) => (role === 'trade' ? tradeServer() : syncServer());
 export const gate = (f: keyof Features) => gateFor(f, syncServer(), tradeServer());
 
 export function addServer(baseUrl: string, name?: string, origin = originOf()): Server {

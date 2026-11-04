@@ -67,13 +67,12 @@ export function userDb(id: number): DatabaseSync {
 }
 /** Create the file of a brand-new user (registration). */
 export function createUserDb(id: number): DatabaseSync { if (isPublic) closeUserDb(id); return isPublic ? handle(id, true) : db }
-export function closeUserDb(id: number) { const h = open.get(id); if (h) { closeQuiet(h.d); open.delete(id) } }
+function closeUserDb(id: number) { const h = open.get(id); if (h) { closeQuiet(h.d); open.delete(id) } }
 /** Delete the user's whole data (account deletion). */
 export function deleteUserDb(id: number) {
   closeUserDb(id);
   for (const s of ['', '-wal', '-shm']) rmSync(file(id) + s, { force: true });
 }
-export const userDbExists = (id: number) => !isPublic ? id === 1 : existsSync(file(id));
 /** Size of the user's database file in bytes (0 when it does not exist). */
 export function userDbBytes(id: number): number {
   try { const d = userDb(id); const p = (d.prepare('PRAGMA page_count').get() as { page_count: number }).page_count, s = (d.prepare('PRAGMA page_size').get() as { page_size: number }).page_size; return p * s } catch { return 0 }

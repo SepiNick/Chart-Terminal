@@ -15,7 +15,7 @@ migration('recorder/1', `
   CREATE TABLE prints_days (sym TEXT NOT NULL, day INTEGER NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (sym, day));`);
 
 /** A print plus the exchange's trade id when it has a sequential one (Binance aggregate trade id). */
-export type RecPrint = Print & { id?: number };
+type RecPrint = Print & { id?: number };
 /** lastId: Binance's last aggregate trade id; since: time (ms) of the last recorded print, for sources without ids. */
 export type Source = (sym: string, lastId: number | undefined, on: (ps: RecPrint[]) => void, since?: number) => () => void;
 
@@ -31,7 +31,7 @@ const API = 'https://data-api.binance.vision/api/v3', WS = 'wss://data-stream.bi
 type Agg = { a: number; p: string; q: string; T: number; m: boolean };
 const fromAgg = (x: Agg): RecPrint => ({ t: x.T / 1000, px: +x.p, qty: +x.q, buy: !x.m, id: x.a });
 type WsLike = { onopen: (() => void) | null; onmessage: ((e: { data: unknown }) => void) | null; onclose: (() => void) | null; close(): void };
-export interface BinanceIo { WebSocket: new (url: string) => WsLike; fetch: (url: string) => Promise<{ ok: boolean; json(): Promise<unknown> }>; maxPages: number; maxDelay: number }
+interface BinanceIo { WebSocket: new (url: string) => WsLike; fetch: (url: string) => Promise<{ ok: boolean; json(): Promise<unknown> }>; maxPages: number; maxDelay: number }
 
 /**
  * Live aggTrades for one symbol. Reconnects with exponential backoff; after a (re)connect, pages the REST endpoint from the

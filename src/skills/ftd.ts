@@ -21,7 +21,7 @@ function swingLow(h: D[], i: number) {
 }
 const swingLows = (h: D[], max = 6) => { const out: NonNullable<ReturnType<typeof swingLow>>[] = []; for (let i = h.length - 1; i > 3 && out.length < max; i--) { const s = swingLow(h, i); if (s) out.push(s) } return out };
 
-export function trackRally(h: D[], sl: number) {
+function trackRally(h: D[], sl: number) {
   const r = { day1: null as number | null, days: 0, rally: [] as { day: number; idx: number; change: number; volume: number }[], invalidated: false, why: '' };
   const slPrice = h[sl].close;
   if (sl >= h.length - 1) return r;
@@ -46,7 +46,7 @@ export function trackRally(h: D[], sl: number) {
   r.days = n;
   return r;
 }
-export function detectFtd(h: D[], r: ReturnType<typeof trackRally>) {
+function detectFtd(h: D[], r: ReturnType<typeof trackRally>) {
   if (r.invalidated) return null;
   for (const d of r.rally) {
     if (d.day < 4 || d.day > 10 || d.change < 1.25) continue;
@@ -57,7 +57,7 @@ export function detectFtd(h: D[], r: ReturnType<typeof trackRally>) {
   }
   return null;
 }
-export function analyzeIndex(history: D[]) {
+function analyzeIndex(history: D[]) {
   const out = { state: 'NO_SIGNAL' as State, ftd: null as ReturnType<typeof detectFtd>, rally: null as ReturnType<typeof trackRally> | null, swing: null as ReturnType<typeof swingLow>, depth: 0 };
   if (history.length < 10) return out;
   const w = history.slice(-60), hi = Math.max(...w.map(x => x.close));
@@ -96,7 +96,7 @@ export function marketState(sp: D[], nq: D[]) {
   return { combined, dual: aOk && bOk, sp500: a, nasdaq: b };
 }
 const ema = (p: number[], n: number) => { if (p.length < n) return p.length ? p.reduce((a, b) => a + b, 0) / p.length : 0; let e = p.slice(0, n).reduce((a, b) => a + b, 0) / n; const k = 2 / (n + 1); for (const x of p.slice(n)) e = x * k + e * (1 - k); return e };
-export function powerTrend(h: D[]) {
+function powerTrend(h: D[]) {
   if (h.length < 50) return null;
   const c = h.map(x => x.close), e21 = ema(c, 21), s50 = c.slice(-50).reduce((a, b) => a + b, 0) / 50, rising = c.length >= 55 ? s50 > c.slice(-55, -5).reduce((a, b) => a + b, 0) / 50 : null;
   return { on: e21 > s50 && rising === true && c.at(-1)! > e21, met: [e21 > s50, rising === true, c.at(-1)! > e21].filter(Boolean).length };

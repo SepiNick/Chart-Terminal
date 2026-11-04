@@ -7,7 +7,7 @@ import { pct, pyRound, pyRoundN, type Ctx, type Skill } from './types.ts';
 export interface H { date: string; open: number; high: number; close: number; volume: number }
 const avg = (a: number[]) => a.reduce((s, x) => s + x, 0) / a.length;
 /** calc_ema: newest-first prices, seeded with the SMA of the oldest `n`. */
-export const ema = (p: number[], n: number) => { if (p.length < n) return avg(p); const r = [...p].reverse(); let e = avg(r.slice(0, n)); const k = 2 / (n + 1); for (const x of r.slice(n)) e = x * k + e * (1 - k); return e };
+const ema = (p: number[], n: number) => { if (p.length < n) return avg(p); const r = [...p].reverse(); let e = avg(r.slice(0, n)); const k = 2 / (n + 1); for (const x of r.slice(n)) e = x * k + e * (1 - k); return e };
 const lowerHighs = (hi: number[], lb = 20) => { if (hi.length < lb) return false; const r = hi.slice(0, lb), s: number[] = []; for (let i = 1; i < r.length - 1; i++) if (r[i] > r[i - 1] && r[i] > r[i + 1]) s.push(r[i]); return s.length >= 2 && s[0] < s[1] };
 
 // 1. Distribution days (25%)
@@ -31,14 +31,14 @@ export function distribution(sp: H[], nq: H[]) {
 }
 
 // 2. Leading stock health (20%)
-export const DEFAULT_LEADERS = ['ARKK', 'WCLD', 'IGV', 'XBI', 'SOXX', 'SMH', 'KWEB', 'TAN'];
-export const POOL = ['SMH', 'SOXX', 'PSI', 'SOXQ', 'IGV', 'WCLD', 'CLOU', 'BUG', 'XBI', 'ARKG', 'ARKK', 'ARKW', 'KOMP', 'TAN', 'ICLN', 'KWEB', 'FDN', 'FINX', 'IPAY', 'BOTZ'];
+const DEFAULT_LEADERS = ['ARKK', 'WCLD', 'IGV', 'XBI', 'SOXX', 'SMH', 'KWEB', 'TAN'];
+const POOL = ['SMH', 'SOXX', 'PSI', 'SOXQ', 'IGV', 'WCLD', 'CLOU', 'BUG', 'XBI', 'ARKG', 'ARKK', 'ARKW', 'KOMP', 'TAN', 'ICLN', 'KWEB', 'FDN', 'FINX', 'IPAY', 'BOTZ'];
 export interface Q { price: number; yearHigh: number }
 export function dynamicBasket(q: Record<string, Q>, n = 10) {
   const s = POOL.filter(x => q[x] && q[x].price > 0 && q[x].yearHigh > 0).map(x => [x, q[x].price / q[x].yearHigh] as const);
   return s.length < 5 ? [...DEFAULT_LEADERS] : [...s].sort((a, b) => b[1] - a[1]).slice(0, n).map(x => x[0]);   // stable, like Python's sort
 }
-export function etfDeterioration(q: Q, h: H[]) {
+function etfDeterioration(q: Q, h: H[]) {
   let s = 0; const flags: string[] = [];
   const dist = q.yearHigh > 0 ? (q.price - q.yearHigh) / q.yearHigh * 100 : 0;
   if (q.yearHigh > 0) { const p = dist <= -25 ? 40 : dist <= -15 ? 30 : dist <= -10 ? 20 : dist <= -5 ? 10 : 0; if (p) { s += p; flags.push(`${Math.abs(dist).toFixed(0)}% below 52w high`) } }
@@ -62,9 +62,9 @@ export function leaders(q: Record<string, Q>, hist: Record<string, H[]>, list: s
 }
 
 // 3. Defensive rotation (15%)
-export const DEFENSIVE = ['XLU', 'XLP', 'XLV', 'VNQ'], OFFENSIVE = ['XLK', 'XLC', 'XLY', 'QQQ'];
+const DEFENSIVE = ['XLU', 'XLP', 'XLV', 'VNQ'], OFFENSIVE = ['XLK', 'XLC', 'XLY', 'QQQ'];
 const ret = (h: H[] | undefined, d: number) => !h || h.length < d + 1 || h[d].close === 0 ? null : (h[0].close - h[d].close) / h[d].close * 100;
-export const rotationScore = (r: number) => r >= 5 ? 100 : r >= 3 ? pyRound(80 + (r - 3) / 2 * 20) : r >= 1.5 ? pyRound(60 + (r - 1.5) / 1.5 * 20) : r >= 0.5 ? pyRound(40 + (r - 0.5) * 20) : r >= 0 ? pyRound(20 + r / 0.5 * 20) : r >= -2 ? pyRound(Math.max(0, 20 + r / 2 * 20)) : 0;
+const rotationScore = (r: number) => r >= 5 ? 100 : r >= 3 ? pyRound(80 + (r - 3) / 2 * 20) : r >= 1.5 ? pyRound(60 + (r - 1.5) / 1.5 * 20) : r >= 0.5 ? pyRound(40 + (r - 0.5) * 20) : r >= 0 ? pyRound(20 + r / 0.5 * 20) : r >= -2 ? pyRound(Math.max(0, 20 + r / 2 * 20)) : 0;
 const r2 = (x: number) => pyRoundN(x, 2);
 function period(h: Record<string, H[]>, d: number) {
   const dr = DEFENSIVE.map(s => ret(h[s], d)).filter((x): x is number => x != null), or = OFFENSIVE.map(s => ret(h[s], d)).filter((x): x is number => x != null);
@@ -104,7 +104,7 @@ function gapDown(h: H[], lb = 5) {
   for (let i = 0; i < lb; i++) { const t = h[i], y = h[i + 1]; if (y.close === 0 || y.volume === 0) continue; if ((t.open - y.close) / y.close * 100 <= -0.5 && t.volume > y.volume * 1.1) return true }
   return false;
 }
-export function indexTech(h: H[], price?: number) {
+function indexTech(h: H[], price?: number) {
   if (h.length < 21) return { raw: 0, available: false, flags: ['insufficient data'] };
   const c = h.map(x => x.close), p = price ?? c[0], e21 = ema(c, 21), e50 = c.length >= 50 ? ema(c, 50) : null, s200 = c.length >= 200 ? avg(c.slice(0, 200)) : null;
   let s = 0; const flags: string[] = [];
@@ -124,7 +124,7 @@ export function technical(sp: H[], nq: H[], spPx?: number, nqPx?: number) {
 
 // 6. Sentiment (10%)
 export type Term = 'steep_contango' | 'contango' | 'flat' | 'backwardation';
-export const termOf = (vix: number, vix3m: number): Term | null => !(vix3m > 0) ? null : vix / vix3m < 0.85 ? 'steep_contango' : vix / vix3m < 0.95 ? 'contango' : vix / vix3m <= 1.05 ? 'flat' : 'backwardation';
+const termOf = (vix: number, vix3m: number): Term | null => !(vix3m > 0) ? null : vix / vix3m < 0.85 ? 'steep_contango' : vix / vix3m < 0.95 ? 'contango' : vix / vix3m <= 1.05 ? 'flat' : 'backwardation';
 export function sentiment(vix: number | null, pc: number | null, term: Term | null, margin: number | null) {
   if (vix == null && pc == null && term == null) return { score: 50, available: false };
   let t = 0;
@@ -136,10 +136,10 @@ export function sentiment(vix: number | null, pc: number | null, term: Term | nu
 }
 
 // Composite
-export const WEIGHTS = { distribution_days: 0.25, leading_stocks: 0.2, defensive_rotation: 0.15, breadth_divergence: 0.15, index_technical: 0.15, sentiment: 0.1 };
+const WEIGHTS = { distribution_days: 0.25, leading_stocks: 0.2, defensive_rotation: 0.15, breadth_divergence: 0.15, index_technical: 0.15, sentiment: 0.1 };
 export type Comp = keyof typeof WEIGHTS;
-export const LABELS: Record<Comp, string> = { distribution_days: 'Distribution days', leading_stocks: 'Leading stock health', defensive_rotation: 'Defensive rotation', breadth_divergence: 'Breadth divergence', index_technical: 'Index technicals', sentiment: 'Sentiment & speculation' };
-export const ZONES: [number, string, string, string][] = [
+const LABELS: Record<Comp, string> = { distribution_days: 'Distribution days', leading_stocks: 'Leading stock health', defensive_rotation: 'Defensive rotation', breadth_divergence: 'Breadth divergence', index_technical: 'Index technicals', sentiment: 'Sentiment & speculation' };
+const ZONES: [number, string, string, string][] = [
   [20, 'Green (Normal)', '100%', 'Normal position sizing and stops; new entries allowed.'],
   [40, 'Yellow (Early Warning)', '80-90%', 'Tighten stops 10-20%, cut new position sizes 25-50%, review the weakest positions.'],
   [60, 'Orange (Elevated Risk)', '60-75%', 'Take profits on the weakest 25-30%, no new momentum entries, raise cash.'],

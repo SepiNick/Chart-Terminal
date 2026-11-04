@@ -11,7 +11,7 @@ type Target = Parameters<IPrimitivePaneRenderer['draw']>[0];
 interface Host { chart: IChartApi; series: ISeriesApi<SeriesType>; bars: () => Bar[]; tfSec: () => number; fmt: (p: number) => string }
 interface Hit { d: Drawing; handle: number }
 
-export const BASE_STYLE: Style = {
+const BASE_STYLE: Style = {
   color: '#2962ff', width: 2, dash: 'solid', fillColor: '#2962ff', fillAlpha: 0,
   text: '', textColor: '#2962ff', fontSize: 13, bold: false, italic: false, extendLeft: false, extendRight: false,
 };
@@ -22,7 +22,7 @@ export function styleFor(def: ToolDef, color: string, template?: Partial<Style>)
   if (def.levels) s.levels = def.levels.map(l => ({ ...l }));
   return { ...s, ...structuredClone(template ?? {}) };
 }
-export const isVisible = (d: Drawing, tfSec: number) => !d.hidden && (!d.vis || (tfSec >= d.vis.min && tfSec <= d.vis.max));
+const isVisible = (d: Drawing, tfSec: number) => !d.hidden && (!d.vis || (tfSec >= d.vis.min && tfSec <= d.vis.max));
 
 /**
  * All drawings of one chart, rendered as a single series primitive. Tools are pure ToolDefs;

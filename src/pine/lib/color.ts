@@ -8,7 +8,7 @@ export const COLOR_CONSTS: Record<string, PineValue> = {
 };
 
 type RGBA = [number, number, number, number];   // r,g,b 0-255, a 0-1
-export function parse(c: PineValue | undefined): RGBA | null {
+function parse(c: PineValue | undefined): RGBA | null {
   if (typeof c !== 'string') return null;
   let m = c.match(/^#([0-9a-f]{3,8})$/i);
   if (m) {
@@ -24,7 +24,7 @@ export function parse(c: PineValue | undefined): RGBA | null {
   return p.length >= 3 && p.every(x => !Number.isNaN(x)) ? [p[0], p[1], p[2], p[3] ?? 1] : null;
 }
 const hx = (n: number) => Math.round(Math.min(255, Math.max(0, n))).toString(16).padStart(2, '0');
-export const make = ([r, g, b, a]: RGBA) => {
+const make = ([r, g, b, a]: RGBA) => {
   const al = Math.round(Math.min(1, Math.max(0, a)) * 255);
   return '#' + hx(r) + hx(g) + hx(b) + (al === 255 ? '' : hx(al));
 };

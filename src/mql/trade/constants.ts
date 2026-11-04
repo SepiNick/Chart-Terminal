@@ -14,7 +14,7 @@ export const RC = {
   SHORT_ONLY: 10043, CLOSE_ONLY: 10044, FIFO_CLOSE: 10045, HEDGE_PROHIBITED: 10046,
 } as const;
 
-export const RC_TEXT: Record<number, string> = {
+const RC_TEXT: Record<number, string> = {
   0: 'no error', 10004: 'requote', 10006: 'request rejected', 10007: 'request canceled by trader', 10008: 'order placed',
   10009: 'request completed', 10010: 'only part of the request was completed', 10011: 'request processing error', 10012: 'request timed out',
   10013: 'invalid request', 10014: 'invalid volume', 10015: 'invalid price', 10016: 'invalid stops', 10017: 'trade disabled',

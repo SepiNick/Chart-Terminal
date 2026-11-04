@@ -7,8 +7,8 @@ import { FILERS, SHARE_CLASSES } from './filers13f.ts';
 export interface Filing { form: string; accession: string; filed: string; period: string; primary: string }
 export interface Row { issuer: string; title: string; cusip: string; value: number; shares: number; share_type: string; put_call: string }
 export interface Pos extends Row { rows: number; pct: number; cusips: string[]; ticker?: string | null; ticker_source?: string; check?: boolean; name?: string; tickers?: string[]; classes?: string[] }
-export const cik10 = (v: string | number) => { const d = String(v).replace(/\D/g, ''); if (!d) throw new Error(`not a CIK: ${v}`); return d.padStart(10, '0') };
-export function findBundled(q: string) {
+const cik10 = (v: string | number) => { const d = String(v).replace(/\D/g, ''); if (!d) throw new Error(`not a CIK: ${v}`); return d.padStart(10, '0') };
+function findBundled(q: string) {
   const s = q.toLowerCase().trim();
   if (/^\d{1,10}$/.test(s)) return FILERS.filter(f => f.cik === cik10(s));
   const w = s.split(/\s+/);
@@ -68,14 +68,14 @@ const SUFFIX = /\s*\/\s*[A-Z]{2,5}\s*\/?\s*$/;
 const ABBREV: Record<string, string> = { AMER: 'AMERICA', AMERN: 'AMERICAN', FINL: 'FINANCIAL', FIN: 'FINANCIAL', PETE: 'PETROLEUM', HLDGS: 'HOLDINGS', HLDG: 'HOLDING', HOLDG: 'HOLDING', INTL: 'INTERNATIONAL', GRP: 'GROUP', SVCS: 'SERVICES', SVC: 'SERVICE', SYS: 'SYSTEMS', MGMT: 'MANAGEMENT', INDS: 'INDUSTRIES', NATL: 'NATIONAL', ENTMT: 'ENTERTAINMENT', PAC: 'PACIFIC', LABS: 'LABORATORIES', PPTYS: 'PROPERTIES', RLTY: 'REALTY', TECHS: 'TECHNOLOGIES', TECH: 'TECHNOLOGY', COMMNS: 'COMMUNICATIONS', COMMUNICATN: 'COMMUNICATIONS', MFG: 'MANUFACTURING', ELEC: 'ELECTRIC', PHARMACEUTICALS: 'PHARMACEUTICALS', PHARMS: 'PHARMACEUTICALS', BANCORPORATION: 'BANCORP', RES: 'RESOURCES', SOLUTIONS: 'SOLUTIONS', WTR: 'WATER', MTRS: 'MOTORS', AIRLS: 'AIRLINES', CHEM: 'CHEMICAL' };
 const DROP = new Set(['INC', 'INCORPORATED', 'CORP', 'CORPORATION', 'CO', 'COMPANY', 'LTD', 'LIMITED', 'PLC', 'LLC', 'LP', 'SA', 'NV', 'AG', 'SE', 'THE', 'AND', 'OF']);
 const NONCOMMON = /-P[A-Z]*$|-WT[A-Z]*$|-WS$|-U$|-UN$|-R$|-RT$/;
-export function normName(n: string) {
+function normName(n: string) {
   let s = (n ?? '').toUpperCase().replace(/&/g, ' AND ');
   for (let i = 0; i < 2; i++) s = s.replace(SUFFIX, '');
   s = s.replace(/['’]/g, '').replace(/[^A-Z0-9 ]+/g, ' ');
   return s.split(/\s+/).filter(Boolean).map(w => ABBREV[w] ?? w).filter(w => !DROP.has(w));
 }
 const keys = (n: string) => { const w = normName(n); return [w.join(''), [...w].sort().join(' ')] as const };
-export const normTicker = (t: string) => { const x = (t ?? '').trim().toUpperCase(); return NONCOMMON.test(x) ? x : x.replace(/[-/ ]([A-Z]{1,2})$/, '.$1') };
+const normTicker = (t: string) => { const x = (t ?? '').trim().toUpperCase(); return NONCOMMON.test(x) ? x : x.replace(/[-/ ]([A-Z]{1,2})$/, '.$1') };
 const classLetter = (t: string) => /\b(?:CL|CLASS|SER|SERIES)\s*([A-Z])\b/.exec((t ?? '').toUpperCase())?.[1] ?? null;
 export class TickerIndex {
   byCik = new Map<string, string[]>(); titles = new Map<string, string>(); spaceless = new Map<string, Set<string>>(); sorted = new Map<string, Set<string>>();
@@ -104,7 +104,7 @@ export class TickerIndex {
     return [normTicker(c[0]), true];
   }
 }
-export function prettyName(issuer: string, sec?: string | null) {
+function prettyName(issuer: string, sec?: string | null) {
   let n = sec && /[a-z]/.test(sec) ? sec : sec || issuer;
   n = (n ?? '').replace(SUFFIX, '');
   n = n.trim().replace(/,?\s+(Inc\.?|Incorporated|Corp\.?|Corporation|Co\.?|Company|Ltd\.?|Limited|plc|PLC|LLC|L\.P\.|N\.V\.|S\.A\.)$/i, '');

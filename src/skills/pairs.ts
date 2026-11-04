@@ -13,7 +13,7 @@ export function ncdf(x: number) {
   return x >= 0 ? 1 - erfc / 2 : erfc / 2;
 }
 /** OLS by normal equations; returns coefficients, their t-values, SSR and n. */
-export function ols(y: number[], X: number[][]) {
+function ols(y: number[], X: number[][]) {
   const n = y.length, k = X[0].length, A = Array.from({ length: k }, (_, i) => Array.from({ length: k }, (_, j) => X.reduce((s, r) => s + r[i] * r[j], 0))), b = Array.from({ length: k }, (_, i) => X.reduce((s, r, t) => s + r[i] * y[t], 0));
   const inv = A.map((r, i) => [...r, ...Array.from({ length: k }, (_, j) => +(i === j))]);   // Gauss-Jordan inverse
   for (let c = 0; c < k; c++) { let p = c; for (let r = c + 1; r < k; r++) if (Math.abs(inv[r][c]) > Math.abs(inv[p][c])) p = r; [inv[c], inv[p]] = [inv[p], inv[c]]; const d = inv[c][c]; for (let j = 0; j < 2 * k; j++) inv[c][j] /= d; for (let r = 0; r < k; r++) if (r !== c) { const f = inv[r][c]; for (let j = 0; j < 2 * k; j++) inv[r][j] -= f * inv[c][j] } }
@@ -21,7 +21,7 @@ export function ols(y: number[], X: number[][]) {
   return { beta, t: beta.map((v, i) => v / Math.sqrt(s2 * Ai[i][i])), ssr, n, k, aic: n * (Math.log(2 * Math.PI) + Math.log(ssr / n) + 1) + 2 * k };
 }
 const CRIT_C: number[][] = [[-3.43035, -6.5393, -16.786, -79.433], [-2.86154, -2.8903, -4.234, -40.04], [-2.56677, -1.5384, -2.809, 0]];
-export function mackinnonp(t: number) {
+function mackinnonp(t: number) {
   if (t > 2.74) return 1; if (t < -18.83) return 0;
   const c = t <= -1.61 ? [2.1659, 1.4412, 3.8269 * 1e-2] : [1.7339, 9.3202 * 1e-1, -1.2745 * 1e-1, -1.0368 * 1e-2];
   return ncdf(c.reduce((s, v, i) => s + v * t ** i, 0));
@@ -36,13 +36,13 @@ export function adf(x: number[], maxlag = 1) {
 }
 const mean = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
 const sd = (v: number[]) => { const m = mean(v); return Math.sqrt(v.reduce((a, x) => a + (x - m) ** 2, 0) / (v.length - 1)) };
-export function corr(a: number[], b: number[]) { const ma = mean(a), mb = mean(b); let c = 0, va = 0, vb = 0; for (let i = 0; i < a.length; i++) { c += (a[i] - ma) * (b[i] - mb); va += (a[i] - ma) ** 2; vb += (b[i] - mb) ** 2 } return c / Math.sqrt(va * vb) }
-export function linreg(x: number[], y: number[]) { const mx = mean(x), my = mean(y); let sxy = 0, sxx = 0; for (let i = 0; i < x.length; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2 } const slope = sxy / sxx; return { slope, intercept: my - slope * mx } }
-export function halfLife(s: number[]) { const f = ols(s.slice(1), s.slice(0, -1).map(v => [1, v])), phi = f.beta[1]; return phi >= 1 || phi <= 0 ? null : -Math.log(2) / Math.log(phi) }
-export function zNow(s: number[], w = 90) { const t = s.slice(-Math.min(w, s.length)), q = sd(t); return !Number.isFinite(q) || q === 0 ? null : (s.at(-1)! - mean(t)) / q }
+function corr(a: number[], b: number[]) { const ma = mean(a), mb = mean(b); let c = 0, va = 0, vb = 0; for (let i = 0; i < a.length; i++) { c += (a[i] - ma) * (b[i] - mb); va += (a[i] - ma) ** 2; vb += (b[i] - mb) ** 2 } return c / Math.sqrt(va * vb) }
+function linreg(x: number[], y: number[]) { const mx = mean(x), my = mean(y); let sxy = 0, sxx = 0; for (let i = 0; i < x.length; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2 } const slope = sxy / sxx; return { slope, intercept: my - slope * mx } }
+function halfLife(s: number[]) { const f = ols(s.slice(1), s.slice(0, -1).map(v => [1, v])), phi = f.beta[1]; return phi >= 1 || phi <= 0 ? null : -Math.log(2) / Math.log(phi) }
+function zNow(s: number[], w = 90) { const t = s.slice(-Math.min(w, s.length)), q = sd(t); return !Number.isFinite(q) || q === 0 ? null : (s.at(-1)! - mean(t)) / q }
 export type Series = Map<string, number>;   // date → close
-export function align(a: Series, b: Series) { const ds = [...a.keys()].filter(d => b.has(d) && Number.isFinite(a.get(d)!) && Number.isFinite(b.get(d)!)).sort(); return [ds.map(d => a.get(d)!), ds.map(d => b.get(d)!), ds] as const }
-export function analyzePair(A: string, B: string, sa: Series, sb: Series, minCorr = 0.7) {
+function align(a: Series, b: Series) { const ds = [...a.keys()].filter(d => b.has(d) && Number.isFinite(a.get(d)!) && Number.isFinite(b.get(d)!)).sort(); return [ds.map(d => a.get(d)!), ds.map(d => b.get(d)!), ds] as const }
+function analyzePair(A: string, B: string, sa: Series, sb: Series, minCorr = 0.7) {
   const [a, b] = align(sa, sb); if (a.length < 100) return null;
   const c = corr(a, b); if (!Number.isFinite(c) || c < minCorr) return null;
   if (new Set(a).size < 2 || new Set(b).size < 2) return null;

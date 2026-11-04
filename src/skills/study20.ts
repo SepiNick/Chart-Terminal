@@ -5,12 +5,12 @@ import { pyRoundN, type Ctx, type Skill } from './types.ts';
 import { stockUniverse, universeInputs } from './burst.ts';
 
 export interface Bar { date: string; open: number; high: number; low: number; close: number; volume: number }
-export const HORIZONS = [1, 3, 5, 10, 20];
+const HORIZONS = [1, 3, 5, 10, 20];
 const EPS = 1e-9, SURVIVOR = 'CURRENT_UNIVERSE_BACKFILL_SURVIVORSHIP_BIAS';
 const chg = (c: number, p: number) => (p <= 0 ? 0 : (c / p - 1) * 100), spct = (n: number, d: number) => (d === 0 ? 0 : n / d * 100);
 const avg = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0);
 const loc = (b: Bar) => (b.high <= b.low ? 50 : Math.max(0, Math.min(100, (b.close - b.low) / (b.high - b.low) * 100)));
-export function median(v: number[]) { const s = v.filter(x => !Number.isNaN(x)).sort((a, b) => a - b), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null }
+function median(v: number[]) { const s = v.filter(x => !Number.isNaN(x)).sort((a, b) => a - b), n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null }
 const days = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 864e5;
 
 export interface Event {
@@ -19,9 +19,9 @@ export interface Event {
   pattern: string; closeQuality: string; extension: string; flags: string[]; scores: { continuation: number; reversal: number; priority: number; dataQuality: number };
   labels: string[]; handoffs: Record<string, boolean>; outcomes: Record<string, Outcome | null>; catalyst: string;
 }
-export interface Outcome { status: 'MATURED' | 'PENDING'; close?: number; mfe?: number; mae?: number; dClose?: number; dMfe?: number; dMae?: number; tag?: string }
+interface Outcome { status: 'MATURED' | 'PENDING'; close?: number; mfe?: number; mae?: number; dClose?: number; dMfe?: number; dMae?: number; tag?: string }
 
-export function pattern(dir: string, cl: number, gap: number, ret: number, d52: number, vr: number, p20: number) {
+function pattern(dir: string, cl: number, gap: number, ret: number, d52: number, vr: number, p20: number) {
   if (dir === 'DOWN') return cl >= 65 ? 'DOWN_GAP_REVERSAL_CANDIDATE' : Math.abs(ret) >= 35 && cl <= 25 ? 'STRUCTURAL_BREAKDOWN' : 'BREAKDOWN_EVENT';
   if (gap >= 8 && cl >= 75 && vr >= 2) return 'GAP_AND_GO';
   if (d52 >= -5 && cl >= 70 && vr >= 1.5) return 'BASE_BREAKOUT';
@@ -32,7 +32,7 @@ export function pattern(dir: string, cl: number, gap: number, ret: number, d52: 
 const closeQuality = (cl: number, dir: string) => dir === 'UP' ? (cl >= 80 ? 'STRONG_CLOSE' : cl >= 55 ? 'MID_CLOSE' : 'WEAK_CLOSE') : cl <= 20 ? 'WEAK_CLOSE_DOWN' : cl <= 45 ? 'MID_CLOSE_DOWN' : 'REVERSAL_CLOSE';
 const extension = (r: number, p: number, cl: number) => { const s = (r >= 60 ? 2 : r >= 35 ? 1 : 0) + (p >= 50 ? 2 : p >= 25 ? 1 : 0) + (cl < 45 ? 1 : 0); return s >= 4 ? 'HIGH' : s >= 2 ? 'MODERATE' : 'LOW' };
 const CATALYST: Record<string, number> = { EARNINGS_REVALUATION: 24, GUIDANCE_RAISE: 24, 'M&A': 22, CONTRACT_ORDER: 18, FDA_CLINICAL: 14, ANALYST_UPGRADE: 12, SHORT_SQUEEZE: 8, THEME_SYMPATHY: 14, NO_CLEAR_NEWS: 3, LOW_FLOAT_SPECULATION: 0, CAPITAL_STRUCTURE: 0 };
-export function score(dir: string, cat: string, dv: number, vr: number, cl: number, d52: number, pat: string, ext: string, flags: string[]) {
+function score(dir: string, cat: string, dv: number, vr: number, cl: number, d52: number, pat: string, ext: string, flags: string[]) {
   const cq = CATALYST[cat] ?? 5, liq = Math.min(15, Math.trunc(dv / 20e6 * 10)), vol = Math.min(10, Math.trunc(vr * 3)), close = Math.trunc((dir === 'UP' ? cl : 100 - cl) / 100 * 15);
   const setup = pat === 'BASE_BREAKOUT' || pat === 'GAP_AND_GO' ? 12 : pat.includes('MOMENTUM') ? 8 : 3, high = dir === 'DOWN' ? 5 : d52 >= -5 ? 10 : 4;
   const pen = ({ LOW: 0, MODERATE: -5, HIGH: -12 } as Record<string, number>)[ext] ?? -5, dq = Math.max(0, 100 - flags.length * 15);
@@ -83,11 +83,11 @@ export function detect(prices: Record<string, Bar[]>, asOf: string | null, o: Op
   return out;
 }
 const r4 = (x: number | null) => (x == null ? null : pyRoundN(x, 4));
-export function outcomeTag(dir: string, cr: number, dc: number, dm: number, da: number, h: number) {
+function outcomeTag(dir: string, cr: number, dc: number, dm: number, da: number, h: number) {
   if (dir === 'UP') return dc >= 8 || dm >= 12 ? 'STRONG_CONTINUATION' : dc >= 4 || dm >= 6 ? 'CONTINUED' : cr <= -4 ? 'FAILED_FADE' : da <= -8 && dc < 2 ? 'CHOPPY_FAILURE' : 'NEUTRAL';
   return dc >= 8 || dm >= 12 ? 'STRONG_BREAKDOWN_CONTINUATION' : dc >= 4 || dm >= 6 ? 'BREAKDOWN_CONTINUED' : cr >= 6 ? 'REVERSAL_BOUNCE' : h >= 5 && cr >= 3 ? 'PARTIAL_REVERSAL' : 'NEUTRAL';
 }
-export function outcomes(e: Event, bars: Bar[], hs = HORIZONS) {
+function outcomes(e: Event, bars: Bar[], hs = HORIZONS) {
   const idx = bars.findIndex(b => b.date === e.date); if (idx < 0) return e;
   const entry = bars[idx].close, o: Record<string, Outcome | null> = { ...e.outcomes };
   for (const h of hs) {

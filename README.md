@@ -1,6 +1,6 @@
 # Chart Terminal
 
-نسخه‌ای از TradingView که از صفر ساخته شده. نقشه‌ی راه و یافته‌های بررسی برنامه در [ROADMAP.md](ROADMAP.md) آمده است.
+نسخه‌ای از TradingView که از صفر ساخته شده. نقشه‌ی راه و یافته‌های بررسی برنامه در [ROADMAP.md](ROADMAP.md) آمده است. نصب و اجرا روی ویندوز، لینوکس، اندروید و سرور: [docs/README.md](docs/README.md).
 
 ```bash
 npm install && npm --prefix server install

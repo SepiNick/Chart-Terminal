@@ -1,7 +1,7 @@
 // Order-flow model, no DOM: trades → footprint cells per bar, delta/CVD, imbalances, big prints; order-book history for the heatmap.
 // t in seconds (ms precision); buy = aggressive buyer; bar = time of the activity bar (tick/range/…) it belongs to, if any
 export interface Print { t: number; px: number; qty: number; buy: boolean; bar?: number }
-export interface Cell { bid: number; ask: number; n: number }                 // bid = sold into the bid (sell aggressor), ask = bought at the ask
+interface Cell { bid: number; ask: number; n: number }                 // bid = sold into the bid (sell aggressor), ask = bought at the ask
 export interface FBar {
   time: number; cells: Map<number, Cell>;      // key = bin index (price / row)
   buy: number; sell: number; trades: number; hi: number; lo: number;

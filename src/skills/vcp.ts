@@ -111,7 +111,7 @@ function scoreVcp(c: Contraction[], v: ReturnType<typeof validate>) {
   if (v.t1 > 30) s -= 10;
   return Math.max(0, Math.min(100, s));
 }
-export function vcpPattern(h: H[], { lookback = 120, mult = 1.5, minDays = 5, minN = 2, t1Min = 10, ratio = 0.7, loose = 15 } = {}) {
+function vcpPattern(h: H[], { lookback = 120, mult = 1.5, minDays = 5, minN = 2, t1Min = 10, ratio = 0.7, loose = 15 } = {}) {
   const empty = { score: 0, valid: false, contractions: [] as Contraction[], pivot: null as number | null, wideLoose: false };
   if (h.length < 30) return empty;
   const p = h.slice(0, lookback).reverse(); if (p.length < 30) return empty;
@@ -134,7 +134,7 @@ export function vcpPattern(h: H[], { lookback = 120, mult = 1.5, minDays = 5, mi
 }
 
 // ---- volume ----
-export function volumePattern(h: H[], pivot: number | null, cs: Contraction[] | null, bo = 1.5) {
+function volumePattern(h: H[], pivot: number | null, cs: Contraction[] | null, bo = 1.5) {
   if (h.length < 20) return { score: 0, dryUp: null as number | null, breakout: false };
   const v = h.map(x => x.volume), c = h.map(x => x.close), n = v.length, vp = Math.min(50, n), avg = v.slice(0, vp).reduce((a, b) => a + b, 0) / vp;
   if (avg <= 0) return { score: 0, dryUp: null, breakout: false };
@@ -154,7 +154,7 @@ export function volumePattern(h: H[], pivot: number | null, cs: Contraction[] | 
 }
 
 // ---- pivot, execution state, rating ----
-export function pivotProximity(price: number, pivot: number | null, lastLow: number | null, breakout: boolean) {
+function pivotProximity(price: number, pivot: number | null, lastLow: number | null, breakout: boolean) {
   if (!pivot || pivot <= 0 || price <= 0) return { score: 0, dist: null as number | null, stop: null as number | null, risk: null as number | null, status: 'NO PIVOT' };
   const d = (price - pivot) / pivot * 100;
   let [s, st]: [number, string] = d > 20 ? [20, 'OVEREXTENDED - Do not chase'] : d > 10 ? [35, 'EXTENDED - Very high chase risk'] : d > 5 ? [50, 'EXTENDED - High chase risk'] : d > 3 ? [65, 'EXTENDED - Moderate chase risk'] : d > 0 ? [90, 'ABOVE PIVOT (within 3%)'] : d >= -2 ? [90, 'AT PIVOT (within 2%)'] : d >= -5 ? [75, 'NEAR PIVOT (2-5% below)'] : d >= -8 ? [60, 'APPROACHING (5-8% below)'] : d >= -10 ? [45, 'DEVELOPING (8-10% below)'] : d >= -15 ? [30, 'EARLY (10-15% below)'] : [10, 'FAR FROM PIVOT (>15% below)'];
@@ -163,7 +163,7 @@ export function pivotProximity(price: number, pivot: number | null, lastLow: num
   if (lastLow && lastLow > 0) { stop = r2(lastLow * 0.99); if (price > stop) risk = r2((price - stop) / price * 100); else { st = 'BELOW STOP LEVEL'; s = 0 } }
   return { score: s, dist: r2(d), stop, risk, status: st };
 }
-export function executionState(dist: number | null, price: number, s50: number | null, s200: number | null, s200d: number | null, lastLow: number | null, breakout: boolean, maxExt = 50) {
+function executionState(dist: number | null, price: number, s50: number | null, s200: number | null, s200d: number | null, lastLow: number | null, breakout: boolean, maxExt = 50) {
   if (s50 != null && s200 != null && price < s50 && s50 < s200) return 'Invalid';
   if (lastLow != null && lastLow > 0 && price < lastLow) return 'Damaged';
   if (s50 != null && price < s50) return 'Damaged';
@@ -183,7 +183,7 @@ export function composite(s: Record<keyof typeof W, number>, valid: boolean, sta
   if (wideLoose && ['Textbook VCP', 'Strong VCP', 'Good VCP'].includes(rating)) rating = 'Developing VCP';
   return { score, rating };
 }
-export function patternType(valid: boolean, n: number, finalDepth: number | null, state: string, dry: number | null, wideLoose: boolean) {
+function patternType(valid: boolean, n: number, finalDepth: number | null, state: string, dry: number | null, wideLoose: boolean) {
   if (state === 'Invalid' || state === 'Damaged') return 'Damaged';
   if (state === 'Overextended' || state === 'Extended') return valid ? 'Extended Leader' : 'VCP-adjacent';
   if (state === 'Early-post-breakout' || state === 'Breakout') return valid ? 'Post-breakout' : 'VCP-adjacent';
@@ -209,8 +209,8 @@ export function preFilter(q: Quote) {
 }
 export const stale = (h: H[], th = 1) => { if (h.length < 10) return false; const r = h.slice(0, 10).filter(b => b.close > 0).map(b => (b.high - b.low) / b.close * 100); return r.length > 0 && r.reduce((a, b) => a + b, 0) / r.length < th };
 
-export const toH = (b: { time: number; open: number; high: number; low: number; close: number; volume: number }[], n = 260): H[] => b.slice(-n).reverse().map(x => ({ date: new Date(x.time * 1000).toISOString().slice(0, 10), open: x.open, high: x.high, low: x.low, close: x.close, volume: x.volume }));
-export const quoteOf = (b: { high: number; low: number; close: number; volume: number }[]): Quote => { const y = b.slice(-252); return { price: b.at(-1)?.close ?? 0, yearHigh: Math.max(0, ...y.map(x => x.high)), yearLow: Math.min(...y.map(x => x.low)), avgVolume: b.slice(-63).reduce((a, x) => a + x.volume, 0) / Math.max(1, Math.min(63, b.length)) } };
+const toH = (b: { time: number; open: number; high: number; low: number; close: number; volume: number }[], n = 260): H[] => b.slice(-n).reverse().map(x => ({ date: new Date(x.time * 1000).toISOString().slice(0, 10), open: x.open, high: x.high, low: x.low, close: x.close, volume: x.volume }));
+const quoteOf = (b: { high: number; low: number; close: number; volume: number }[]): Quote => { const y = b.slice(-252); return { price: b.at(-1)?.close ?? 0, yearHigh: Math.max(0, ...y.map(x => x.high)), yearLow: Math.min(...y.map(x => x.low)), avgVolume: b.slice(-63).reduce((a, x) => a + x.volume, 0) / Math.max(1, Math.min(63, b.length)) } };
 /** Fetch daily bars for many US stocks, `n` at a time; failures are skipped. */
 export async function barsMany(ctx: Ctx, syms: string[], n = 6) {
   const out = new Map<string, Awaited<ReturnType<Ctx['bars']>>>(); let i = 0;

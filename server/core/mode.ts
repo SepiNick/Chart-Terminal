@@ -12,7 +12,7 @@ export const MODE: 'public' | 'private' = raw === 'public' ? 'public' : 'private
 export const isPublic = MODE === 'public';
 
 export const HOST = process.env.CT_HOST?.trim() || '127.0.0.1';
-export const TRUST_PROXY = ['1', 'true', 'yes'].includes((process.env.CT_TRUST_PROXY ?? '').toLowerCase());
+const TRUST_PROXY = ['1', 'true', 'yes'].includes((process.env.CT_TRUST_PROXY ?? '').toLowerCase());
 const norm = (ip: string) => ip.replace(/^::ffff:/i, '').toLowerCase();
 const PROXY_IPS = new Set(['127.0.0.1', '::1', ...(process.env.CT_PROXY_IPS ?? '').split(',').map(s => norm(s.trim())).filter(Boolean)]);
 export const REGISTRATION: 'invite' | 'open' | 'closed' = (['invite', 'open', 'closed'] as const).find(x => x === (process.env.CT_REGISTRATION ?? '').toLowerCase()) ?? 'invite';
@@ -29,7 +29,7 @@ export const CORS_ORIGINS: ReadonlySet<string> = new Set((process.env.CT_CORS_OR
 export const SERVER_NAME = (process.env.CT_SERVER_NAME ?? '').replace(/[^\P{Cc}]/gu, '').trim().slice(0, 60);
 export const publicUrl = (): URL | null => { try { return process.env.CT_PUBLIC_URL ? new URL(process.env.CT_PUBLIC_URL) : null } catch { return null } };
 /** Cookies get `Secure` (and in public mode the `__Host-` prefix) when the site is served over HTTPS. */
-export const publicHttps = () => isPublic && publicUrl()?.protocol === 'https:';
+const publicHttps = () => isPublic && publicUrl()?.protocol === 'https:';
 
 const trusted = (ip: string) => PROXY_IPS.has(norm(ip));
 /** True when the socket peer is a proxy we were told to believe (CT_TRUST_PROXY=1 and loopback or CT_PROXY_IPS). */

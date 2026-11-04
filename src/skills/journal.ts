@@ -16,7 +16,7 @@ function parts(t: number, tz: string) {
 const weekOf = (t: number, tz: string) => parts(t - parts(t, tz).wd * DAY, tz).day;
 
 export interface CbRules { maxDailyLossPct: number; streakN: number; cooldownHours: number; weeklyPct: number; monthlyPct: number; tz: string }
-export const CB_DEFAULTS: CbRules = { maxDailyLossPct: 2, streakN: 2, cooldownHours: 24, weeklyPct: 5, monthlyPct: 8, tz: 'UTC' };
+const CB_DEFAULTS: CbRules = { maxDailyLossPct: 2, streakN: 2, cooldownHours: 24, weeklyPct: 5, monthlyPct: 8, tz: 'UTC' };
 export interface CbOut { recommendation: 'TRADING_ALLOWED' | 'COOLDOWN' | 'HALTED'; rules: { rule: string; value: string; limit: string; active: boolean; until?: string }[]; day: number; week: number; month: number; streak: number }
 
 /** drawdown-circuit-breaker: realized P&L today / this week / this month and the latest losing streak, vs. limits. */

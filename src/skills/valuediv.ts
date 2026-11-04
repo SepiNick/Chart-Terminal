@@ -9,10 +9,10 @@ import { isReit, rsi } from './divgrowth.ts';
 
 type Div = { date: string; dividend: number };
 const cagr = (a: number, b: number, y: number) => (a <= 0 || b <= 0 || y <= 0 ? null : ((b / a) ** (1 / y) - 1) * 100);
-export const positiveTrend = (v: number[]) => v.length >= 3 && v[0] < v.at(-1)! && v.slice(1).filter((x, i) => x < v[i]).length <= 1;
+const positiveTrend = (v: number[]) => v.length >= 3 && v[0] < v.at(-1)! && v.slice(1).filter((x, i) => x < v[i]).length <= 1;
 const day = (s: string) => Date.parse(`${s}T00:00:00Z`) / 864e5;
 /** CAGR of trailing-twelve-month dividends `back` years ago vs now. */
-export function divGrowth(divs: Div[], today: string, back = 3) {
+function divGrowth(divs: Div[], today: string, back = 3) {
   const t = day(today), p = divs.filter(d => d.date && (d.dividend || 0) > 0 && day(d.date.slice(0, 10)) <= t).map(d => [day(d.date.slice(0, 10)), d.dividend] as const);
   if (!p.length || t - Math.min(...p.map(x => x[0])) < 365 * back) return null;
   const ttm = (e: number) => p.filter(([d]) => e - 365 < d && d <= e).reduce((a, [, x]) => a + x, 0), w = Array.from({ length: back + 1 }, (_, i) => ttm(t - 365 * (back - i)));
@@ -31,8 +31,8 @@ export function stability(divs: Div[], year: number) {
   r.growing = o.length >= 3 && r.years >= 2 && o.at(-1)! > o[0];
   return r;
 }
-export function stabilityScore(s: ReturnType<typeof stability>) { let x = 0; if (s.stable) x += 40; else if (s.vol != null && s.vol < 100) x += Math.max(0, 40 - s.vol * 0.4); if (s.growing) x += 30; x += Math.min(s.years * 10, 30); return pyRoundN(x, 1) }
-export function sustainability(a: Annual | undefined, reit: boolean) {
+function stabilityScore(s: ReturnType<typeof stability>) { let x = 0; if (s.stable) x += 40; else if (s.vol != null && s.vol < 100) x += Math.max(0, 40 - s.vol * 0.4); if (s.growing) x += 30; x += Math.min(s.years * 10, 30); return pyRoundN(x, 1) }
+function sustainability(a: Annual | undefined, reit: boolean) {
   const r = { payout: null as number | null, fcfPayout: null as number | null, fcf: null as number | null, coverage: 'MISSING_DATA', sustainable: false };
   if (!a) return r;
   const paid = a.dividendsPaid != null ? Math.abs(a.dividendsPaid) : null;
@@ -45,12 +45,12 @@ export function sustainability(a: Annual | undefined, reit: boolean) {
   else { if (a.netIncome != null && a.netIncome > 0) r.payout = paid / a.netIncome * 100; r.sustainable = r.payout != null && r.payout < 80 && r.coverage === 'COVERED' && r.fcfPayout != null && r.fcfPayout < 100 }
   return r;
 }
-export function healthy(a: Annual | undefined) {
+function healthy(a: Annual | undefined) {
   if (!a) return { de: null as number | null, cr: null as number | null, ok: false };
   const de = (a.equity ?? 0) > 0 ? (a.totalDebt ?? 0) / a.equity! : null, cr = (a.currentLiabilities ?? 0) > 0 ? (a.currentAssets ?? 0) / a.currentLiabilities! : null;
   return { de, cr, ok: de != null && cr != null && de < 2 && cr > 1 };
 }
-export function quality(roe: number | null, a: Annual | undefined) {
+function quality(roe: number | null, a: Annual | undefined) {
   if (!a) return { margin: null as number | null, score: 0 };
   const margin = (a.revenue ?? 0) > 0 ? (a.netIncome ?? 0) / a.revenue! * 100 : null; let s = 0;
   if (roe) s += Math.min(roe * 100 / 20 * 50, 50);
@@ -71,7 +71,7 @@ export function analyzeValue(a: Annual[], divs: Div[], price: number, closes: nu
   return { rsi: r, yield: pyRoundN(y, 2), divCagr: pyRoundN(dg.cagr, 2), revC, epsC, st, ss, su, h, q, score: pyRoundN(score, 1) };
 }
 /** Oversold (RSI ≤ 40) by score; if none, lowest RSI first. */
-export function rank<T extends { rsi: number; score: number }>(r: T[], top = 20) {
+function rank<T extends { rsi: number; score: number }>(r: T[], top = 20) {
   const o = r.filter(x => x.rsi <= 40);
   return o.length ? o.sort((a, b) => b.score - a.score).slice(0, top) : [...r].sort((a, b) => a.rsi - b.rsi || b.score - a.score).slice(0, top);
 }

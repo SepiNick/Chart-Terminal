@@ -3,13 +3,13 @@
 // e.g. "RSI زیر ۳۰ و حجم بالای ۱ میلیون", "change > 5% and price above sma 50", "امتیاز خرید قوی".
 // Unknown words are an error (never silently dropped) and the parsed filter is always shown back (describe()).
 
-export type Field = 'price' | 'change' | 'volume' | 'rsi' | 'sma' | 'ema' | 'rating';
+type Field = 'price' | 'change' | 'volume' | 'rsi' | 'sma' | 'ema' | 'rating';
 export interface Cond { field: Field; op: '>' | '<' | 'between'; value: number; value2?: number; period?: number }
 export interface Query { conds: Cond[]; join: 'and' | 'or' }
-export class QueryError extends Error { word: string; constructor(msg: string, word: string) { super(msg); this.word = word } }
+class QueryError extends Error { word: string; constructor(msg: string, word: string) { super(msg); this.word = word } }
 
 /** Persian/Arabic digits and letters to one form; lower case; spaces around symbols. */
-export function normalize(s: string): string {
+function normalize(s: string): string {
   return s
     .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x06f0))
     .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660))

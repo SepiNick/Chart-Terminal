@@ -7,7 +7,7 @@ export type PropVal = string | number | boolean | { id: string };
 export interface PPResult { toks: Tok[]; props: Record<string, PropVal>; errors: Diagnostic[]; warnings: Diagnostic[] }
 interface Macro { params: string[] | null; variadic: boolean; body: Tok[] }
 
-export const normPath = (p: string) => {
+const normPath = (p: string) => {
   const out: string[] = [];
   for (const s of p.replace(/\\/g, '/').toLowerCase().split('/')) {
     if (s === '..') out.pop();

@@ -7,7 +7,7 @@ import { css } from './brushes.ts';
 import type { NtDateTime } from './helpers.ts';
 import type { BarsCtx } from './series.ts';
 
-export const BAR_PX = 10, HEIGHT = 1000;
+const BAR_PX = 10, HEIGHT = 1000;
 
 export class Vector2 { X: number; Y: number; constructor(x = 0, y = 0) { this.X = x; this.Y = y } }
 export class RectangleF {
@@ -30,7 +30,7 @@ export class TextLayout {
   Dispose() { }
 }
 /** SharpDX.Direct2D1.PathGeometry: figures of straight segments. */
-export class PathGeometry {
+class PathGeometry {
   figures: { pts: Vector2[]; closed: boolean }[] = [];
   constructor(_factory?: unknown) { }
   Open() {

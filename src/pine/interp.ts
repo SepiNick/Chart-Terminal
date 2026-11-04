@@ -27,9 +27,9 @@ export interface Plot {
   shape?: string; location?: string; char?: string; size?: string; texts?: (string | null)[]; textcolor?: string;
   ohlc?: { o: number[]; h: number[]; l: number[]; c: number[] }; colordown?: string; wickcolors?: (string | null)[]; bordercolors?: (string | null)[];
 }
-export interface HLine { id: string; title: string; price: number; color: string; linestyle: string; linewidth: number; display: boolean }
-export interface Fill { a: string; b: string; colors: (string | null)[]; title: string }
-export interface TableCell { text: string; width: number; height: number; text_color: string; text_halign: string; text_valign: string; text_size: string; bgcolor: string | null; tooltip: string; font: string }
+interface HLine { id: string; title: string; price: number; color: string; linestyle: string; linewidth: number; display: boolean }
+interface Fill { a: string; b: string; colors: (string | null)[]; title: string }
+interface TableCell { text: string; width: number; height: number; text_color: string; text_halign: string; text_valign: string; text_size: string; bgcolor: string | null; tooltip: string; font: string }
 export interface PineTable {
   type: 'table'; id: number; deleted?: boolean; position: string; columns: number; rows: number;
   bgcolor: string | null; frame_color: string | null; frame_width: number; border_color: string | null; border_width: number;
@@ -62,8 +62,8 @@ export interface RunOpts {
 type TypeDecl = Extract<Stmt, { kind: 'TypeDecl' }>;
 type EnumDecl = Extract<Stmt, { kind: 'EnumDecl' }>;
 /** User-defined type instance; `type` is the qualified type name (alias.Name for library types). */
-export interface Udt extends PineObject { type: string; udt: true; f: Record<string, PineValue> }
-export const isUdt = (v: unknown): v is Udt => !!v && typeof v === 'object' && (v as Udt).udt === true;
+interface Udt extends PineObject { type: string; udt: true; f: Record<string, PineValue> }
+const isUdt = (v: unknown): v is Udt => !!v && typeof v === 'object' && (v as Udt).udt === true;
 const libCache = new Map<string, Program>();
 /** Pine timeframe string ('D', '240', '1W', '30S'; app forms like '4h' also work) → app tf ('1d', '4h'), or null. */
 export function appTf(s: string): string | null {

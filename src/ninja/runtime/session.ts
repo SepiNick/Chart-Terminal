@@ -47,7 +47,7 @@ function toUtc(day: number, min: number, tz: string): number {
 const weekend = (day: number) => { const w = new Date(day * 86400000).getUTCDay(); return w === 0 || w === 6 };
 
 /** Trading day (days since epoch) of the session containing unix time t, or -1 outside every session. */
-export function tradingDay(t: number, s: Session | null): number {
+function tradingDay(t: number, s: Session | null): number {
   if (!s) return Math.floor(t / 86400);
   const { day, min } = local(t, s.tz), night = s.end <= s.start;
   const inside = night ? min >= s.start || min < s.end : min >= s.start && min < s.end;
@@ -55,14 +55,14 @@ export function tradingDay(t: number, s: Session | null): number {
   return inside && !weekend(td) ? td : -1;
 }
 /** [begin, end) of trading day td in unix seconds. */
-export function bounds(td: number, s: Session | null): [number, number] {
+function bounds(td: number, s: Session | null): [number, number] {
   if (!s) return [td * 86400, (td + 1) * 86400];
   return [toUtc(s.end <= s.start ? td - 1 : td, s.start, s.tz), toUtc(td, s.end, s.tz)];
 }
 /** Session id (trading day or -1) of each bar, by its open time. */
 export const sessionIds = (bars: Bar[], s: Session | null) => bars.map(b => tradingDay(b.time, s));
 /** First session ending after t (or at t when includesEnd). */
-export function nextSession(t: number, s: Session | null, includesEnd = false): { td: number; begin: number; end: number } {
+function nextSession(t: number, s: Session | null, includesEnd = false): { td: number; begin: number; end: number } {
   const d0 = Math.floor(t / 86400) - 1;
   for (let td = d0; td < d0 + 10; td++) {
     if (s && weekend(td)) continue;

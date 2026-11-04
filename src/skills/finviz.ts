@@ -6,7 +6,7 @@ import FILTERS from './finviz-filters.ts';
 
 type Row = [code: string, meaning: string, section: string, keywords: string[], signal: boolean];
 const ROWS = FILTERS as Row[];
-export const VIEWS: Record<string, string> = { overview: '111', valuation: '121', ownership: '131', performance: '141', custom: '152', financial: '161', technical: '171' };
+const VIEWS: Record<string, string> = { overview: '111', valuation: '121', ownership: '131', performance: '141', custom: '152', financial: '161', technical: '171' };
 const PREFIXES = new Set(['an_', 'cap_', 'earningsdate_', 'etf_', 'exch_', 'fa_', 'geo_', 'idx_', 'ind_', 'ipodate_', 'news_', 'sec_', 'sh_', 'subtheme_', 'ta_', 'targetprice_', 'theme_']);
 // A few Persian phrases for the commonest filters (the reference has English and Japanese keywords).
 const FA: [string, string][] = [['کوچک', 'cap_small'], ['متوسط', 'cap_mid'], ['بزرگ', 'cap_large'], ['خیلی بزرگ', 'cap_mega'], ['فناوری', 'sec_technology'], ['تکنولوژی', 'sec_technology'], ['انرژی', 'sec_energy'], ['مالی', 'sec_financial'], ['بانک', 'sec_financial'], ['سلامت', 'sec_healthcare'], ['دارو', 'sec_healthcare'], ['صنعتی', 'sec_industrials'], ['املاک', 'sec_realestate'], ['آمریکا', 'geo_usa'], ['اس اند پی', 'idx_sp500'], ['سقف جدید', 'ta_newhigh'], ['کف جدید', 'ta_newlow'], ['اشباع فروش', 'ta_oversold'], ['اشباع خرید', 'ta_overbought'], ['حجم غیرعادی', 'ta_unusualvolume']];

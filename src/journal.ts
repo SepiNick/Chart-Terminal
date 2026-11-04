@@ -40,7 +40,7 @@ export interface JTrade {
 export interface JAccount { id: string; name: string; initial: number; kind: 'paper' | 'manual' | 'backtest' | 'exchange'; transfers: { id: string; t: number; amount: number; note?: string }[] }
 export interface Checklist { id: string; title: string; items: { id: string; text: string; weight: number }[]; advanced?: boolean }
 export interface Note { id: string; title: string; body: string; tags: string[]; pinned?: boolean; created: number; updated: number }
-export interface CustomField { id: string; label: string; type: 'text' | 'number' | 'select' | 'checkbox' | 'date'; options?: string[] }
+interface CustomField { id: string; label: string; type: 'text' | 'number' | 'select' | 'checkbox' | 'date'; options?: string[] }
 export interface Prop { id: string; name: string; accountId: string; phase: string; target: number; maxDD: number; dailyDD: number; ddType: 'static' | 'trailing'; minDays: number; start: number }
 export interface Journal {
   trades: JTrade[]; seen: number; synced?: boolean; notes: Record<string, string>; setups: string[];
@@ -57,12 +57,12 @@ export interface Journal {
 export const EMOTIONS = ['Calm', 'Confident', 'Focused', 'Uncertain', 'Fearful', 'Greedy', 'FOMO', 'Revenge', 'Bored', 'Tired', 'Euphoric', 'Frustrated'];
 export const MISTAKES = ['No stop loss', 'Moved stop', 'Exited too early', 'Held too long', 'Late entry', 'Chased price', 'Oversized', 'Against trend', 'Ignored plan', 'Overtrading', 'Revenge trade', 'Added to loser', 'News ignored'];
 export const EXIT_KINDS = ['Target hit', 'Stop hit', 'Trailing stop', 'Exit signal', 'Discretionary', 'Time exit', 'Breakeven', 'News / event', 'Fear', 'Margin / risk limit'];
-export const DEFAULT_SETUPS = ['Breakout', 'Pullback', 'Reversal', 'Range', 'Trend follow', 'Scalp', 'News'];
+const DEFAULT_SETUPS = ['Breakout', 'Pullback', 'Reversal', 'Range', 'Trend follow', 'Scalp', 'News'];
 
-export const MOTIVES = ['Per strategy', 'FOMO', 'Revenge on the market', 'Intuition', "Someone's advice", 'News', 'Technical signal', 'Fundamental signal'];
+const MOTIVES = ['Per strategy', 'FOMO', 'Revenge on the market', 'Intuition', "Someone's advice", 'News', 'Technical signal', 'Fundamental signal'];
 export const FEELINGS = ['Calm', 'Confident', 'Anxious', 'Fearful', 'Greedy', 'Excited', 'Disappointed', 'Neutral', 'Angry', 'Tired'];
-export const DEFAULT_ENTRY_REASONS = ['Price action', 'Support / resistance', 'Trend line', 'Breakout', 'Pullback', 'Classic pattern', 'Candlestick pattern', 'Indicator signal', 'Ichimoku', 'Order flow', 'Liquidity sweep', 'News'];
-export const DEFAULT_EXIT_REASONS = ['Target hit', 'Stop hit', 'Trailing stop', 'Opposite signal', 'Time exit', 'Break-even', 'Manual / discretionary', 'News', 'Fear'];
+const DEFAULT_ENTRY_REASONS = ['Price action', 'Support / resistance', 'Trend line', 'Breakout', 'Pullback', 'Classic pattern', 'Candlestick pattern', 'Indicator signal', 'Ichimoku', 'Order flow', 'Liquidity sweep', 'News'];
+const DEFAULT_EXIT_REASONS = ['Target hit', 'Stop hit', 'Trailing stop', 'Opposite signal', 'Time exit', 'Break-even', 'Manual / discretionary', 'News', 'Fear'];
 
 export const newJournal = (): Journal => ({ trades: [], seen: 0, notes: {}, setups: [...DEFAULT_SETUPS] });
 /** Fill in lists and the paper account for journals saved by older versions. */

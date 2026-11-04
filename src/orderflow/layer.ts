@@ -32,7 +32,7 @@ export const defaultOF = (): OFCfg => ({ footprint: 'off', row: 0, ratio: 3, hea
 /** `type`: the chart types 'footprint' and 'tpo' switch the matching layer on by themselves. */
 export const ofActive = (c?: OFCfg, type?: string) => type === 'footprint' || type === 'tpo' || (!!c && (c.footprint !== 'off' || c.heatmap || c.bubbles || c.cvd || c.delta || !!c.tpo || !!c.vprofile || (c.cluster ?? 'off') !== 'off' || !!c.absorption));
 /** Effective settings: defaults for fields older layouts lack, plus what the chart type implies. */
-export function ofEffective(c: OFCfg | undefined, type?: string): OFCfg {
+function ofEffective(c: OFCfg | undefined, type?: string): OFCfg {
   const e = { ...defaultOF(), ...c };
   if (type === 'footprint' && e.footprint === 'off') e.footprint = 'bidask';
   if (type === 'tpo') e.tpo = true;

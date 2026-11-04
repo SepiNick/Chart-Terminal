@@ -1,9 +1,9 @@
 // Reference tools. New tool files follow the same shape: export a ToolDef[] and register it in tools/index.ts.
-import type { Drawing, Geo, Level, Pt, ToolDef, XY } from './types.ts';
+import type { Drawing, Geo, Level, Pt, ToolDef } from './types.ts';
 import { positionSize, stepDecimals } from './math.ts';
 
 /** Price on the infinite line through a drawing's first two points, at time t (linear in bar index). */
-export function linePriceAt(d: Drawing, t: number, g: Geo): number | null {
+function linePriceAt(d: Drawing, t: number, g: Geo): number | null {
   const [a, b] = d.pts, la = g.logical(a.t), lb = g.logical(b.t);
   if (la === lb) return null;
   return a.p + ((b.p - a.p) * (g.logical(t) - la)) / (lb - la);
@@ -191,5 +191,3 @@ function position(id: string, name: string, icon: string, dir: 1 | -1): ToolDef 
     },
   };
 }
-
-export type { XY };

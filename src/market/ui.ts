@@ -232,7 +232,7 @@ interface News { title: string; link: string; source: string; t: number }
 let newsMine = store.get('mktNewsMine', false);
 /** Words that find a symbol's news: its base asset (BTC) and, for well-known coins, the name (Bitcoin). */
 const NAMES: Record<string, string> = { BTC: 'Bitcoin', ETH: 'Ethereum,Ether', SOL: 'Solana', XRP: 'Ripple,XRP', BNB: 'Binance', DOGE: 'Dogecoin', ADA: 'Cardano', TON: 'Toncoin', TRX: 'Tron', AVAX: 'Avalanche', DOT: 'Polkadot', LINK: 'Chainlink', LTC: 'Litecoin', SHIB: 'Shiba', PEPE: 'Pepe', SUI: 'Sui', ARB: 'Arbitrum', OP: 'Optimism' };
-export const newsWords = (sym: string) => { const s = (isRemote(sym) ? splitSym(sym).symbol : sym).replace(/^[A-Z0-9]+:/, '').replace(/[_/]?(USDT|USDC|USD|BUSD|IRT|EUR|BTC)(\.P)?$/, ''); return [s, ...(NAMES[s]?.split(',') ?? [])].join(',') };
+const newsWords = (sym: string) => { const s = (isRemote(sym) ? splitSym(sym).symbol : sym).replace(/^[A-Z0-9]+:/, '').replace(/[_/]?(USDT|USDC|USD|BUSD|IRT|EUR|BTC)(\.P)?$/, ''); return [s, ...(NAMES[s]?.split(',') ?? [])].join(',') };
 const newsList = (items: News[]) => items.map(n => `<div class="news"><a href="${esc(n.link)}" target="_blank" rel="noopener noreferrer">${esc(n.title)}</a><div class="muted">${esc(n.source)}${n.t ? ' · ' + new Date(n.t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</div></div>`).join('') || '<div class="muted">No headlines.</div>';
 async function newsView(v: HTMLElement) {
   v.innerHTML = `<label><input type="checkbox" id="newsMine" ${newsMine ? 'checked' : ''}> only ${esc(host.symbol())}</label><div id="newsOut" class="muted">Loading…</div>`;

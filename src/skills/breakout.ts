@@ -3,8 +3,8 @@
 // constrained by portfolio heat). Proposals only.
 import { money, num, pct, type Skill } from './types.ts';
 
-export const roundPrice = (p: number) => (p >= 1 ? Math.round(p * 100) / 100 : Math.round(p * 10000) / 10000);
-export const ratingBand = (score: number) => (score >= 90 ? 'textbook' : score >= 80 ? 'strong' : score >= 70 ? 'good' : score >= 60 ? 'developing' : 'weak');
+const roundPrice = (p: number) => (p >= 1 ? Math.round(p * 100) / 100 : Math.round(p * 10000) / 10000);
+const ratingBand = (score: number) => (score >= 90 ? 'textbook' : score >= 80 ? 'strong' : score >= 70 ? 'good' : score >= 60 ? 'developing' : 'weak');
 const MULT: Record<string, number> = { textbook: 1.75, strong: 1, good: 0.75, developing: 0, weak: 0 };
 
 export interface BreakoutIn { pivot: number; low: number; price: number; score: number; breakoutVolume: boolean; account: number; riskPct: number; maxPositionPct: number; maxSectorPct: number; sectorExposure: number; heatPct: number; maxHeatPct: number; targetR: number; stopBufferPct: number; maxChasePct: number; pivotBufferPct: number; maxRiskPct: number; fractional?: boolean }

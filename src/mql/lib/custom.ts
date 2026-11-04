@@ -75,7 +75,7 @@ export function installCustom(rt: Rt, env: Env) {
   const SmoothedMA = (pos: number, n: number, prev: number, p: N) => { if (n < 1) return 0; if (pos === n - 1) return SimpleMA(pos, n, p); if (pos >= n) return (prev * (n - 1) + p.get(pos)) / n; return 0 };
   const LinearWeightedMA = (pos: number, n: number, p: N) => { if (n < 1 || pos < n - 1) return 0; let s = 0, w = 0; for (let i = 0; i < n; i++) { s += p.get(pos - i) * (n - i); w += n - i } return s / w };
   /** Shared OnBuffer loop: zero-fills the lead-in, seeds at `first`, then steps. */
-  const onBuffer = (total: number, prev: number, begin: number, n: number, p: N, b: N, first: number, step: (i: number) => number) => {
+  const onBuffer = (total: number, prev: number, begin: number, n: number, b: N, first: number, step: (i: number) => number) => {
     if (n <= 1 || total - begin < n) return 0;
     if (!b.fixed && b.size < total) b.resize(total);
     let start: number;
@@ -85,9 +85,9 @@ export function installCustom(rt: Rt, env: Env) {
   };
   Object.assign(rt, {
     SimpleMA, ExponentialMA, SmoothedMA, LinearWeightedMA,
-    SimpleMAOnBuffer: (t: number, pc: number, bg: number, n: number, p: N, b: N) => onBuffer(t, pc, bg, n, p, b, bg + n - 1, i => SimpleMA(i, n, p)),
-    ExponentialMAOnBuffer: (t: number, pc: number, bg: number, n: number, p: N, b: N) => onBuffer(t, pc, bg, n, p, b, bg, i => (i === bg ? p.get(bg) : ExponentialMA(i, n, b.get(i - 1), p))),
-    SmoothedMAOnBuffer: (t: number, pc: number, bg: number, n: number, p: N, b: N) => onBuffer(t, pc, bg, n, p, b, bg + n - 1, i => (i === bg + n - 1 ? SimpleMA(i, n, p) : (b.get(i - 1) * (n - 1) + p.get(i)) / n)),
-    LinearWeightedMAOnBuffer: (t: number, pc: number, bg: number, n: number, p: N, b: N, ws?: unknown) => { put(ws, (n * (n + 1)) / 2); return onBuffer(t, pc, bg, n, p, b, bg + n - 1, i => LinearWeightedMA(i, n, p)) },
+    SimpleMAOnBuffer: (t: number, pc: number, bg: number, n: number, p: N, b: N) => onBuffer(t, pc, bg, n, b, bg + n - 1, i => SimpleMA(i, n, p)),
+    ExponentialMAOnBuffer: (t: number, pc: number, bg: number, n: number, p: N, b: N) => onBuffer(t, pc, bg, n, b, bg, i => (i === bg ? p.get(bg) : ExponentialMA(i, n, b.get(i - 1), p))),
+    SmoothedMAOnBuffer: (t: number, pc: number, bg: number, n: number, p: N, b: N) => onBuffer(t, pc, bg, n, b, bg + n - 1, i => (i === bg + n - 1 ? SimpleMA(i, n, p) : (b.get(i - 1) * (n - 1) + p.get(i)) / n)),
+    LinearWeightedMAOnBuffer: (t: number, pc: number, bg: number, n: number, p: N, b: N, ws?: unknown) => { put(ws, (n * (n + 1)) / 2); return onBuffer(t, pc, bg, n, b, bg + n - 1, i => LinearWeightedMA(i, n, p)) },
   });
 }

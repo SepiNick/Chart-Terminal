@@ -15,8 +15,8 @@ export type BrokerEnv = Pick<Env, 'dialect' | 'symbol' | 'point' | 'digits' | 'a
 
 export const ORDER_NAMES = ['buy', 'sell', 'buy_limit', 'sell_limit', 'buy_stop', 'sell_stop', 'buy_stop_limit', 'sell_stop_limit', 'close_by'];
 export const sideOf = (code: number): Side => (code % 2 ? 'sell' : 'buy');
-export const ST = { PLACED: 1, CANCELED: 2, FILLED: 4, REJECTED: 5, EXPIRED: 6 };
-export const RS = { EXPERT: 3, SL: 4, TP: 5, SO: 6 };
+const ST = { PLACED: 1, CANCELED: 2, FILLED: 4, REJECTED: 5, EXPIRED: 6 };
+const RS = { EXPERT: 3, SL: 4, TP: 5, SO: 6 };
 const ENTRY = ['in', 'out', 'inout', 'out'] as const;
 const TAG: Record<number, string> = { 4: '[sl]', 5: '[tp]', 6: '[so]' };
 const EPS = 1e-8;
@@ -26,7 +26,7 @@ const eod = (t: number) => Math.floor(t / 86400) * 86400 + 86400;
 interface Tick { bid: number; ask: number; time: number }
 interface Opts { sl?: number; tp?: number; magic?: number; comment?: string; order: number; reason: number; target?: Pos; noComm?: boolean; entryCode?: number; swap?: number }
 /** ENUM_TRADE_TRANSACTION_TYPE */
-export const TX = { ORDER_ADD: 0, ORDER_UPDATE: 1, ORDER_DELETE: 2, HISTORY_ADD: 3, HISTORY_UPDATE: 4, HISTORY_DELETE: 5, DEAL_ADD: 6, DEAL_UPDATE: 7, DEAL_DELETE: 8, POSITION: 9, REQUEST: 10 };
+const TX = { ORDER_ADD: 0, ORDER_UPDATE: 1, ORDER_DELETE: 2, HISTORY_ADD: 3, HISTORY_UPDATE: 4, HISTORY_DELETE: 5, DEAL_ADD: 6, DEAL_UPDATE: 7, DEAL_DELETE: 8, POSITION: 9, REQUEST: 10 };
 /** One trade transaction for OnTradeTransaction (MqlTradeTransaction fields; request/result only on TRADE_TRANSACTION_REQUEST). */
 export interface Tx { trans: Record<string, number | string>; req?: Partial<TradeReq>; res?: TradeRes }
 

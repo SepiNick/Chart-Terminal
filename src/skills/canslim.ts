@@ -70,7 +70,7 @@ export function mScore(price: number, spNewest: number[], vix: number | null) {
   if (vix) { if (vix < 15) s += 10; else if (vix > 30) s = 0 }
   return { score: Math.min(Math.max(s, 0), 100), trend, dist: pyRoundN(d, 2) };
 }
-export const W = { C: 0.15, A: 0.2, N: 0.15, S: 0.15, L: 0.2, I: 0.1, M: 0.05 };
+const W = { C: 0.15, A: 0.2, N: 0.15, S: 0.15, L: 0.2, I: 0.1, M: 0.05 };
 export type K = keyof typeof W;
 export function composite(s: Record<K, number>) {
   const score = pyRoundN((Object.keys(W) as K[]).reduce((a, k) => a + s[k] * W[k], 0), 1), rating = score >= 90 ? 'Exceptional+' : score >= 80 ? 'Exceptional' : score >= 70 ? 'Strong' : score >= 60 ? 'Above Average' : score >= 50 ? 'Average' : score >= 40 ? 'Below Average' : 'Weak';
@@ -79,7 +79,7 @@ export function composite(s: Record<K, number>) {
   return { score, rating, failed: s.M === 0 ? ['M'] : failed, rec };
 }
 /** Quarterly and annual EPS/revenue (newest first) from SEC facts. */
-export function statements(cf: Facts) {
+function statements(cf: Facts) {
   const eps = series(cf, 'eps_diluted').s, rev = series(cf, 'revenue').s;
   const q = [...eps.keys()].sort().reverse().slice(0, 8).map(d => ({ date: d, eps: eps.get(d)!.value, revenue: rev.get(d)?.value ?? null }));
   const ann = (keys: string[], unit: string) => { const m = new Map<string, number>(); for (const c of keys) for (const f of periods(factsFor(cf, c, unit)).values()) { const d = (Date.parse(f.end) - Date.parse(f.start!)) / 864e5; if (d >= 350 && d <= 380 && (f.form ?? '').startsWith('10-K') && !m.has(f.end)) m.set(f.end, f.val) } return m };

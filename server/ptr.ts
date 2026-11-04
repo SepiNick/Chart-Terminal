@@ -16,7 +16,7 @@ async function cached<T>(k: string, ttl: number, load: () => Promise<T>): Promis
 async function bytes(url: string) { const r = await deps.fetch(url); if (!r.ok) throw new HttpError(502, `House Clerk returned ${r.status}`); return Buffer.from(await r.arrayBuffer()) }
 
 /** The first .xml file of a ZIP (stored or deflated), read from its central directory. */
-export function unzipXml(z: Buffer): Buffer {
+function unzipXml(z: Buffer): Buffer {
   if (z[0] !== 0x50 || z[1] !== 0x4b) return z;
   let e = z.length - 22; while (e >= 0 && z.readUInt32LE(e) !== 0x06054b50) e--;
   if (e < 0) throw new HttpError(502, 'Broken ZIP');

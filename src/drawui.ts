@@ -92,7 +92,7 @@ export function setTool(host: DrawUIHost, id: string) {
   host.layer().setTool(id);
   renderLeftToolbar(host);
 }
-export function setCursor(host: DrawUIHost, c: CursorMode) { host.layers().forEach(l => l.setCursor(c)); renderLeftToolbar(host) }
+function setCursor(host: DrawUIHost, c: CursorMode) { host.layers().forEach(l => l.setCursor(c)); renderLeftToolbar(host) }
 
 function renderFavBar(host: DrawUIHost) {
   if (!host.layer()) return;
@@ -191,7 +191,7 @@ export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLa
     <button data-act="more" title="More">⋯</button>
     <button data-act="del" title="Remove (Del)">🗑</button>`;
 }
-export function cloneDrawings(l: DrawingLayer, offsetBars = 3) {
+function cloneDrawings(l: DrawingLayer, offsetBars = 3) {
   const copies = [...l.selected].map(d => ({ ...structuredClone(d), id: Date.now() + Math.random(), locked: false }));
   const g = l.geo();
   copies.forEach(c => (c.pts = c.pts.map(p => ({ t: g.timeAt(g.logical(p.t) + offsetBars), p: p.p }))));

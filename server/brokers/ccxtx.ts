@@ -20,7 +20,7 @@ export interface Cx {
   createOrder: Fn; fetchClosedOrders?: Fn; cancelOrder: Fn; editOrder: Fn; watchOrders?: Fn; close?: () => Promise<void> | void;
   [k: string]: unknown;
 }
-export type CcxtBroker = 'binance' | 'binanceusdm' | 'bybit' | 'okx';
+type CcxtBroker = 'binance' | 'binanceusdm' | 'bybit' | 'okx';
 export interface Keys { apiKey: string; secret: string; passphrase?: string }
 
 /** How an account's CCXT instance is made (tests swap in a fake). */

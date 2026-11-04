@@ -1,12 +1,12 @@
 // Pine Script tokenizer: indentation blocks (indent/dedent/nl tokens), line wrapping, comments, //@version.
 import { PineSyntaxError } from './ast.ts';
 
-export type TokType = 'num' | 'str' | 'color' | 'ident' | 'kw' | 'op' | 'nl' | 'indent' | 'dedent' | 'eof';
+type TokType = 'num' | 'str' | 'color' | 'ident' | 'kw' | 'op' | 'nl' | 'indent' | 'dedent' | 'eof';
 export interface Tok { type: TokType; value: string; line: number; col: number }   // str value is unescaped
 
 // import/export/method/type/enum are contextual: lexed as identifiers, recognised by the parser at statement start
 // (so `syminfo.type` or a variable named `method` still work).
-export const KEYWORDS = new Set(['if', 'else', 'for', 'to', 'by', 'in', 'while', 'switch', 'var', 'varip',
+const KEYWORDS = new Set(['if', 'else', 'for', 'to', 'by', 'in', 'while', 'switch', 'var', 'varip',
   'true', 'false', 'na', 'and', 'or', 'not', 'break', 'continue']);
 const OPS = [':=', '==', '!=', '<=', '>=', '=>', '+=', '-=', '*=', '/=', '%=',
   '+', '-', '*', '/', '%', '<', '>', '=', '?', ':', ',', '.', '(', ')', '[', ']'];

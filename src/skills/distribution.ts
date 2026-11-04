@@ -22,7 +22,7 @@ export function distributionDays(h: Row[], minDecline = -0.002, expire = 25, gai
   return out;
 }
 const active = (dd: DD[], maxAge: number) => dd.filter(d => d.status === 'active' && d.age <= maxAge).length;
-export function classify(d5: number, d15: number, d25: number, belowMa: boolean | null) {
+function classify(d5: number, d15: number, d25: number, belowMa: boolean | null) {
   if (d25 >= 6 || d15 >= 4 || (belowMa === true && d25 >= 5)) return 'SEVERE';
   if (d25 >= 5 || d15 >= 3 || d5 >= 2) return 'HIGH';
   return d25 >= 3 ? 'CAUTION' : 'NORMAL';

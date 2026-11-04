@@ -4,7 +4,7 @@
 import type { Bar } from '../data.ts';
 import { ema, highest, lowest, macd, rma, rsi, sma, stoch, type Series } from '../indicators.ts';
 
-export type Vote = 1 | 0 | -1;
+type Vote = 1 | 0 | -1;
 export interface Rating { all: number; ma: number; osc: number; label: string; votes: { name: string; group: 'ma' | 'osc'; value: number | null; vote: Vote }[] }
 
 const last = (s: Series, k = 0) => s[s.length - 1 - k] ?? null;
@@ -18,7 +18,7 @@ const hma = (v: Series, n: number) => { const a = wma(v, Math.round(n / 2)), b =
 const vwma = (b: Bar[], n: number) => { const pv = sma(b.map(x => x.close * x.volume), n), vv = sma(b.map(x => x.volume), n); return pv.map((x, i) => (x == null || !vv[i] ? null : x / vv[i]!)) };
 const mid = (b: Bar[], n: number) => { const h = highest(b.map(x => x.high), n), l = lowest(b.map(x => x.low), n); return h.map((x, i) => (x == null || l[i] == null ? null : (x + l[i]!) / 2)) };
 
-export const ratingLabel = (v: number) => (v > 0.5 ? 'Strong buy' : v > 0.1 ? 'Buy' : v < -0.5 ? 'Strong sell' : v < -0.1 ? 'Sell' : 'Neutral');
+const ratingLabel = (v: number) => (v > 0.5 ? 'Strong buy' : v > 0.1 ? 'Buy' : v < -0.5 ? 'Strong sell' : v < -0.1 ? 'Sell' : 'Neutral');
 
 /** Needs ~200 bars for every vote; missing indicators (too little history) don't vote. */
 export function technicalRating(b: Bar[]): Rating {

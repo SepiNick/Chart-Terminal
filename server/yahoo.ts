@@ -7,7 +7,7 @@ const MAJORS = ['EUR', 'USD', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD'];
 const EXOTICS = ['SEK', 'NOK', 'DKK', 'PLN', 'HUF', 'CZK', 'TRY', 'ZAR', 'MXN', 'SGD', 'HKD', 'CNY', 'INR', 'BRL', 'THB', 'ILS', 'AED', 'SAR', 'KRW', 'RUB'];
 const RANK = Object.fromEntries(MAJORS.map((c, i) => [c, i]));
 
-export interface FxMarket { sym: string; yahoo: string; name: string; type: 'forex' | 'metal' | 'energy' | 'index' | 'commodity' | 'stock' | 'crypto' }
+interface FxMarket { sym: string; yahoo: string; name: string; type: 'forex' | 'metal' | 'energy' | 'index' | 'commodity' | 'stock' | 'crypto' }
 const SPECIAL: FxMarket[] = [
   ['XAUUSD', 'GC=F', 'Gold', 'metal'], ['XAGUSD', 'SI=F', 'Silver', 'metal'], ['XPTUSD', 'PL=F', 'Platinum', 'metal'], ['XPDUSD', 'PA=F', 'Palladium', 'metal'], ['COPPER', 'HG=F', 'Copper', 'metal'],
   ['USOIL', 'CL=F', 'WTI crude oil', 'energy'], ['UKOIL', 'BZ=F', 'Brent crude oil', 'energy'], ['NATGAS', 'NG=F', 'Natural gas', 'energy'], ['GASOLINE', 'RB=F', 'Gasoline', 'energy'],

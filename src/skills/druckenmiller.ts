@@ -12,11 +12,11 @@ export interface Sig {
   ftd?: { state: string; quality: number; dual: boolean; dist: number };
   theme?: { derived: number; exhaustion?: number }; vcp?: { derived: number; textbook?: number }; canslim?: { derived: number; exceptional?: number };
 }
-export const WEIGHTS = { market_structure: 0.18, distribution_risk: 0.18, bottom_confirmation: 0.12, macro_alignment: 0.18, theme_quality: 0.12, setup_availability: 0.1, signal_convergence: 0.12 };
+const WEIGHTS = { market_structure: 0.18, distribution_risk: 0.18, bottom_confirmation: 0.12, macro_alignment: 0.18, theme_quality: 0.12, setup_availability: 0.1, signal_convergence: 0.12 };
 export type K = keyof typeof WEIGHTS;
-export const LABELS: Record<K, string> = { market_structure: 'Market structure (breadth + uptrend)', distribution_risk: 'Distribution risk (top, inverted)', bottom_confirmation: 'Bottom confirmation (FTD)', macro_alignment: 'Macro alignment (regime)', theme_quality: 'Theme quality', setup_availability: 'Setup availability (VCP + CANSLIM)', signal_convergence: 'Signal convergence' };
+const LABELS: Record<K, string> = { market_structure: 'Market structure (breadth + uptrend)', distribution_risk: 'Distribution risk (top, inverted)', bottom_confirmation: 'Bottom confirmation (FTD)', macro_alignment: 'Macro alignment (regime)', theme_quality: 'Theme quality', setup_availability: 'Setup availability (VCP + CANSLIM)', signal_convergence: 'Signal convergence' };
 const clamp = (x: number) => Math.max(0, Math.min(x, 100));
-export function components(s: Sig): Record<K, number> {
+function components(s: Sig): Record<K, number> {
   const b = s.breadth ?? 50, u = s.uptrend ?? 50, div = Math.abs(b - u);
   const ms = clamp(pyRound1(b * 0.5 + u * 0.5 - (div > 30 ? (div - 30) * 0.3 : 0)));
   const st = s.ftd?.state ?? 'NO_SIGNAL', q = s.ftd?.quality ?? 0;
@@ -40,7 +40,7 @@ export function components(s: Sig): Record<K, number> {
     theme_quality: pyRound1(clamp(s.theme?.derived ?? 50)), setup_availability: set.length ? pyRound1(clamp(set.reduce((a, x) => a + x, 0) / set.length + bonus)) : 50, signal_convergence: conv,
   };
 }
-export const ZONES: [number, string, string, string][] = [
+const ZONES: [number, string, string, string][] = [
   [80, 'Maximum Conviction', '90-100%', 'All signals aligned: the fat pitch. Concentrate in the strongest setups.'],
   [60, 'High Conviction', '70-90%', 'Multiple signals confirm. Standard sizing on quality setups, normal stops.'],
   [40, 'Moderate Conviction', '50-70%', 'Mixed signals. Half-size positions, A-grade setups only, tighter stops.'],
@@ -52,7 +52,7 @@ export function conviction(s: Sig) {
   const score = pyRound1(avail.reduce((a, k) => a + c[k] * WEIGHTS[k] / tw, 0)), z = ZONES.find(x => score >= x[0])!;
   return { c, avail, score, zone: z[1], exposure: z[2], guidance: z[3] };
 }
-export const PATTERNS: Record<string, [string, string]> = {
+const PATTERNS: Record<string, [string, string]> = {
   policy_pivot_anticipation: ['Policy Pivot Anticipation', 'Central bank policy at an inflection the market has not priced.'],
   unsustainable_distortion: ['Unsustainable Distortion', 'Fragile structure: distribution plus macro contraction.'],
   extreme_sentiment_contrarian: ['Extreme Sentiment Contrarian', 'Bottom confirmed after extreme bearishness.'],
@@ -76,7 +76,7 @@ type Mix = { equity: number; bonds: number; alternatives: number; cash: number }
 const BASE: Record<string, Mix> = { 'Maximum Conviction': { equity: 90, bonds: 0, alternatives: 5, cash: 5 }, 'High Conviction': { equity: 75, bonds: 5, alternatives: 5, cash: 15 }, 'Moderate Conviction': { equity: 55, bonds: 10, alternatives: 10, cash: 25 }, 'Low Conviction': { equity: 30, bonds: 15, alternatives: 15, cash: 40 }, 'Capital Preservation': { equity: 10, bonds: 20, alternatives: 20, cash: 50 } };
 const REG: Record<string, Mix> = { broadening: { equity: 5, bonds: 0, alternatives: 0, cash: -5 }, concentration: { equity: 3, bonds: 0, alternatives: 0, cash: -3 }, transitional: { equity: 0, bonds: 0, alternatives: 0, cash: 0 }, inflationary: { equity: -5, bonds: -5, alternatives: 10, cash: 0 }, contraction: { equity: -10, bonds: 5, alternatives: 0, cash: 5 } };
 const PAT: Record<string, Mix> = { policy_pivot_anticipation: { equity: 5, bonds: 3, alternatives: -3, cash: -5 }, unsustainable_distortion: { equity: -10, bonds: 0, alternatives: 5, cash: 5 }, extreme_sentiment_contrarian: { equity: 10, bonds: -5, alternatives: 0, cash: -5 }, wait_and_observe: { equity: -5, bonds: 0, alternatives: 0, cash: 5 } };
-export const SIZING: Record<string, [number, number, number]> = { 'Maximum Conviction': [25, 0.4, 8], 'High Conviction': [15, 0.3, 12], 'Moderate Conviction': [10, 0.25, 15], 'Low Conviction': [5, 0.15, 20], 'Capital Preservation': [3, 0.1, 25] };
+const SIZING: Record<string, [number, number, number]> = { 'Maximum Conviction': [25, 0.4, 8], 'High Conviction': [15, 0.3, 12], 'Moderate Conviction': [10, 0.25, 15], 'Low Conviction': [5, 0.15, 20], 'Capital Preservation': [3, 0.1, 25] };
 export function allocation(zone: string, pat: string, regime: string): Mix {
   const m = { ...(BASE[zone] ?? BASE['Moderate Conviction']) }, r = REG[regime] ?? REG.transitional, p = PAT[pat] ?? PAT.wait_and_observe, k = Object.keys(m) as (keyof Mix)[];
   for (const a of k) m[a] = Math.max(0, m[a] + r[a] + p[a]);

@@ -9,24 +9,24 @@ import { marketState, quality } from './ftd.ts';
 import { topRisk } from './top.ts';
 import { classify, macroComponents } from './macro.ts';
 
-export const WEIGHTS = { regime: 0.25, top_risk: 0.2, breadth: 0.15, uptrend: 0.15, institutional: 0.1, sector: 0.05, theme: 0.05, ftd: 0.05 };
+const WEIGHTS = { regime: 0.25, top_risk: 0.2, breadth: 0.15, uptrend: 0.15, institutional: 0.1, sector: 0.05, theme: 0.05, ftd: 0.05 };
 export type In = keyof typeof WEIGHTS;
 const CRITICAL: In[] = ['regime', 'top_risk', 'breadth'];
-export const REGIME_SCORE: Record<string, number> = { broadening: 80, concentration: 60, transitional: 50, inflationary: 40, contraction: 20 };
+const REGIME_SCORE: Record<string, number> = { broadening: 80, concentration: 60, transitional: 50, inflationary: 40, contraction: 20 };
 
-export function compositeOf(s: Partial<Record<In, number | null>>) {
+function compositeOf(s: Partial<Record<In, number | null>>) {
   const provided: In[] = [], missing: In[] = []; let w = 0, tw = 0;
   for (const [k, wt] of Object.entries(WEIGHTS) as [In, number][]) { const v = s[k]; if (v != null) { w += v * wt; tw += wt; provided.push(k) } else missing.push(k) }
   if (tw === 0) return { composite: 50, provided, missing };
   return { composite: Math.max(0, w / tw - missing.filter(k => CRITICAL.includes(k)).length * 10), provided, missing };
 }
-export const ceiling = (c: number) => c >= 80 ? Math.min(100, Math.trunc(90 + (c - 80))) : c >= 65 ? Math.trunc(70 + (c - 65) * 1.3) : c >= 50 ? Math.trunc(50 + (c - 50) * 1.3) : c >= 35 ? Math.trunc(30 + (c - 35) * 1.3) : c >= 20 ? Math.trunc(10 + (c - 20) * 1.3) : Math.max(0, Math.trunc(c / 2));
-export function recommendation(c: number, top: number | null, missCrit: number) {
+const ceiling = (c: number) => c >= 80 ? Math.min(100, Math.trunc(90 + (c - 80))) : c >= 65 ? Math.trunc(70 + (c - 65) * 1.3) : c >= 50 ? Math.trunc(50 + (c - 50) * 1.3) : c >= 35 ? Math.trunc(30 + (c - 35) * 1.3) : c >= 20 ? Math.trunc(10 + (c - 20) * 1.3) : Math.max(0, Math.trunc(c / 2));
+function recommendation(c: number, top: number | null, missCrit: number) {
   if (c < 30 || (top != null && top < 25)) return 'CASH_PRIORITY';
   if (c < 50 || (top != null && top < 40) || missCrit >= 2) return 'REDUCE_ONLY';
   return 'NEW_ENTRY_ALLOWED';
 }
-export function bias(regime: string, theme: number | null, lead: string | null) {
+function bias(regime: string, theme: number | null, lead: string | null) {
   const r = regime.toLowerCase();
   if (r === 'inflationary') return 'VALUE';
   if (r === 'contraction') return 'DEFENSIVE';
@@ -34,8 +34,8 @@ export function bias(regime: string, theme: number | null, lead: string | null) 
   if (lead) { const l = lead.toLowerCase(); if (['technology', 'consumer discretionary', 'communications'].includes(l)) return 'GROWTH'; if (['financials', 'energy', 'materials', 'industrials'].includes(l)) return 'VALUE'; if (['utilities', 'staples', 'healthcare'].includes(l)) return 'DEFENSIVE' }
   return 'NEUTRAL';
 }
-export const participation = (up: number | null, br: number | null) => { const u = up != null && up >= 50, b = br != null && br >= 50; return u && b ? 'BROAD' : u || b ? 'MODERATE' : 'NARROW' };
-export function confidence(provided: In[], missing: In[]) { const mc = missing.filter(k => CRITICAL.includes(k)).length; return provided.length >= 6 && mc === 0 ? 'HIGH' : provided.length >= 4 || mc <= 1 ? 'MEDIUM' : 'LOW' }
+const participation = (up: number | null, br: number | null) => { const u = up != null && up >= 50, b = br != null && br >= 50; return u && b ? 'BROAD' : u || b ? 'MODERATE' : 'NARROW' };
+function confidence(provided: In[], missing: In[]) { const mc = missing.filter(k => CRITICAL.includes(k)).length; return provided.length >= 6 && mc === 0 ? 'HIGH' : provided.length >= 4 || mc <= 1 ? 'MEDIUM' : 'LOW' }
 export function posture(s: Partial<Record<In, number | null>>, regime: string, lead: string | null) {
   const { composite, provided, missing } = compositeOf(s), mc = missing.filter(k => CRITICAL.includes(k)).length;
   return { composite, provided, missing, ceiling: ceiling(composite), rec: recommendation(composite, s.top_risk ?? null, mc), bias: bias(regime, s.theme ?? null, lead), part: participation(s.uptrend ?? null, s.breadth ?? null), conf: confidence(provided, missing) };

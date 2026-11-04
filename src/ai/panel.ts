@@ -24,7 +24,7 @@ function context() {
   return chartContext({ symbol: p.cfg.symbol, tf: p.cfg.tf, bars: p.vb(), prec: p.prec, indicators: [...p.cfg.ind, ...(p.cfg.scripts ?? []).map(s => `script ${s.id}`)] });
 }
 /** Minimal, escape-first markdown: code fences, inline code, bold, line breaks. */
-export function md(s: string) {
+function md(s: string) {
   return esc(s).replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, c) => `<pre dir="ltr">${c}</pre>`).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
 }
 function render() {
