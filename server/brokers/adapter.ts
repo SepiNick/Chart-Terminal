@@ -19,6 +19,8 @@ export interface Adapter {
   fills(syms: string[]): Promise<BrokerFill[]>;
   price(sym: string): Promise<number>;
   place(o: Native): Promise<BrokerOrder>;
+  /** The order sent with this clientId (open or recently closed), or null: lets a retry after a timeout avoid a second order. */
+  find?(clientId: string, sym: string): Promise<BrokerOrder | null>;
   cancel(id: string, sym: string, trigger?: boolean): Promise<void>;
   edit?(id: string, o: Native): Promise<BrokerOrder>;
   /** true / false where the exchange exposes key permissions, null where it doesn't (the user's confirmation decides). */

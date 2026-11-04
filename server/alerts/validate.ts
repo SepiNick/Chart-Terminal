@@ -1,13 +1,15 @@
 // Strict validation of AlertInput coming from clients (another device may send anything).
 import type { AlertInput, AlertSource, Channel, LineRef, ScriptSource } from '../../src/alerttypes.ts';
 import { validTf } from '../../src/data.ts';
-import { compile, isError } from '../../src/pine/engine.ts';
 import { bad } from '../core/http.ts';
 import { EX_RE, SYM_RE } from '../market.ts';
 import { isExchange } from '../ccxt.ts';
 import { CONDITIONS, FREQUENCIES, isChannel, isMoving } from './evaluate.ts';
-import { validSource } from '../scriptsource.ts';
-import { buildJob } from '../scripts.ts';
+import { isPublic } from '../core/mode.ts';
+
+// Script compilers are loaded on a private server only: a public one never has them in its process.
+const PE = isPublic ? null : await import('../../src/pine/engine.ts'), SS = isPublic ? null : await import('../scriptsource.ts'), SC = isPublic ? null : await import('../scripts.ts');
+const PUBLIC_CHANNELS: Channel[] = ['popup', 'push'];
 
 const CHANNELS: Channel[] = ['popup', 'push', 'telegram', 'email', 'webhook'];
 const KEYS = new Set(['name', 'sym', 'tf', 'source', 'condition', 'value', 'value2', 'bars', 'frequency', 'expires', 'channels', 'webhook', 'message', 'active', 'autoStop']);
@@ -32,16 +34,16 @@ export function validSym(sym: unknown): string {
 function script(x: unknown) {
   const src = str(x, 'script', 200_000);
   if (!src.trim()) throw bad('Script is empty');
-  const p = compile(src);
-  if (isError(p)) throw bad(`Script error (line ${p.line}): ${p.msg}`);
+  const p = PE!.compile(src);
+  if (PE!.isError(p)) throw bad(`Script error (line ${p.line}): ${p.msg}`);
   return src;
 }
 /** MQL / NinjaScript: sources only, compiled here once so a broken script is refused up front. */
 function code(x: unknown, sym: unknown, tf: unknown): ScriptSource | undefined {
   if (x === undefined) return undefined;
-  const c = validSource(obj(x, 'code'));
+  const c = SS!.validSource(obj(x, 'code'));
   if (c.lang === 'pine') throw bad('Pine goes in script');
-  try { buildJob(c, String(sym), String(tf)) } catch (e) { throw bad(`Script error: ${(e as Error).message}`) }
+  try { SC!.buildJob(c, String(sym), String(tf)) } catch (e) { throw bad(`Script error: ${(e as Error).message}`) }
   return c;
 }
 function inputs(x: unknown) {
@@ -67,7 +69,9 @@ function line(x: unknown, what: string): LineRef {
   return out;
 }
 function source(x: unknown, sym: unknown, tf: unknown): AlertSource {
-  const s = obj(x, 'source'), cd = code(s.code, sym, tf);
+  const s = obj(x, 'source');
+  if (isPublic && ((s.kind !== 'price' && s.kind !== 'drawing') || s.code !== undefined)) throw bad('Only price and drawing-line alerts are available on this server; indicator and script alerts need your own private server');
+  const cd = code(s.code, sym, tf);
   // MQL / NinjaScript: `script` is just the main file (for display); `code` is what runs.
   const scr = (v: unknown) => cd ? str(v, 'script', 1024 * 1024) : script(v);
   switch (s.kind) {
@@ -119,6 +123,7 @@ export function validateInput(x: unknown, now = Date.now()): AlertInput {
   else if (b.expires === null) a.expires = null;
   if (!Array.isArray(b.channels) || b.channels.length > CHANNELS.length || b.channels.some(c => !CHANNELS.includes(c))) throw bad('Bad channels');
   a.channels = [...new Set(b.channels as Channel[])];
+  if (isPublic && (a.channels.some(c => !PUBLIC_CHANNELS.includes(c)) || b.webhook !== undefined)) throw bad('Only the in-app popup and push notifications are available on this server');
   if (b.webhook !== undefined) {
     const w = obj(b.webhook, 'webhook'), url = str(w.url, 'webhook url', 2000);
     let u: URL;

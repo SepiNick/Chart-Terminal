@@ -1,36 +1,46 @@
 // Minimal router + static file server + WebSocket hub. Feature modules call `route()` / `onWs()` at import time;
 // index.ts creates the HTTP (127.0.0.1) and optional HTTPS (LAN) servers on top of `handle()` and `upgrade()`.
+// Every request resolves to a user (`c.user`) and a database handle that is that user's only (`c.db`).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
+import type { DatabaseSync } from 'node:sqlite';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { sessionOf } from './auth.ts';
+import { authenticate, userOfToken } from './auth.ts';
+import { HttpError, bad } from './errors.ts';
+import { clientIp, isHttps, isPublic } from './mode.ts';
+import { limits } from './quota.ts';
+import { ANON, userDb, type User } from './userdb.ts';
 
-export class HttpError extends Error { status: number; constructor(status: number, msg: string) { super(msg); this.status = status } }
-export const bad = (msg: string) => new HttpError(400, msg);
+export { HttpError, bad };
+export type { User };
 
 export interface Ctx {
   req: IncomingMessage; res: ServerResponse; url: URL; params: Record<string, string>;
   body: unknown;            // parsed JSON (or Buffer for raw routes)
   secure: boolean;          // request came over HTTPS
   session: string | null;   // session token (null only on public routes)
+  user: User;               // the caller (ANON on public routes without a session)
+  readonly db: DatabaseSync;   // the caller's own database; there is no handle to anyone else's
 }
 type Handler = (c: Ctx) => unknown | Promise<unknown>;
-interface Route { method: string; re: RegExp; keys: string[]; h: Handler; public: boolean; raw: boolean; limit: number }
+interface Route { method: string; path: string; re: RegExp; keys: string[]; h: Handler; public: boolean; raw: boolean; limit: number }
 const routes: Route[] = [];
+/** Every registered route (tests: isolation.test.ts fails on a route it has not classified). */
+export const routeTable = () => routes.map(r => ({ method: r.method, path: r.path, public: r.public }));
 
 /**
  * Register a route. Path params as `:name` (e.g. '/api/alerts/:id'). Handlers return a JSON-serialisable value
  * (sent as 200 JSON), `undefined` (204), or write to `c.res` themselves and return `RAW`.
- * opts.public: no session needed. opts.raw: body is a Buffer (uploads). opts.limit: max body bytes (default 2 MB).
+ * opts.public: no session needed. opts.raw: body is a Buffer (uploads). opts.limit: max body bytes (default 2 MB, 256 KB in public mode).
  */
 export function route(method: string, path: string, h: Handler, opts: { public?: boolean; raw?: boolean; limit?: number } = {}) {
   const keys: string[] = [];
   const re = new RegExp('^' + path.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)' }) + '$');
-  routes.push({ method, re, keys, h, public: !!opts.public, raw: !!opts.raw, limit: opts.limit ?? 2 * 1024 * 1024 });
+  routes.push({ method, path, re, keys, h, public: !!opts.public, raw: !!opts.raw, limit: opts.limit ?? (isPublic ? 256 * 1024 : 2 * 1024 * 1024) });
 }
 export const RAW = Symbol('raw');
 
@@ -51,15 +61,17 @@ function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
 // CT_DIST_DIR: the desktop app bundles the server, so the built client isn't at ../../dist there.
 const DIST = process.env.CT_DIST_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist');
 const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.crt': 'application/x-x509-ca-cert', '.mobileconfig': 'application/x-apple-aspen-config' };
-const SECURITY_HEADERS = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY' };
+const SECURITY_HEADERS: Record<string, string> = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY', ...(isPublic ? { 'permissions-policy': 'camera=(), geolocation=(), payment=(), usb=(), microphone=(self)' } : {}) };
 
 /** Serve the built app (dist/) with an SPA fallback, for phones/other devices that don't go through Vite. */
 function serveStatic(c: Ctx): boolean {
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return false;
-  let p = normalize(decodeURIComponent(c.url.pathname)).replace(/^([/\\])+/, '');
+  const p = normalize(decodeURIComponent(c.url.pathname)).replace(/^([/\\])+/, '');
   if (p.includes('..')) return false;
   let file = join(DIST, p);
-  if (!p || !existsSync(file) || statSync(file).isDirectory()) file = join(DIST, 'index.html');
+  const missing = !p || !existsSync(file) || statSync(file).isDirectory();
+  if (missing && isPublic && /\.\w+$/.test(p)) return false;   // a missing file (/ca.crt, /x.js) is a 404, not the app shell
+  if (missing) file = join(DIST, 'index.html');
   if (!existsSync(file)) return false;
   const type = MIME[extname(file)] ?? 'application/octet-stream';
   // Only Vite's content-hashed files under /assets are immutable; the manifest, icons and sw.js must revalidate.
@@ -68,20 +80,60 @@ function serveStatic(c: Ctx): boolean {
   return true;
 }
 
-export async function handle(req: IncomingMessage, res: ServerResponse, secure: boolean) {
+// ---------- rate limits (public mode): token buckets in memory ----------
+const buckets = new Map<string, { t: number; at: number }>();
+/** 0 when allowed, else the seconds to wait. */
+function take(key: string, rate: number, burst: number): number {
+  if (!Number.isFinite(rate)) return 0;
+  const now = Date.now(), b = buckets.get(key) ?? { t: burst, at: now };
+  b.t = Math.min(burst, b.t + (now - b.at) / 1000 * rate); b.at = now;
+  buckets.set(key, b);
+  if (b.t >= 1) { b.t--; return 0 }
+  return Math.ceil((1 - b.t) / rate);
+}
+if (isPublic) setInterval(() => { const old = Date.now() - 120_000; for (const [k, b] of buckets) if (b.at < old) buckets.delete(k) }, 60_000).unref();
+const inflight = new Map<number, number>();
+const MUST_CHANGE_OK = new Set(['/api/auth/password', '/api/auth/logout']);
+const slow = (s: number, msg: string) => Object.assign(new HttpError(429, msg), { retryAfter: s });
+
+/** CSRF. Private: a request with an Origin must match Host (curl, tests and the app send none or a matching one). Public: browsers only. */
+export function csrfOk(req: IncomingMessage): boolean {
+  if (!isPublic) return sameOrigin(req);
+  const o = req.headers.origin, fetchSite = req.headers['sec-fetch-site'];
+  const origin = o ? sameOrigin(req) : fetchSite === 'same-origin';
+  return origin && /^[\w-]{8,64}$/.test(String(req.headers['x-ct-client'] ?? ''));   // a cross-site form cannot set this header
+}
+
+export async function handle(req: IncomingMessage, res: ServerResponse, listenerSecure: boolean) {
   const url = new URL(req.url ?? '/', 'http://local');
-  const c: Ctx = { req, res, url, params: {}, body: undefined, secure, session: null };
+  const secure = isHttps(req, listenerSecure);
+  const c: Ctx = { req, res, url, params: {}, body: undefined, secure, session: null, user: ANON, get db() { return userDb(this.user.id) } };
+  const ip = clientIp(req);
+  let counted = 0;
   try {
-    if (!allowedHost(req)) throw new HttpError(421, 'Unknown host');
+    if (!allowedHost(req, url.pathname)) throw new HttpError(421, 'Unknown host');
     const r = routes.find(x => x.method === req.method && x.re.test(url.pathname));
     if (!r) {
       if (url.pathname.startsWith('/api/')) throw new HttpError(404, 'Not found');
       if (serveStatic(c)) return;
       throw new HttpError(404, 'Not found');
     }
-    if (!r.public) { c.session = sessionOf(req); if (!c.session) throw new HttpError(401, 'Login required') }
+    const a = authenticate(req, secure);
+    if (a) { c.session = a.token; c.user = a.user }
+    if (isPublic && (!a || r.public)) {   // anonymous callers: per-IP bucket, and a stricter one for the login/register family
+      const w = take('ip:' + ip, 5, 30) || (url.pathname.startsWith('/api/auth/') ? take('auth:' + ip, 1, 60) : 0);
+      if (w) throw slow(w, 'Too many requests');
+    }
+    if (!r.public && !a) throw new HttpError(401, 'Login required');
     // CSRF: state-changing requests must come from our own pages (cookies are SameSite=Strict too).
-    if (req.method !== 'GET' && req.method !== 'HEAD' && !sameOrigin(req)) throw new HttpError(403, 'Cross-site request blocked');
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !csrfOk(req)) throw new HttpError(403, 'Cross-site request blocked');
+    if (a?.user.mustChange && !MUST_CHANGE_OK.has(url.pathname) && !r.public) throw Object.assign(new HttpError(403, 'Change your password first'), { code: 'must_change' });
+    if (isPublic && a) {
+      const L = limits(a.user.id), w = take('u:' + a.user.id, L.rps, L.burst);
+      if (w) throw slow(w, 'Too many requests, slow down');
+      if ((inflight.get(a.user.id) ?? 0) >= L.inflight) throw slow(1, 'Too many requests in progress');
+      inflight.set(a.user.id, (inflight.get(a.user.id) ?? 0) + 1); counted = a.user.id;
+    }
     const m = url.pathname.match(r.re)!;
     r.keys.forEach((k, i) => (c.params[k] = decodeURIComponent(m[i + 1])));
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -93,9 +145,14 @@ export async function handle(req: IncomingMessage, res: ServerResponse, secure: 
     if (out === undefined) { res.writeHead(204, SECURITY_HEADERS).end(); return }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY_HEADERS }).end(JSON.stringify(out));
   } catch (e) {
-    const status = e instanceof HttpError ? e.status : e instanceof SyntaxError ? 400 : 502;
+    const err = e as Error & { errcode?: number; code?: string; retryAfter?: number };
+    const full = err.errcode === 13;   // SQLITE_FULL: the user's file hit its size ceiling
+    const status = e instanceof HttpError ? e.status : e instanceof SyntaxError ? 400 : full ? 413 : isPublic ? 500 : 502;
+    // Public servers do not echo internal error text (paths, SQL); HttpErrors are written for users and pass through.
+    const msg = e instanceof HttpError || e instanceof SyntaxError || !isPublic ? err.message : full ? 'Your storage is full' : 'Internal error';
+    if (isPublic && !(e instanceof HttpError)) console.error(`[http] ${req.method} ${url.pathname}: ${String(err.message).replace(/\s+/g, ' ').slice(0, 300)}`);
     const send = () => {
-      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json', ...SECURITY_HEADERS }).end(JSON.stringify({ error: (e as Error).message }));
+      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json', ...(err.retryAfter ? { 'retry-after': String(err.retryAfter) } : {}), ...SECURITY_HEADERS }).end(JSON.stringify({ error: msg, ...(err.code === 'must_change' ? { code: 'must_change' } : {}) }));
       else res.end();
     };
     // After a 413 the rest of the body is still arriving (readBody drains it). Answer once it has, or the client gets a
@@ -104,7 +161,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, secure: 
       const t = setTimeout(() => { res.setHeader('connection', 'close'); send(); req.destroy() }, 5000);
       req.once('end', () => { clearTimeout(t); send() });
     } else send();
-  }
+  } finally { if (counted) inflight.set(counted, Math.max(0, (inflight.get(counted) ?? 1) - 1)) }
 }
 export function sameOrigin(req: IncomingMessage) {
   const o = req.headers.origin; if (!o) return true;   // non-browser clients (curl, tests) send no Origin
@@ -114,7 +171,8 @@ export function sameOrigin(req: IncomingMessage) {
 /**
  * DNS-rebinding guard: a hostile page can point its own domain at 127.0.0.1 and then talk to us "same-origin".
  * Only accept Host names we actually serve: loopback names, this machine's own IPs (LAN access), and names listed in
- * CT_ALLOWED_HOSTS (comma-separated, e.g. the VPS domain later).
+ * CT_ALLOWED_HOSTS (comma-separated, e.g. the VPS domain later). Public mode accepts CT_ALLOWED_HOSTS only (plus
+ * loopback for the container health check).
  */
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 let ownIps = new Set<string>(), ownIpsAt = 0;
@@ -128,13 +186,14 @@ function machineIps() {
 const extraHosts = () => new Set((process.env.CT_ALLOWED_HOSTS ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
 export const hostName = (req: IncomingMessage) => String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
 export const isLoopbackHost = (req: IncomingMessage) => LOOPBACK.has(hostName(req));
-export function allowedHost(req: IncomingMessage) {
+export function allowedHost(req: IncomingMessage, path = '') {
   const h = hostName(req);
+  if (isPublic) return extraHosts().has(h) || (path === '/api/health' && LOOPBACK.has(h));
   return LOOPBACK.has(h) || machineIps().has(h) || extraHosts().has(h);
 }
 
 // ---------- WebSocket hub: one socket per client, typed messages ----------
-export interface WsClient { ws: WebSocket; session: string; send: (msg: unknown) => void; data: Map<string, unknown> }
+export interface WsClient { ws: WebSocket; session: string; userId: number; send: (msg: unknown) => void; data: Map<string, unknown> }
 type WsHandler = (client: WsClient, msg: Record<string, unknown>) => void;
 const wsHandlers = new Map<string, WsHandler>();   // keyed by msg.op
 const closeHandlers: ((c: WsClient) => void)[] = [];
@@ -142,18 +201,30 @@ export const clients = new Set<WsClient>();
 /** Handle client messages with `{ op: <op>, ... }`. */
 export function onWs(op: string, h: WsHandler) { wsHandlers.set(op, h) }
 export function onWsClose(h: (c: WsClient) => void) { closeHandlers.push(h) }
-/** Send to every connected client (all of them belong to the single user). */
-export function broadcast(msg: unknown, except?: WsClient) { const s = JSON.stringify(msg); for (const c of clients) if (c !== except && c.ws.readyState === 1) c.ws.send(s) }
+/** Send to every socket of one user (private mode: all sockets belong to the single user). There is deliberately no send-to-everyone. */
+export function broadcastTo(userId: number, msg: unknown, except?: WsClient) {
+  const s = JSON.stringify(msg);
+  for (const c of clients) if (c !== except && c.ws.readyState === 1 && (!isPublic || c.userId === userId)) c.ws.send(s);
+}
+/** Close sockets matching `pred` (sign-out, password change, disabled account). */
+export function closeClients(pred: (c: WsClient) => boolean, code = 4001, reason = 'Signed out') { for (const c of clients) if (pred(c)) c.ws.close(code, reason) }
 
-const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: isPublic ? 1024 : 1024 * 1024 });
 export function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-  if (!req.url?.startsWith('/ws') || !allowedHost(req) || !sameOrigin(req)) { socket.destroy(); return }
-  const session = sessionOf(req);
-  if (!session) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return }
+  if (!req.url?.startsWith('/ws') || !allowedHost(req) || !sameOrigin(req) || (isPublic && !req.headers.origin)) { socket.destroy(); return }   // browsers always send Origin
+  const a = authenticate(req, isHttps(req, false));
+  if (!a) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); return }
+  if (isPublic) {
+    const mine = [...clients].filter(x => x.userId === a.user.id).length;
+    if (mine >= limits(a.user.id).sockets) { socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n'); socket.destroy(); return }
+    if (a.user.mustChange) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return }
+  }
   wss.handleUpgrade(req, socket, head, ws => {
-    const client: WsClient = { ws, session, data: new Map(), send: m => { if (ws.readyState === 1) ws.send(JSON.stringify(m)) } };
+    const client: WsClient = { ws, session: a.token, userId: a.user.id, data: new Map(), send: m => { if (ws.readyState === 1) ws.send(JSON.stringify(m)) } };
     clients.add(client);
+    const L = limits(a.user.id), bucket = 'ws:' + Math.random();
     ws.on('message', raw => {
+      if (isPublic && take(bucket, L.wsMsgPerSec, L.wsMsgPerSec * 2)) { ws.close(1008, 'Too many messages'); return }
       let m: Record<string, unknown>;
       try { m = JSON.parse(String(raw)) } catch { return }
       const h = wsHandlers.get(String(m.op ?? ''));   // market data uses 'sub'/'unsub'; feature modules use 'module.action'
@@ -162,3 +233,5 @@ export function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     ws.on('close', () => { clients.delete(client); closeHandlers.forEach(h => h(client)) });
   });
 }
+/** Public mode: sockets whose session ended elsewhere (expired, account disabled or deleted by the CLI) are closed. */
+if (isPublic) setInterval(() => { for (const c of clients) if (!userOfToken(c.session)) c.ws.close(4001, 'Signed out') }, 30_000).unref();

@@ -17,7 +17,7 @@ export interface Cx {
   fetch: (url: string, method?: string, headers?: unknown, body?: unknown) => Promise<unknown>;
   client?: (url: string) => unknown;
   loadMarkets: Fn; fetchBalance: Fn; fetchPositions: Fn; fetchOpenOrders: Fn; fetchOrder: Fn; fetchMyTrades: Fn; fetchTicker: Fn;
-  createOrder: Fn; cancelOrder: Fn; editOrder: Fn; watchOrders?: Fn; close?: () => Promise<void> | void;
+  createOrder: Fn; fetchClosedOrders?: Fn; cancelOrder: Fn; editOrder: Fn; watchOrders?: Fn; close?: () => Promise<void> | void;
   [k: string]: unknown;
 }
 export type CcxtBroker = 'binance' | 'binanceusdm' | 'bybit' | 'okx';
@@ -48,7 +48,7 @@ export function lockToTestnet(x: Cx): string[] {
 }
 
 const STATUS: Record<string, BrokerOrder['status']> = { open: 'open', closed: 'filled', canceled: 'canceled', cancelled: 'canceled', expired: 'canceled', rejected: 'rejected' };
-type CcxtOrder = { id: string; symbol: string; side: 'buy' | 'sell'; type?: string; amount?: number; filled?: number; price?: number; average?: number; triggerPrice?: number; stopPrice?: number; reduceOnly?: boolean; status?: string; timestamp?: number; lastUpdateTimestamp?: number };
+type CcxtOrder = { id: string; symbol: string; side: 'buy' | 'sell'; type?: string; amount?: number; filled?: number; price?: number; average?: number; triggerPrice?: number; stopPrice?: number; reduceOnly?: boolean; clientOrderId?: string; status?: string; timestamp?: number; lastUpdateTimestamp?: number };
 
 export function ccxtAdapter(broker: CcxtBroker, market: Market, keys: Keys): Adapter {
   const futures = market === 'futures';
@@ -163,6 +163,13 @@ export function ccxtAdapter(broker: CcxtBroker, market: Market, keys: Keys): Ada
       return p;
     },
     async place(o) { const r = await request(o); return toOrder(await x.createOrder(r.s, r.type, o.side, r.amount, r.price, r.params) as CcxtOrder) },
+    async find(clientId, sym) {
+      const m = await mkt(sym);
+      for (const get of [() => x.fetchOpenOrders(m.symbol), () => x.fetchOpenOrders(m.symbol, undefined, undefined, { trigger: true }), () => x.fetchClosedOrders?.(m.symbol, undefined, 50)]) {
+        try { const f = ((await get()) as CcxtOrder[] | undefined)?.find(o => o.clientOrderId === clientId); if (f) return toOrder(f) } catch { /* try the next list */ }
+      }
+      return null;
+    },
     async cancel(id, sym, trigger) { const m = await mkt(sym); await x.cancelOrder(id, m.symbol, trigger ? { trigger: true } : {}) },
     async edit(id, o) { const r = await request(o); return toOrder(await x.editOrder(id, r.s, r.type, o.side, r.amount, r.price, r.params) as CcxtOrder) },
     async canWithdraw() {
