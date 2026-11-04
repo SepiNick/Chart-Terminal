@@ -9,3 +9,4 @@ desktop/release/
 desktop/build/
 mt5bridge/token.txt
 __pycache__/
+dist-lite/

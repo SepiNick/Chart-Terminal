@@ -1,6 +1,8 @@
 // Service worker: Web Push notifications only (no offline caching — the app needs the server anyway).
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+// Deliberately empty: older Chrome on Android only offers "Install app" for pages whose worker has a fetch handler. It never calls respondWith, so requests go straight to the network.
+self.addEventListener('fetch', () => {});
 
 // Payload from the server (server/notify): { title, body, tag, data: { url, ... } }
 self.addEventListener('push', e => {

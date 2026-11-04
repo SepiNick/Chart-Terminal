@@ -6,12 +6,11 @@
 //   GET /api/derivs/liqs?ex&sym[&since=sec]                     → { list: [{t, long, qty, px, value}], err? }
 // Liquidations are live only (no exchange serves public history): the first poll starts a watcher that stops 2 minutes
 // after the last poll. Exchanges that geo-block this machine fail with a clear message (the client shows it in the pane).
-import ccxtNs from 'ccxt';
+import { ccxtLib } from './ccxtlib.ts';
 import { route, bad, HttpError } from './core/http.ts';
 import * as cx from './ccxt.ts';
 import { normFunding, normFundingHist, normLiq, normOI, normRatio, type Liq } from '../src/derivs/model.ts';
 
-const ccxt = ((ccxtNs as unknown as { exchanges?: string[] }).exchanges ? ccxtNs : (ccxtNs as unknown as { default: typeof ccxtNs }).default);
 type Ex = Record<string, unknown> & { has: Record<string, unknown>; loadMarkets: () => Promise<unknown>; market: (s: string) => { id: string } };
 type Call = (...a: unknown[]) => Promise<unknown>;
 const call = (x: Ex, m: string, ...a: unknown[]) => (x[m] as Call).apply(x, a);
@@ -21,11 +20,11 @@ const rest = new Map<string, Ex>(), pro = new Map<string, Ex>();
 export const deps = {
   rest(id: string): Ex {
     let x = rest.get(id);
-    if (!x) { x = new (ccxt as unknown as Record<string, new (o: object) => Ex>)[id]({ enableRateLimit: true, timeout: 15000 }); rest.set(id, x) }
+    if (!x) { x = new (ccxtLib() as unknown as Record<string, new (o: object) => Ex>)[id]({ enableRateLimit: true, timeout: 15000 }); rest.set(id, x) }
     return x;
   },
   pro(id: string): Ex | null {
-    const P = (ccxt.pro as unknown as Record<string, (new (o: object) => Ex) | undefined>)[id]; if (!P) return null;
+    const P = (ccxtLib().pro as unknown as Record<string, (new (o: object) => Ex) | undefined>)[id]; if (!P) return null;
     let x = pro.get(id);
     if (!x) { x = new P({ enableRateLimit: true }); pro.set(id, x) }
     return x;

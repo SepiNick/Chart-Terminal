@@ -4,7 +4,7 @@ import { X509Certificate } from 'node:crypto';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { opensslCandidates, findOpenssl, lanIps, sanList, needsNewCert, certIps, ensureCerts, mobileconfig, CA_NAME } from './tls.ts';
+import { lanNames, opensslCandidates, findOpenssl, lanIps, sanList, needsNewCert, certIps, ensureCerts, mobileconfig, CA_NAME } from './tls.ts';
 
 const iface = (address: string, internal = false, family = 'IPv4') => ({ address, internal, family, netmask: '', mac: '', cidr: null }) as never;
 
@@ -53,7 +53,7 @@ const openssl = findOpenssl();
 test('certificates: CA + server cert, regenerated when the IP set changes, CA kept', { skip: !openssl && 'openssl not found' }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'ct-tls-'));
   try {
-    const a = ensureCerts(dir, ['192.168.1.20'], openssl);
+    const a = ensureCerts(dir, ['192.168.1.20'], openssl, []);
     const ca = new X509Certificate(a.caPem), cert = new X509Certificate(a.cert);
     assert.ok(ca.ca); assert.match(ca.subject, new RegExp(CA_NAME));
     assert.ok(cert.checkIssued(ca) && cert.verify(ca.publicKey));
@@ -69,11 +69,28 @@ test('certificates: CA + server cert, regenerated when the IP set changes, CA ke
     assert.equal(needsNewCert(null, [], ca), true);
     assert.equal(needsNewCert(cert, ['192.168.1.20'], ca, Date.parse(cert.validTo) - 86400_000), true);
 
-    const same = ensureCerts(dir, ['192.168.1.20'], openssl);
+    const same = ensureCerts(dir, ['192.168.1.20'], openssl, []);
     assert.equal(same.cert, a.cert);
-    const b = ensureCerts(dir, ['10.0.0.5', '192.168.1.20'], openssl);
+    const b = ensureCerts(dir, ['10.0.0.5', '192.168.1.20'], openssl, []);
     assert.notEqual(b.cert, a.cert);
     assert.equal(b.caFingerprint, a.caFingerprint);
     assert.deepEqual(certIps(new X509Certificate(b.cert)), ['10.0.0.5', '192.168.1.20']);
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+});
+
+test('mDNS name in the certificate: only plain host labels, and a missing name forces a new certificate', () => {
+  assert.deepEqual(lanNames('Laptop'), ['laptop.local']);
+  assert.deepEqual(lanNames('my-pc.lan'), ['my-pc.local']);
+  assert.deepEqual(lanNames('bad_name!'), []);
+  assert.deepEqual(sanList(['10.0.0.5'], ['laptop.local']), ['DNS:localhost', 'DNS:laptop.local', 'IP:127.0.0.1', 'IP:10.0.0.5']);
+  const openssl = findOpenssl();
+  if (!openssl) return;
+  const dir = mkdtempSync(join(tmpdir(), 'ct-tls-'));
+  try {
+    const a = ensureCerts(dir, ['10.0.0.5'], openssl, ['laptop.local']);
+    const ca = new X509Certificate(a.caPem), cert = new X509Certificate(a.cert);
+    assert.match(cert.subjectAltName!, /DNS:laptop\.local/);
+    assert.equal(needsNewCert(cert, ['10.0.0.5'], ca, Date.now(), ['laptop.local']), false);
+    assert.equal(needsNewCert(cert, ['10.0.0.5'], ca, Date.now(), []), true);
   } finally { rmSync(dir, { recursive: true, force: true }) }
 });

@@ -38,3 +38,12 @@ test('CCXT print filter: overlapping pages pass each trade once, in time order',
   assert.deepEqual(f([t(1001, 'b'), t(1001, 'c'), t(1002, 'd')]).map(p => Math.round(p.t * 1000)), [1001, 1002], 'b was already passed on, c shares its ms');
   assert.deepEqual(f([t(1002, 'd')]), []);
 });
+
+test('CCXT loads lazily and exchanges.json matches the installed version', async () => {
+  const { ccxtLib, ccxtLoaded, EXCHANGE_IDS } = await import('./ccxtlib.ts');
+  const { isExchange, exchangeIds } = await import('./ccxt.ts');
+  assert.ok(isExchange('binance') && !isExchange('nope') && exchangeIds().length === EXCHANGE_IDS.length);
+  assert.equal(ccxtLoaded(), false, 'listing ids must not load CCXT');
+  assert.deepEqual([...EXCHANGE_IDS], ccxtLib().exchanges, 'regenerate server/exchanges.json after upgrading ccxt');
+  assert.equal(ccxtLoaded(), true);
+});

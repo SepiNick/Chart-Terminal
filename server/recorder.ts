@@ -80,11 +80,13 @@ export const deps = { source: liveSource, now: () => Date.now(), batchRows: 2000
 // ---------- storage ----------
 const ins = db.prepare('INSERT INTO prints (sym, t, px, qty, buy, id) VALUES (?, ?, ?, ?, ?, ?)');
 const bumpDay = db.prepare('INSERT INTO prints_days (sym, day, n) VALUES (?, ?, ?) ON CONFLICT(sym, day) DO UPDATE SET n = n + excluded.n');
-let buf: { sym: string; p: RecPrint }[] = [];
+let buf: { sym: string; p: RecPrint }[] = [], flushTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function add(sym: string, ps: RecPrint[]) {
   for (const p of ps) if (Number.isFinite(p.t) && Number.isFinite(p.px) && Number.isFinite(p.qty)) buf.push({ sym, p });
   if (buf.length >= deps.batchRows) flush();
+  // Armed on demand instead of a 1 s interval, so an idle recorder never wakes the CPU.
+  else if (buf.length && !flushTimer && !process.env.CT_NO_AUTOSTART) flushTimer = setTimeout(() => { flushTimer = undefined; flush() }, 1000).unref();
 }
 /** Write buffered prints in one transaction (called every second and whenever the buffer reaches batchRows). */
 export function flush() {
@@ -229,7 +231,6 @@ route('GET', '/api/recorder/bars', c => {
 });
 
 if (!process.env.CT_NO_AUTOSTART) {
-  setInterval(flush, 1000).unref();
   setTimeout(() => { prune(); setInterval(() => prune(), DAY * 1000).unref() }, 60_000).unref();
   setImmediate(apply);
   process.on('exit', flush);

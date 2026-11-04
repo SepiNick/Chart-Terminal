@@ -2,8 +2,9 @@
 // Email (SMTP) and webhooks. Secrets live in core/secrets.ts and never leave the server; network senders sit in
 // `senders` so tests can replace them.
 import { randomUUID } from 'node:crypto';
-import webpush from 'web-push';
-import nodemailer from 'nodemailer';
+import { createRequire } from 'node:module';
+import type webpush from 'web-push';
+import type nodemailerNs from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import { broadcast, route, bad } from '../core/http.ts';
 import { db, migration, configGet, configSet } from '../core/db.ts';
@@ -23,6 +24,11 @@ export interface Delivery { channel: Channel; ok: boolean; error?: string }
 
 const CHANNELS: Channel[] = ['popup', 'push', 'telegram', 'email', 'webhook'];
 const TIMEOUT = 10_000;
+// web-push and nodemailer cost ~12 MB and ~150 ms to load; only the first push or mail needs them.
+const req = createRequire(import.meta.url);
+let wp: typeof webpush | undefined, nm: typeof nodemailerNs | undefined;
+const webpushLib = () => wp ??= req('web-push') as typeof webpush;
+const nodemailer = () => nm ??= req('nodemailer') as typeof nodemailerNs;
 
 migration('notify/1', `
   CREATE TABLE notify_push_subs (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, agent TEXT NOT NULL, created INTEGER NOT NULL, last_ok INTEGER);
@@ -31,8 +37,8 @@ migration('notify/1', `
 /** Network edges; tests swap these out. */
 export const senders = {
   fetch: (url: string, init: RequestInit): Promise<Response> => fetch(url, init),
-  push: (sub: webpush.PushSubscription, payload: string, opts: webpush.RequestOptions): Promise<unknown> => webpush.sendNotification(sub, payload, opts),
-  mail: async (opts: SMTPTransport.Options, msg: { from: string; to: string; subject: string; text: string }) => { await nodemailer.createTransport(opts).sendMail(msg) },
+  push: (sub: webpush.PushSubscription, payload: string, opts: webpush.RequestOptions): Promise<unknown> => webpushLib().sendNotification(sub, payload, opts),
+  mail: async (opts: SMTPTransport.Options, msg: { from: string; to: string; subject: string; text: string }) => { await nodemailer().createTransport(opts).sendMail(msg) },
 };
 
 /** Replace `{{name}}` (also `{{plot_0}}`, `{{plot("RSI")}}` …) with vars[name]; unknown placeholders stay as they are. */
@@ -150,7 +156,7 @@ const errText = (e: unknown) => scrub(e instanceof Error ? (e.name === 'TimeoutE
 export function vapid() {
   let pub = configGet<string>('notify.vapid.public', ''), priv = secretGet('push.vapid.private');
   if (!pub || !priv) {
-    const k = webpush.generateVAPIDKeys();
+    const k = webpushLib().generateVAPIDKeys();
     pub = k.publicKey; priv = k.privateKey;
     secretSet('push.vapid.private', priv); configSet('notify.vapid.public', pub);
     db.exec('DELETE FROM notify_push_subs');   // subscriptions are bound to the old key
