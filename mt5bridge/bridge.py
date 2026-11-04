@@ -11,6 +11,7 @@ app's MT5 account uses as its "API key". Trading is refused unless the terminal 
 (one position per symbol), checked on every request. MT5 pushes no prices to Python, so the app polls.
 """
 import json
+import math
 import os
 import secrets
 import time
@@ -27,7 +28,9 @@ TF = {'1m': mt5.TIMEFRAME_M1, '5m': mt5.TIMEFRAME_M5, '15m': mt5.TIMEFRAME_M15, 
 
 def token():
     if os.path.exists(TOKEN_FILE):
-        return open(TOKEN_FILE, encoding='utf-8').read().strip()
+        t = open(TOKEN_FILE, encoding='utf-8').read().strip()
+        if len(t) >= 32:   # an empty or cut-short file (crash while writing) would otherwise accept requests with no token
+            return t
     t = secrets.token_hex(24)
     with open(TOKEN_FILE, 'w', encoding='utf-8') as f:
         f.write(t)
@@ -72,10 +75,12 @@ def info(sym):
 def lots(s, units):
     """App quantities are in units (lots x contract size), so position caps compare real notionals."""
     step = s.volume_step or 0.01
-    v = round(round(units / s.trade_contract_size / step) * step, 8)
+    v = round(math.floor(units / s.trade_contract_size / step + 1e-9) * step, 8)   # rounded DOWN: the order never exceeds the notional the app's cap checked
     if v < s.volume_min:
         raise Refused(f'{units} units is below the minimum of {s.volume_min} lots ({s.volume_min * s.trade_contract_size} units)')
-    return min(v, s.volume_max)
+    if v > s.volume_max:
+        raise Refused(f'{units} units is above the maximum of {s.volume_max} lots ({s.volume_max * s.trade_contract_size} units)')
+    return v
 
 
 def csize(sym):
@@ -109,6 +114,7 @@ def order_out(o, history=False):
 
 
 def send(req):
+    demo_netting()   # again, right before the order leaves: the terminal may have been switched since the caller checked
     r = mt5.order_send(req)
     if r is None:
         raise Refused(f'order_send failed: {mt5.last_error()}')
@@ -119,7 +125,9 @@ def send(req):
 
 def place(b):
     demo_netting()
-    side, kind = b['side'], b['kind']
+    side, kind = b.get('side'), b.get('kind')
+    if side not in ('buy', 'sell') or kind not in ('market', 'limit', 'stop', 'stop_limit'):
+        raise Refused('Bad side or order kind')
     s = info(str(b['sym']))
     sym = s.name
     vol = lots(s, float(b['qty']))
@@ -151,6 +159,8 @@ def place(b):
 def get(path, q, authed):
     one = lambda k, d=None: q.get(k, [d])[0]
     if path == '/account':
+        if not authed:
+            raise PermissionError   # login, server and balance are the user's business, not any local process's
         a = account()
         return {'login': a.login, 'server': a.server, 'currency': a.currency, 'demo': a.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO,
                 'netting': a.margin_mode == mt5.ACCOUNT_MARGIN_MODE_RETAIL_NETTING, 'balance': a.balance, 'equity': a.equity}
@@ -213,6 +223,8 @@ def post(path, b):
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 10   # a client that connects and sends nothing must not block this single-threaded server
+
     def reply(self, code, body):
         data = json.dumps(body).encode()
         self.send_response(code)
@@ -225,8 +237,11 @@ class Handler(BaseHTTPRequestHandler):
         # A page in a browser can't reach us under another name (DNS rebinding) and has no token for the account.
         if self.headers.get('host') not in (f'{HOST}:{PORT}', f'localhost:{PORT}'):
             return self.reply(403, {'error': 'Bad host'})
-        authed = secrets.compare_digest(self.headers.get('x-bridge-token', ''), TOKEN)
+        if self.headers.get('sec-fetch-site') == 'cross-site':
+            return self.reply(403, {'error': 'Cross-site request'})
+        authed = False
         try:
+            authed = secrets.compare_digest(self.headers.get('x-bridge-token', '').encode(), TOKEN.encode())
             self.reply(200, fn(authed))
         except Refused as e:
             self.reply(400, {'error': str(e)})
@@ -235,7 +250,7 @@ class Handler(BaseHTTPRequestHandler):
         except LookupError:
             self.reply(404, {'error': 'Not found'})
         except Exception as e:  # noqa: BLE001 - the app shows the message
-            self.reply(500, {'error': f'{type(e).__name__}: {e}'})
+            self.reply(500, {'error': f'{type(e).__name__}: {e}' if authed else 'Bridge error'})
 
     def do_GET(self):
         u = urlparse(self.path)
@@ -247,8 +262,8 @@ class Handler(BaseHTTPRequestHandler):
         def run(authed):
             if not authed:
                 raise PermissionError
-            n = int(self.headers.get('content-length', '0'))
-            if n > 4096:
+            n = int(self.headers.get('content-length') or 0)
+            if not 0 <= n <= 4096:
                 raise Refused('Body too large')
             return post(u.path, json.loads(self.rfile.read(n) or b'{}'))
         self.handle_any(run)

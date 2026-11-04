@@ -70,8 +70,10 @@ class BridgeSafety(unittest.TestCase):
         self.assertEqual(mt5.sent, [], 'nothing reached the terminal')
 
     def test_units_to_lots(self):
-        self.assertEqual(bridge.lots(EURUSD, 12345), 0.12)        # 0.12345 lots rounded to the 0.01 step
-        self.assertEqual(bridge.lots(EURUSD, 10_000_000), 50)     # capped at volume_max
+        self.assertEqual(bridge.lots(EURUSD, 12345), 0.12)        # 0.12345 lots, rounded down to the 0.01 step
+        self.assertEqual(bridge.lots(EURUSD, 19999), 0.19)        # never up: 0.19999 lots must not become 0.20
+        with self.assertRaisesRegex(bridge.Refused, 'above the maximum'):   # refused, not silently cut down
+            bridge.lots(EURUSD, 10_000_000)
         with self.assertRaisesRegex(bridge.Refused, 'below the minimum'):
             bridge.lots(EURUSD, 100)
 
@@ -95,6 +97,20 @@ class BridgeSafety(unittest.TestCase):
     def test_unknown_symbol_in_positions_does_not_crash(self):
         mt5.pos = [NS(symbol='GONE', volume=0.1, type=mt5.POSITION_TYPE_BUY, price_open=1, profit=0, price_current=1)]
         self.assertEqual(bridge.get('/positions', {}, True)[0]['qty'], 0.1)
+
+    def test_bad_order_fields_and_empty_token(self):
+        for bad in ({'side': 'Buy', 'kind': 'market'}, {'side': 'buy', 'kind': 'nope'}, {'kind': 'market'}):
+            with self.assertRaisesRegex(bridge.Refused, 'Bad side'):
+                bridge.place({'sym': 'EURUSDM', 'qty': 1000, **bad})
+        self.assertEqual(mt5.sent, [])
+        with open(bridge.TOKEN_FILE, 'w') as f:
+            f.write('')
+        self.assertGreaterEqual(len(bridge.token()), 32)    # an empty token file is replaced, never accepted
+
+    def test_account_needs_the_token(self):
+        with self.assertRaises(PermissionError):
+            bridge.get('/account', {}, False)
+        self.assertEqual(bridge.get('/account', {}, True)['currency'], 'USD')
 
 
 if __name__ == '__main__':
