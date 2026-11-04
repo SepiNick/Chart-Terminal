@@ -501,6 +501,10 @@
   - ادغام ۴۰۹ با ادغام فیلد به فیلد (فعلاً «سرور برنده است»).
   - «سرورلس»: معنی آن هنوز مشخص نشده.
 
+### ✅ فاز ۱۶: شکاف‌های رقبا (2026-11-04، جزئیات و محدودیت‌ها: `docs/competitor-gaps.md`)
+- ✅ **Repaint check** برای Pine (`src/pine/repaint.ts`)، **Exit plan** چندمرحله‌ای برای حساب تمرینی (`src/exits.ts`)، **Diagnostics** (`src/diagnostics.ts`)، **Quick start** اردرفلو (`src/orderflow/presets.ts`)، `npm run bench` و `npm run audit:html`.
+- ⚠ **Exit plan روی حساب‌های testnet** و فایل نصبی امضاشده انجام نشد. ممیزی XSS فقط مسیرهای متن آزاد را کامل خوانده است.
+
 ## کنار گذاشته‌شده، فعلاً
 copy trading (ریسک حقوقی)، ابزار کامل آپشن، داده‌ی on-chain پولی (پرداخت از ایران مشکل است)، شبکه‌ی اجتماعی (Ideas و Streams)، و اخبار Reuters و Dow Jones (مجوز لازم دارند).
 

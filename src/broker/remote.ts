@@ -41,7 +41,7 @@ export class RemoteBroker implements Broker {
   }
 
   async refresh() { const s = await this.req<BrokerState>('/state'); this.push(s); return this.st! }
-  async place(o: OrderReq) { const r = await this.req<BrokerOrder>('/orders', { method: 'POST', body: o }); this.merge(r); return r }
+  async place(o: OrderReq) { if (o.exits) throw new Error('Exit plans run on the paper account for now: on an exchange account use take-profit and stop-loss'); const r = await this.req<BrokerOrder>('/orders', { method: 'POST', body: o }); this.merge(r); return r }
   async cancel(id: string) { await this.req<void>(`/orders/${enc(id)}`, { method: 'DELETE' }); this.merge(null, id) }
   async modify(id: string, patch: OrderPatch) { const r = await this.req<BrokerOrder>(`/orders/${enc(id)}`, { method: 'PATCH', body: patch }); this.merge(r); return r }
   async closePosition(sym: string) { await this.req<void>('/close', { method: 'POST', body: { sym } }); this.refresh().catch(() => {}) }

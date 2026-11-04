@@ -1,4 +1,5 @@
 // Paper-trading engine: no DOM, no network. Fills orders against prices it is fed.
+import { planError, resolvePlan, type ExitPlan } from './exits.ts';
 export type Side = 'buy' | 'sell';
 export type OrderType = 'market' | 'limit' | 'stop' | 'stop_limit' | 'trailing_stop';
 export interface Order {
@@ -10,11 +11,16 @@ export interface Order {
   tp?: number; sl?: number;    // bracket: placed as OCO exits once this order fills
   oco?: number;                // orders sharing an oco id cancel each other
   reduceOnly?: boolean;
+  plan?: ExitPlan;             // exit strategy: a stop and a ladder of targets are placed when this entry fills (src/exits.ts)
+  grp?: number;                // exits of one plan share a group; `tIdx` is the target's 0-based number (the stop has none)
+  tIdx?: number;
   ts?: number;                 // placed at (seconds); missing on accounts saved before phase 6
 }
 interface Position { qty: number; avg: number }   // qty < 0 = short
 export interface Fill { id: number; sym: string; side: Side; qty: number; px: number; fee: number; realized: number; ts: number; orderType: OrderType }
-export interface Account { cash: number; pos: Record<string, Position>; orders: Order[]; fills: Fill[]; nextId: number }
+/** A running exit plan: what is needed to move its stop as targets fill. */
+export interface ActivePlan { sym: string; dir: 1 | -1; entry: number; plan: ExitPlan }
+export interface Account { cash: number; pos: Record<string, Position>; orders: Order[]; fills: Fill[]; nextId: number; plans?: Record<number, ActivePlan> }
 /** Change a resting order: only the given fields; `null` removes a bracket TP/SL. */
 export interface OrderPatch { price?: number; stopPrice?: number; qty?: number; tp?: number | null; sl?: number | null }
 
@@ -36,6 +42,12 @@ function check(o: Order, px: number): string | null {
   const trig = o.type === 'stop' ? o.price! : o.type === 'stop_limit' && !o.triggered ? o.stopPx! : null;
   if (trig != null && dir * (trig - px) < 0) return `Stop ${o.side} must be ${o.side === 'buy' ? 'above' : 'below'} market (use limit)`;
   const ref = o.type === 'market' ? px : o.price!;
+  if (o.plan) {
+    if (o.tp != null || o.sl != null) return 'Use either TP/SL or an exit plan, not both';
+    if (o.reduceOnly) return 'An exit plan belongs to an entry order, not a reduce-only one';
+    const e = planError(o.plan, dir as 1 | -1, o.type === 'stop_limit' ? o.price! : ref);
+    if (e) return e;
+  }
   if (o.tp != null && dir * (o.tp - ref) <= 0) return 'Take-profit is on the wrong side';
   if (o.sl != null && dir * (o.sl - ref) >= 0) return 'Stop-loss is on the wrong side';
   return null;
@@ -142,9 +154,43 @@ function fill(a: Account, o: Order, px: number, ts: number): Fill | null {
     if (o.tp != null) a.orders.push({ id: a.nextId++, sym: o.sym, side: exit, type: 'limit', qty, price: o.tp, oco, reduceOnly: true, ts });
     if (o.sl != null) a.orders.push({ id: a.nextId++, sym: o.sym, side: exit, type: 'stop', qty, price: o.sl, oco, reduceOnly: true, ts });
   }
-  // A flat position orphans its reduce-only exits.
-  if (!a.pos[o.sym]) a.orders = a.orders.filter(x => !(x.sym === o.sym && x.reduceOnly));
+  if (o.plan) startPlan(a, o, qty, px, ts);
+  else if (o.grp != null && o.tIdx != null) advancePlan(a, o, px);
+  // A flat position orphans its reduce-only exits (and the plans that ran them).
+  if (!a.pos[o.sym]) { a.orders = a.orders.filter(x => !(x.sym === o.sym && x.reduceOnly)); for (const [g, v] of Object.entries(a.plans ?? {})) if (v.sym === o.sym) delete a.plans![+g] }
   return f;
+}
+
+/** The entry of an exit plan filled: place its stop and targets, sized to this fill. The stop goes first so that on a gap through both, the stop wins. */
+function startPlan(a: Account, o: Order, qty: number, px: number, ts: number) {
+  const dir = dirOf(o) as 1 | -1, r = resolvePlan(o.plan!, dir, px), exit: Side = o.side === 'buy' ? 'sell' : 'buy', grp = a.nextId++;
+  (a.plans ??= {})[grp] = { sym: o.sym, dir, entry: px, plan: o.plan! };
+  a.orders.push({ id: a.nextId++, sym: o.sym, side: exit, type: 'stop', qty, price: r.sl, reduceOnly: true, grp, ts });
+  let left = qty;
+  r.targets.forEach((t, i) => {
+    const last = i === r.targets.length - 1 && r.targets.reduce((s, x) => s + x.qtyPct, 0) >= 99.9999;
+    const q = last ? left : Math.min(left, round((qty * t.qtyPct) / 100));
+    left = round(left - q);
+    if (q > 0) a.orders.push({ id: a.nextId++, sym: o.sym, side: exit, type: 'limit', qty: q, price: t.price, reduceOnly: true, grp, tIdx: i, ts });
+  });
+}
+/** A target of a plan filled: the stop covers what is left, and may move to breakeven or start trailing. */
+function advancePlan(a: Account, tp: Order, px: number) {
+  const act = a.plans?.[tp.grp!], p = a.pos[tp.sym];
+  if (!act || !p) return;
+  const stop = a.orders.find(x => x.grp === tp.grp && x.tIdx == null);
+  if (!stop) return;
+  stop.qty = Math.abs(p.qty);
+  const { breakeven: be, trail: tr } = act.plan;
+  if (be && be.after === tp.tIdx! + 1 && stop.type === 'stop') {
+    const lvl = round(act.entry * (1 + act.dir * ((be.offsetPct ?? 0) / 100)));
+    if (act.dir * (lvl - stop.price!) > 0) stop.price = lvl;   // only ever tightens
+  }
+  if (tr && tr.after === tp.tIdx! + 1) {
+    stop.type = 'trailing_stop'; stop.trail = tr.pct ? { pct: tr.pct } : { amount: tr.amount };
+    const lv = trailLevel(stop, px);
+    if (dirOf(stop) * (lv - stop.price!) < 0) stop.price = lv;
+  }
 }
 
 export function closePosition(a: Account, sym: string, px: number, ts: number) {

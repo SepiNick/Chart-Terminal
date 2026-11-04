@@ -5,6 +5,8 @@ import { createPineEditor, type PineEditor } from './pine/editor.ts';
 import { compile, isError, setInstalledScripts } from './pine/engine.ts';
 import { BUILTIN_SCRIPTS, NEW_INDICATOR, NEW_STRATEGY } from './pine/builtins.ts';
 import { fromBroker } from './pine/report.ts';
+import { checkRepaint, repaintSummary } from './pine/repaint.ts';
+import { tfSeconds } from './data.ts';
 import { renderTester } from './testerui.ts';
 import { initNoCode, openNoCode } from './nocodeui.ts';
 import { LIB_NAMES } from './pine/lib/index.ts';
@@ -192,6 +194,18 @@ export function initPineUI(h: PineHost) {
     if (refs.some(r => r.id === s.id)) { p.build(); toast('Updated on chart') }
     else host.applyCfg(p, { scripts: [...refs, { id: s.id, inputs: {} }] }, 'add script');
     if (isCode(lang)) host.showTab('tester');
+  };
+  // Repaint check: does the script show values that used data from after the bar? (src/pine/repaint.ts)
+  $('#pnRepaint').onclick = () => {
+    const lang = langOf(scripts[editingId]), con = $('#pnConsole'), p = host.active();
+    if (!editor || lang !== 'pine') return toast('The repaint check is for Pine scripts');
+    const bars = p.vb();
+    if (bars.length < 60) return toast('Load at least 60 bars on the active chart first');
+    con.innerHTML = '<div class="muted">Checking for repainting…</div>';
+    setTimeout(() => {   // let the message paint: the check runs the script a dozen times
+      const r = checkRepaint(editor!.getValue(), bars, { symbol: p.cfg.symbol.replace(/^[A-Z0-9]+:/, ''), tf: p.cfg.tf, tfSec: tfSeconds(p.cfg.tf), mintick: 10 ** -p.prec });
+      con.innerHTML = `<div class="${r.verdict === 'stable' ? 'muted' : 'err'}">${esc(repaintSummary(r))}</div>` + r.mismatches.slice(0, 12).map(m => `<div class="warn">bar ${new Date(m.time * 1000).toISOString().slice(0, 16).replace('T', ' ')} · ${esc(m.what)}: ${esc(m.cut)} → ${esc(m.full)}</div>`).join('');
+    }, 20);
   };
   $('#pnExport').onclick = () => {
     if (!editor) return;
