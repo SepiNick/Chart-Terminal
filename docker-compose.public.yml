@@ -1,0 +1,33 @@
+# Public multi-user server behind Caddy (automatic HTTPS). Set DOMAIN (and keep the .env file private):
+#   DOMAIN=charts.example.com docker compose -f docker-compose.public.yml up -d
+# It never stores exchange keys: trading, secrets, script engine, ML, LM and MT5 modules are not loaded in public mode.
+services:
+  app:
+    build: .
+    image: chart-terminal
+    restart: unless-stopped
+    expose: ["8787"]
+    environment:
+      CT_MODE: public
+      CT_HOST: 0.0.0.0
+      PORT: "8787"
+      CT_PUBLIC_URL: https://${DOMAIN:?set DOMAIN}
+      CT_ALLOWED_HOSTS: ${DOMAIN}
+      CT_TRUST_PROXY: "1"
+      CT_REGISTRATION: invite
+      CT_ADMIN: ${CT_ADMIN:-admin}
+    volumes:
+      - chart-terminal-data:/data
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [app]
+volumes:
+  chart-terminal-data:
+  caddy-data:

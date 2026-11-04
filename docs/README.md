@@ -20,6 +20,7 @@
 - [desktop.md](desktop.md): برنامه‌ی Electron (ویندوز، مک، لینوکس)، داده‌ها، tray، ساخت نصبی.
 - [lite.md](lite.md): نسخه‌ی سبک بدون Electron، مقایسه‌ی حجم و حافظه، نصب و حذف.
 - [headless-server.md](headless-server.md): اجرای سرور از سورس روی لپ‌تاپ لینوکسی، systemd، فایروال، پشتیبان‌گیری.
+- [docker.md](docker.md): اجرا با Docker روی رزبری پای، لینوکس یا VPS (سرور خصوصی و عمومی با Caddy؛ ساخته‌نشده و تست‌نشده)
 - [lan-setup.md](lan-setup.md): HTTPS روی شبکه‌ی خانه، نصب گواهی روی اندروید و آیفون، فایروال ویندوز.
 - [android.md](android.md): نصب به‌صورت PWA روی اندروید، اعلان‌ها، باتری، IP ثابت.
 - [android-apk.md](android-apk.md): اپ APK با دو flavor (client و standalone)، حالت Standalone برنامه، قواعد HTTP/HTTPS، ساخت و امضا.

@@ -1,0 +1,16 @@
+# Private home server (a Raspberry Pi or any Linux machine). Uses the host network so the server sees the real LAN addresses
+# of your phone and PC (it refuses anything that is not a private address). After the first start, set the password from the
+# machine itself:  docker compose exec app node server/cli.ts   (see docs/docker.md)
+services:
+  app:
+    build: .
+    image: chart-terminal
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      CT_LAN: "1"              # HTTPS on the home network (port 8443) with a local CA, see docs/android.md
+      CT_SERVER_NAME: "My Chart Terminal"
+    volumes:
+      - chart-terminal-data:/data
+volumes:
+  chart-terminal-data:

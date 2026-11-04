@@ -41,3 +41,4 @@ Thumbs.db
 graphify-out/
 .impeccable/hook.cache.json
 android/app/src/standalone/assets/
+dist-release/
