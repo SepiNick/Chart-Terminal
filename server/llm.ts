@@ -5,7 +5,9 @@ import { HttpError, bad, route } from './core/http.ts';
 
 /** Swappable for tests. */
 export const deps = { fetch: (url: string, init?: RequestInit) => fetch(url, init) };
-export const DEFAULTS = ['http://127.0.0.1:11434/v1', 'http://127.0.0.1:1234/v1'];
+// LM Studio takes the next free port when 1234 is busy, so 1234-1239 are all accepted (only the first two are probed).
+export const DEFAULTS = ['http://127.0.0.1:11434/v1', 'http://127.0.0.1:1234/v1', 'http://127.0.0.1:1235/v1'];
+const LMS_PORTS = ['1234', '1235', '1236', '1237', '1238', '1239'];
 /** A loopback http(s) base URL ending in /v1 (trailing slash trimmed), or an error. */
 export function baseUrl(raw?: string | null) {
   const s = (raw || process.env.CT_LLM_URL || DEFAULTS[0]).trim().replace(/\/+$/, '');
@@ -14,7 +16,7 @@ export function baseUrl(raw?: string | null) {
   const path = u.pathname.replace(/\/+$/, ''), port = (x: URL) => x.port || (x.protocol === 'https:' ? '443' : '80');
   let envPort: string[] = []; try { if (process.env.CT_LLM_URL) envPort = [port(new URL(process.env.CT_LLM_URL))] } catch { /* ignored: a bad CT_LLM_URL just adds nothing */ }
   // Fixed ports and path: an override can't be used to probe other local services (databases, this server, dev tools).
-  if (path !== '/v1' || u.search || ![...DEFAULTS.map(d => port(new URL(d))), ...envPort].includes(port(u))) throw bad('Model URL must be http://127.0.0.1:11434/v1 (Ollama), :1234/v1 (LM Studio) or the port in CT_LLM_URL');
+  if (path !== '/v1' || u.search || !['11434', ...LMS_PORTS, ...envPort].includes(port(u))) throw bad('Model URL must be http://127.0.0.1:11434/v1 (Ollama), :1234-1239/v1 (LM Studio) or the port in CT_LLM_URL');
   return `${u.origin}${path}`;
 }
 async function call(url: string, init: RequestInit = {}, ms = 10_000) {

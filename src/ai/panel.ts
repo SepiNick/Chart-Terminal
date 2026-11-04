@@ -7,7 +7,7 @@ import { chartContext, journalContext, SYSTEM, writePine, type JT, type Msg } fr
 import { tfSeconds } from '../data.ts';
 
 export interface AiHost { active(): ChartPane; trades(): JT[]; openPine(src: string): void }
-let host: AiHost, busy = false;
+let host: AiHost, busy = false, found = '';   // found: the server the last status check reached (Ollama or LM Studio)
 const log: (Msg & { code?: string; note?: string })[] = [];
 const cfg = { model: store.get<string>('aiModel', ''), url: store.get<string>('aiUrl', ''), lang: store.get<string>('aiLang', 'auto') };
 
@@ -16,7 +16,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   if (!r.ok) throw Error((j as { error?: string }).error ?? String(r.status));
   return j as T;
 }
-const ask = (messages: Msg[]) => post<{ text: string }>('/api/ai/chat', { url: cfg.url || undefined, model: cfg.model, messages }).then(r => r.text);
+const ask = (messages: Msg[]) => post<{ text: string }>('/api/ai/chat', { url: cfg.url || found || undefined, model: cfg.model, messages }).then(r => r.text);
 const system = () => SYSTEM + (cfg.lang === 'fa' ? ' Always answer in Persian (Farsi).' : cfg.lang === 'en' ? ' Always answer in English.' : '');
 function context() {
   const p = host.active();
@@ -80,6 +80,7 @@ export async function refreshAi() {
   try {
     const s = await fetch(`/api/ai/status${cfg.url ? `?url=${encodeURIComponent(cfg.url)}` : ''}`).then(r => r.json()) as { url: string; online: boolean; models: string[]; model: string | null; error?: string };
     if (s.error) throw Error(s.error);
+    found = s.online ? s.url : '';
     if (!cfg.model || !s.models.includes(cfg.model)) cfg.model = s.models.includes(s.model ?? '') ? s.model! : s.models[0] ?? '';
     store.set('aiModel', cfg.model);
     sel.innerHTML = s.models.length ? s.models.map(m => `<option ${m === cfg.model ? 'selected' : ''}>${esc(m)}</option>`).join('') : '<option value="">no model</option>';
