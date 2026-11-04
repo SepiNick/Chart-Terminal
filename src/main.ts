@@ -26,7 +26,7 @@ import { initLiqPanel } from './derivs/liqpanel.ts';   // derivs
 import { ofMenu, replayButton, marketReplayUi } from './orderflow/menu.ts';
 import { initJournal, journal, journalBrokers, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
 import { journalReplayOrder } from './journal/replay.ts';
-import { initPineUI, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
+import { initPineUI, openNewScript, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
 import { serverMode, onServer, api } from './sync.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
@@ -36,6 +36,7 @@ import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 import { chartEvents, initMarket, renderDetails, renderMarket } from './market/ui.ts';
 import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
 import { initSkills, renderSkills } from './skills/ui.ts';
+import { initAi, refreshAi } from './ai/panel.ts';
 import { rMultiple } from './journal.ts';
 
 // ---------- layouts (grid arrangements) ----------
@@ -792,6 +793,7 @@ function showSide(name: string) {
   if (st.side === 'journal') renderJournal();
   if (st.side === 'accts') renderAccounts();   // accounts
   if (st.side === 'skills') renderSkills();
+  if (st.side === 'ai') void refreshAi();
   domSync();
 }
 $('#rail').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) showSide(s) };
@@ -939,6 +941,7 @@ initSkills({
   trades: () => journal().trades.filter(t => t.kind !== 'notrade').map(t => ({ sym: t.sym, dir: t.dir, openTime: t.openTime, closeTime: t.closeTime, net: t.net, r: rMultiple(t), status: t.status, setup: t.setup, mistakes: t.mistakes })),
   json: <T,>(path: string) => serverJson<T>(path),
 });
+initAi({ active, trades: () => journal().trades.filter(t => t.kind !== 'notrade').map(t => ({ sym: t.sym, dir: t.dir, openTime: t.openTime, closeTime: t.closeTime, net: t.net, r: rMultiple(t), status: t.status, setup: t.setup, mistakes: t.mistakes })), openPine: src => { openNewScript(src) } });
 
 // ---------- order ticket & trading panel ----------
 const ticket = { side: 'buy' as Side, type: 'market' as OrderType };
