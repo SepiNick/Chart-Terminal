@@ -53,8 +53,11 @@ function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
       n += chunk.length;
       if (n > limit) { over = true; parts.length = 0; reject(new HttpError(413, 'Body too large')) } else parts.push(chunk);
     });
-    req.on('end', () => { if (!over) resolve(Buffer.concat(parts)) });
-    req.on('error', reject);
+    req.on('end', () => { clearTimeout(timer); if (!over) resolve(Buffer.concat(parts)) });
+    req.on('error', e => { clearTimeout(timer); reject(e) });
+    // A body that trickles in must not hold its budget reservation forever (slow-body attack).
+    const timer = setTimeout(() => { over = true; parts.length = 0; reject(Object.assign(new HttpError(408, 'Request body took too long'), { closeConn: true })); req.destroy() }, isPublic ? 30_000 : 10 * 60_000);
+    timer.unref();
   });
 }
 
@@ -100,6 +103,7 @@ const inflight = new Map<number, number>();
 // Bytes of request bodies being received right now (public mode): each upload reserves what it declares, or its route limit.
 const BUDGET = (Number(process.env.CT_BODY_BUDGET_MB) || 64) * 1024 * 1024;
 let inBytes = 0;
+const inBytesBy = new Map<string, number>();   // per principal: one account or address may hold at most a quarter of the budget
 const MUST_CHANGE_OK = new Set(['/api/auth/password', '/api/auth/logout']);
 const slow = (s: number, msg: string) => Object.assign(new HttpError(429, msg), { retryAfter: s });
 
@@ -145,18 +149,19 @@ export async function handle(req: IncomingMessage, res: ServerResponse, listener
     r.keys.forEach((k, i) => (c.params[k] = decodeURIComponent(m[i + 1])));
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       const limit = typeof r.limit === 'function' ? r.limit(url) : r.limit;
-      let held = 0;
+      let held = 0, heldBy = '';
       if (isPublic) {   // refuse by the declared size before reading a byte, and keep a global budget for bodies in flight
         const declared = req.headers['content-length'] === undefined ? NaN : Number(req.headers['content-length']);
         if (declared > limit) throw Object.assign(new HttpError(413, 'Body too large'), { closeConn: true });
         held = Number.isFinite(declared) ? declared : limit;
-        if (inBytes + held > BUDGET) throw Object.assign(new HttpError(503, 'The server is busy receiving other uploads. Try again in a moment'), { retryAfter: 2, closeConn: true });
-        inBytes += held;
+        const who = c.user ? `u${c.user.id}` : `ip${ip}`, mine = inBytesBy.get(who) ?? 0;
+        if (inBytes + held > BUDGET || mine + held > BUDGET / 4) throw Object.assign(new HttpError(503, 'The server is busy receiving other uploads. Try again in a moment'), { retryAfter: 2, closeConn: true });
+        inBytes += held; inBytesBy.set(who, mine + held); heldBy = who;
       }
       try {
         const buf = await readBody(req, limit);
         c.body = r.raw ? buf : buf.length ? JSON.parse(buf.toString('utf8')) : undefined;
-      } finally { inBytes -= held }
+      } finally { inBytes -= held; if (heldBy) { const left = (inBytesBy.get(heldBy) ?? 0) - held; left > 0 ? inBytesBy.set(heldBy, left) : inBytesBy.delete(heldBy) } }
     }
     const out = await r.h(c);
     if (out === RAW) return;
