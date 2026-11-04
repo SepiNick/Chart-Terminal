@@ -69,6 +69,40 @@ export const FA: Record<string, string> = {
   'currency': 'ارز', 'gold': 'طلا', 'coin': 'سکه', 'spot': 'اسپات', 'perpetual': 'پرپچوال', 'future': 'سررسیددار', 'forex': 'فارکس', 'metal': 'فلز', 'energy': 'انرژی',
   // calendar names in settings
   'gregorian': 'میلادی', 'jalali': 'شمسی',
+  // chart settings dialog
+  'Trading': 'معامله', 'Status line': 'نوار وضعیت', 'Scales and lines': 'مقیاس و خطوط', 'Canvas': 'بوم',
+  'Candles': 'کندل‌ها', 'Up color': 'رنگ صعودی', 'Down color': 'رنگ نزولی', 'Body': 'بدنه', 'Borders': 'حاشیه‌ها', 'Wick': 'سایه', 'Color bars based on previous close': 'رنگ کندل بر اساس پایانی قبلی',
+  'Data modification': 'تغییر داده', 'Precision': 'دقت اعشار', 'Timezone': 'منطقه‌ی زمانی', 'Price-based charts': 'نمودارهای قیمت‌محور', 'Renko/PnF box size (atr or a price)': 'اندازه‌ی جعبه‌ی Renko/PnF (atr یا یک قیمت)',
+  'ATR length': 'طول ATR', 'Reversal (boxes)': 'برگشت (جعبه)', 'Line break: number of lines': 'Line break: تعداد خط', 'Range size (0 = auto)': 'اندازه‌ی Range (۰ = خودکار)',
+  'Chart values (OHLC)': 'مقادیر نمودار (OHLC)', 'Title': 'عنوان', 'Bar change values': 'تغییر کندل', 'Volume': 'حجم', 'Indicator titles': 'عنوان اندیکاتورها', 'Indicator arguments': 'پارامترهای اندیکاتور', 'Indicator values': 'مقدار اندیکاتورها', 'Background': 'پس‌زمینه',
+  'Price scale': 'مقیاس قیمت', 'Scale mode': 'حالت مقیاس', 'Invert scale': 'مقیاس معکوس', 'Scale placement': 'جای مقیاس', 'Top margin %': 'حاشیه‌ی بالا ٪', 'Bottom margin %': 'حاشیه‌ی پایین ٪', 'Lines': 'خط‌ها',
+  'Symbol last price label': 'برچسب آخرین قیمت', 'Symbol last price line': 'خط آخرین قیمت', 'Countdown to bar close': 'شمارش معکوس تا بسته شدن کندل', 'Previous day close line': 'خط پایانی روز قبل', 'High and low price lines': 'خط بالاترین و پایین‌ترین قیمت',
+  'Average close price line': 'خط میانگین قیمت پایانی', 'Indicator value labels': 'برچسب مقدار اندیکاتور', 'Time scale': 'مقیاس زمان', 'Right margin (bars)': 'حاشیه‌ی راست (کندل)', 'Day of week on labels': 'روز هفته روی برچسب‌ها',
+  'Date format (Gregorian)': 'قالب تاریخ (میلادی)', '12-hour time': 'ساعت ۱۲ ساعته', 'Chart basic styles': 'سبک پایه‌ی نمودار', 'Background color': 'رنگ پس‌زمینه', 'Gradient bottom color': 'رنگ پایین گرادیان',
+  'Vertical grid lines': 'شبکه‌ی عمودی', 'Horizontal grid lines': 'شبکه‌ی افقی', 'Grid color': 'رنگ شبکه', 'Pane separators': 'جداکننده‌ی پنل‌ها', 'Crosshair mode': 'حالت crosshair', 'Crosshair color': 'رنگ crosshair',
+  'Crosshair width': 'ضخامت crosshair', 'Crosshair style': 'سبک crosshair', 'Watermark': 'واترمارک', 'Scales': 'مقیاس‌ها', 'Text color': 'رنگ متن', 'Font size': 'اندازه‌ی قلم', 'Positions and orders': 'پوزیشن‌ها و سفارش‌ها',
+  'Execution arrows': 'فلش اجرا', 'Order labels alignment': 'چینش برچسب سفارش', 'Buy/Sell buttons': 'دکمه‌های خرید/فروش', 'Instant order placement': 'ثبت فوری سفارش', 'Alert lines': 'خط هشدار', 'Alert line color': 'رنگ خط هشدار',
+  'Only active alerts': 'فقط هشدارهای فعال', 'Alert volume': 'صدای هشدار', 'Auto-hide notifications after 20s': 'پنهان شدن خودکار اعلان بعد از ۲۰ ثانیه',
+  // market panel, journal workspace, skills
+  'Screener': 'اسکرینر', 'Heatmap': 'نقشه‌ی حرارتی', 'Movers': 'پرنوسان‌ها', 'News': 'اخبار',
+  '▦ Dashboard': '▦ داشبورد', '☰ Journals': '☰ ژورنال‌ها', '☑ Checklists': '☑ چک‌لیست‌ها', '🔥 Discipline path': '🔥 مسیر انضباط', 'Daily': 'روزانه', 'Psychology & behaviour': 'روانشناسی و رفتار', 'Time & efficiency': 'زمان و بازدهی',
+  'Execution quality': 'کیفیت اجرا', 'Professional': 'حرفه‌ای', 'Analyses': 'تحلیل‌ها', 'Tools': 'ابزارها', 'Prop challenges': 'چالش‌های پراپ', 'Economic calendar': 'تقویم اقتصادی', 'Forex sessions clock': 'ساعت سشن‌های فارکس',
+  'Trading resume': 'رزومه‌ی معاملاتی', 'Compare accounts': 'مقایسه‌ی حساب‌ها', 'Portfolio risk': 'ریسک پورتفو', '✎ Notes': '✎ یادداشت‌ها', '⚙ Accounts & settings': '⚙ حساب‌ها و تنظیمات',
+  'Risk & sizing': 'ریسک و حجم پوزیشن', 'Journal & review': 'ژورنال و مرور', 'Market regime': 'رژیم بازار', 'Screeners': 'اسکنرها', 'Fundamentals': 'بنیادی', 'Options & futures': 'آپشن و آتی', 'Iran market': 'بازار ایران',
+  // alert dialog, server panel and the rest of the markup
+  'Order ·': 'سفارش ·', 'Other leg (same side and size; one fill cancels the other)': 'پای دیگر (هم‌جهت و هم‌حجم؛ پر شدن یکی دیگری را لغو می‌کند)', '📷 Snapshot': '📷 عکس',
+  'Ask why when a trade opens': 'هنگام باز شدن معامله دلیلش را بپرس', 'Ask how it went when a trade closes': 'هنگام بسته شدن معامله بپرس چطور بود', 'Upper bound': 'کران بالا', 'Within bars': 'در طول چند کندل',
+  'Webhook URL': 'نشانی وب‌هوک', '(empty = the default URL in 🔔 settings)': '(خالی = نشانی پیش‌فرض در تنظیمات 🔔)', 'Webhook body': 'بدنه‌ی وب‌هوک', '(empty = the message; valid JSON is sent as application/json)': '(خالی = خود پیام؛ JSON معتبر با نوع application/json فرستاده می‌شود)',
+  'Set up channels in 🔔 Server & notifications': 'کانال‌ها را در 🔔 سرور و اعلان‌ها تنظیم کنید', 'Make a bot with @BotFather and paste its token. Then send any message to your bot and press “Pick chat”.': 'با @BotFather یک ربات بسازید و توکنش را بچسبانید. بعد یک پیام به ربات بفرستید و «انتخاب چت» را بزنید.',
+  'SMTP host': 'سرور SMTP', 'Port': 'پورت', 'User': 'کاربر', 'From': 'از', 'To': 'به', 'Default URL': 'نشانی پیش‌فرض', 'HTTPS on Wi-Fi': 'HTTPS روی Wi-Fi', 'CA fingerprint': 'اثر انگشت CA', 'CA certificate (Android, Windows)': 'گواهی CA (اندروید، ویندوز)', 'iPhone / iPad profile': 'پروفایل iPhone / iPad',
+  'Install .pine / .mq4 / .mq5 / .mqh / .cs (NinjaScript) files — several at once': 'نصب فایل‌های .pine / .mq4 / .mq5 / .mqh / .cs (NinjaScript)، چند فایل هم‌زمان', 'Import a TradingView watchlist (Export list → .txt)': 'ورود دیده‌بان تریدینگ‌ویو (Export list → .txt)',
+  'Import a TradingView alerts log (CSV)': 'ورود گزارش هشدار تریدینگ‌ویو (CSV)', 'Stop-limit: a limit order placed when the stop price trades': 'استاپ‌لیمیت: وقتی قیمت استاپ معامله شود یک سفارش لیمیت ثبت می‌شود',
+  'Trailing stop: follows the best price by a distance, fills at market': 'تریلینگ استاپ: با فاصله‌ای از بهترین قیمت دنبال می‌کند و در بازار پر می‌شود', 'Sizing mode': 'روش تعیین حجم', 'Other leg type': 'نوع پای دیگر', 'Group price levels': 'گروه‌بندی سطوح قیمت',
+  'Re-centre on the market (scroll the ladder to move it)': 'برگرداندن به مرکز بازار (برای جابه‌جایی نردبان اسکرول کنید)', 'min value': 'حداقل مقدار', 'Hide trades below this value (quote currency)': 'پنهان کردن معاملات زیر این مقدار (ارز مقابل)',
+  'Attach a snapshot of the active chart': 'پیوست عکس نمودار فعال', 'Insert placeholder': 'درج جایگزین', 'Notification channels': 'کانال‌های اعلان', 'In-app pop-up and sound on every open device': 'پنجره‌ی اعلان و صدا روی هر دستگاه باز',
+  'When a chart stays empty or something breaks: collect a report with your browser, the server, a quick check of every data source and the latest errors. Keys, tokens, passwords, e-mail and IP addresses are removed. Nothing is sent anywhere; copy the text to where you ask for help.': 'وقتی نمودار خالی می‌ماند یا چیزی خراب می‌شود: گزارشی از مرورگر، سرور، بررسی سریع هر منبع داده و آخرین خطاها جمع کنید. کلید، توکن، رمز، ایمیل و آدرس IP حذف می‌شوند. چیزی جایی فرستاده نمی‌شود؛ متن را هر جا کمک می‌خواهید کپی کنید.',
+  'A stop and a ladder of targets that manage themselves: sl 98 or sl 2% · tp 1R 50%, 3R 50% (price, R multiple or %, then its share) · be 1 (stop to breakeven after target 1) · trail 1% 2 (trail after target 2). Paper account only.': 'یک حد ضرر و نردبان اهداف که خودشان مدیریت می‌شوند: sl 98 یا sl 2% · tp 1R 50%, 3R 50% (قیمت، مضرب R یا درصد، بعد سهم آن) · be 1 (حد ضرر بعد از هدف ۱ به سر‌به‌سر) · trail 1% 2 (تریل بعد از هدف ۲). فقط حساب تمرینی.',
+
 };
 
 const SKIP = 'canvas, #grid, #pnEditor, #pnConsole, textarea, code, pre, script, style, .cm-editor, [data-i18n="off"]';
@@ -83,6 +117,8 @@ export const t = (en: string): string => (current === 'fa' ? FA[en] ?? en : en);
 function xText(n: Text) {
   const raw = n.data, core = raw.trim();
   if (!core) return;
+  const par = n.parentElement;
+  if (par?.tagName === 'OPTION' && !par.hasAttribute('value')) return;   // its text IS its value: translating would change what the form reads
   const orig = textOrig.get(n);
   if (current === 'en') { if (orig !== undefined && FA[orig.trim()] === core) n.data = orig; return }
   const fa = FA[core];

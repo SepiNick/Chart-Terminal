@@ -59,3 +59,20 @@ export async function tgjuBars(sym: string, tf: string, until?: number, limit = 
 
 export interface TgjuMarket { sym: string; base: string; quote: string; type: string; name: string }
 export const tgjuMarkets = (): TgjuMarket[] => Object.entries(TGJU_ITEMS).map(([sym, i]) => ({ sym, base: sym, quote: i.rial ? 'IRT' : 'USD', type: i.type, name: i.name }));
+
+/** Latest price and change vs the previous trading day for every item (one small request each, cached, so the first call takes a few seconds). */
+export async function tgjuTickers(): Promise<{ sym: string; last: number; change: number; quoteVolume: number }[]> {
+  const out: { sym: string; last: number; change: number; quoteVolume: number }[] = [];
+  let lastError: unknown;
+  for (const [sym, it] of Object.entries(TGJU_ITEMS)) {
+    try {
+      const q = new URLSearchParams({ lang: 'fa', order_dir: 'desc', start: '0', length: '3' });
+      const { data } = await fetchJson<{ data?: unknown[]; rows?: unknown[] }>(`${tgjuBaseUrl()}/market/indicator/summary-table-data/${it.slug}?${q}`, { ttl: 120_000, gap: 500 });
+      const bars = cleanBars(((data.data ?? data.rows) as unknown[] | undefined)?.flatMap(r => rowToBar(r, it.rial) ?? []) ?? []);
+      const a = bars.at(-1), b = bars.at(-2);
+      if (a) out.push({ sym, last: a.close, change: b ? ((a.close - b.close) / b.close) * 100 : 0, quoteVolume: 0 });
+    } catch (e) { lastError = e }
+  }
+  if (!out.length && lastError) throw lastError;
+  return out;
+}
