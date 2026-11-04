@@ -43,6 +43,13 @@ export async function enablePush(): Promise<void> {
   await api('/api/notify/push/subscribe', { body: { subscription: sub.toJSON(), agent: navigator.userAgent } });
 }
 
+/** Shared browsers: before logging out, stop this account's alerts reaching this browser (the browser's own subscription stays, so the next login can re-enable it with one click). */
+export async function releasePushOnServer(): Promise<void> {
+  if (!window.isSecureContext || !supported()) return;
+  const sub = await subscription();
+  if (sub) await api('/api/notify/push/unsubscribe', { body: { endpoint: sub.endpoint } }).catch(() => {});
+}
+
 export async function disablePush(): Promise<void> {
   if (!window.isSecureContext || !supported()) return;
   const sub = await subscription();

@@ -1,6 +1,7 @@
 // Sign-in screens (first password, login) and the account menu in the top bar. Built at runtime so index.html stays
 // the app's markup; styled with the app's CSS variables.
 import { api, flushNow, onSyncStatus, type SyncStatus } from './sync.ts';
+import { releasePushOnServer } from './push.ts';
 import { esc, toast } from './store.ts';
 
 const CSS = `
@@ -106,6 +107,8 @@ export function accountMenu() {
 }
 async function logout() {
   await flushNow();
+  const mode = await fetch('/api/auth/status').then(r => r.json()).then(j => j.mode).catch(() => 'private');
+  if (mode === 'public') await releasePushOnServer().catch(() => {});   // someone else may sign in on this browser next
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   location.reload();
 }

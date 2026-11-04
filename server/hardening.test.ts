@@ -100,11 +100,16 @@ test('bodies are refused by their declared size before being read, and share a g
   assert.equal(await send(u.c.cookie, '/api/state/x', 3_000_000), 413, 'state key: about 2 MB');
   assert.equal(await send(u.c.cookie, '/api/alerts/log/import', 2_000_000), 413, 'alerts import: 1 MB');
   assert.equal(await send(u.c.cookie, '/api/alerts', 300_000), 413, 'default: 256 KB');
-  // the journal may be 8 MB and media 15 MB; two 12 MB uploads in flight do not fit a 20 MB budget
-  const first = send(u.c.cookie, '/api/media', 12_000_000);   // stays open: only a few bytes sent
+  // one account may hold at most a quarter of the 20 MB budget: its second 3 MB upload in flight is refused although the server is not full
+  const one = send(u.c.cookie, '/api/media', 3_000_000);   // stays open: only a few bytes sent
   await new Promise(r => setTimeout(r, 200));
-  assert.equal(await send(u.c.cookie, '/api/media', 12_000_000), 503);
-  void first;
+  assert.equal(await send(u.c.cookie, '/api/media', 3_000_000), 503, 'per-account share');
+  // and the whole budget is shared: four more accounts at 4 MB each fill 20 MB, the next one is refused
+  const holders = await Promise.all(['k1', 'k2', 'k3', 'k4', 'k5'].map(n => signup(b, `gina-${n}`)));
+  for (const h of holders.slice(0, 4)) void send(h.c.cookie, '/api/media', 4_000_000);
+  await new Promise(r => setTimeout(r, 300));
+  assert.equal(await send(holders[4].c.cookie, '/api/media', 4_000_000), 503, 'global budget');
+  void one;
 });
 
 test('malformed escapes are a 400, not a 500', async () => {
