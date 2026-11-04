@@ -10,7 +10,7 @@ if (cmd === 'create-admin') console.log(`admin ${need()} created. one-time passw
 else if (cmd === 'list') console.table(U.listUsers());
 else if (cmd === 'reset') console.log(`temporary password for ${need()}: ${await U.resetPassword(a)}`);
 else if (cmd === 'disable' || cmd === 'enable') { U.setStatus(need(), cmd === 'disable' ? 'disabled' : 'active'); console.log('ok') }
-else if (cmd === 'delete') { U.removeUser(need()); console.log('deleted') }
+else if (cmd === 'delete') { await U.removeUser(need()); console.log('deleted') }
 else if (cmd === 'invite') console.log(`invite code (shown once): ${U.createInvite(null, { uses: Number(a) || 1, days: Number(b) || 7, note: rest.join(' ') })}`);
 else if (cmd === 'vapid') { const k = (await import('web-push')).default.generateVAPIDKeys(); console.log(`CT_VAPID_PUBLIC=${k.publicKey}\nCT_VAPID_PRIVATE=${k.privateKey}`) }
 else { console.log('commands: create-admin <name> | list | reset <name> | disable <name> | enable <name> | delete <name> | invite [uses] [days] [note] | vapid'); process.exitCode = 1 }

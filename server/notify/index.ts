@@ -14,7 +14,6 @@ import { limits, tooMany } from '../core/quota.ts';
 // Private server: telegram / email / webhook with their secrets and the single settings table. A public server never
 // loads the secret store (no key file, no SMTP or bot credentials of users) and has push + the in-app popup only.
 const P = isPublic ? null : { ...(await import('../core/db.ts')), ...(await import('../core/secrets.ts')) };
-const U = isPublic ? await import('../core/users.ts') : null;
 const configGet = <T>(k: string, f: T) => P!.configGet<T>(k, f), configSet = (k: string, v: unknown) => P!.configSet(k, v);
 const secretGet = (n: string) => (P ? P.secretGet(n) : null), secretSet = (n: string, v: string) => P!.secretSet(n, v), secretHas = (n: string) => !!P && P.secretHas(n), secretDel = (n: string) => P!.secretDel(n);
 
@@ -206,7 +205,7 @@ export async function sendPush(n: Notice): Promise<void> {
       d().prepare('UPDATE notify_push_subs SET last_ok = ? WHERE endpoint = ?').run(Date.now(), s.endpoint);
     } catch (e) {
       const code = (e as { statusCode?: number }).statusCode;
-      if (code === 404 || code === 410) { d().prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(s.endpoint); U?.releasePushEndpoint(s.endpoint, uid); errs.push('subscription expired (removed)') }
+      if (code === 404 || code === 410) { d().prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(s.endpoint); errs.push('subscription expired (removed)') }
       else errs.push(code ? `push service HTTP ${code}` : errText(e));
     }
   }));
@@ -226,8 +225,6 @@ route('POST', '/api/notify/push/subscribe', c => {
   if (isPublic) {
     const max = limits(uid).pushSubs, has = mine.prepare('SELECT 1 FROM notify_push_subs WHERE endpoint = ?').get(endpoint), n = (mine.prepare('SELECT COUNT(*) AS n FROM notify_push_subs').get() as { n: number }).n;
     if (!has && n >= max) throw tooMany('push devices', max);
-    const prev = U!.claimPushEndpoint(endpoint, uid);   // the same browser switching accounts: the previous account loses it
-    if (prev) { try { userDb(prev).prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(endpoint) } catch {} }
   }
   mine.prepare(`INSERT INTO notify_push_subs (endpoint, p256dh, auth, agent, created) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, agent = excluded.agent`).run(endpoint, p256dh, auth, agent, Date.now());
@@ -236,7 +233,6 @@ route('POST', '/api/notify/push/subscribe', c => {
 route('POST', '/api/notify/push/unsubscribe', c => {
   const endpoint = str(obj(c.body, 'body').endpoint, 'endpoint', 2000);
   c.db.prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(endpoint);
-  U?.releasePushEndpoint(endpoint, c.user.id);
   return { ok: true };
 });
 

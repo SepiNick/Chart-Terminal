@@ -56,6 +56,7 @@ export function assertPublicSafe(dataDir: string) {
     } catch { n = 1 }
     if (n) throw Error(`CT_MODE=public refuses to start: ${legacy} holds secrets or broker accounts. Use a clean CT_DATA_DIR`);
   }
+  if (!TRUST_PROXY && process.env.CT_NO_PROXY !== '1') throw Error('CT_MODE=public needs CT_TRUST_PROXY=1 (Caddy/nginx in front); without it every client looks like the proxy and the rate limits are shared. Set CT_NO_PROXY=1 only if clients really connect directly');
   const u = publicUrl();
   if (!u) throw Error('CT_MODE=public needs CT_PUBLIC_URL (e.g. https://charts.example.com)');
   if (u.protocol !== 'https:' && !(u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname))) throw Error('CT_PUBLIC_URL must be https (plain http is only allowed for localhost)');

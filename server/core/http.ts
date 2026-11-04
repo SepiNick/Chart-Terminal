@@ -27,7 +27,7 @@ export interface Ctx {
   readonly db: DatabaseSync;   // the caller's own database; there is no handle to anyone else's
 }
 type Handler = (c: Ctx) => unknown | Promise<unknown>;
-interface Route { method: string; path: string; re: RegExp; keys: string[]; h: Handler; public: boolean; raw: boolean; limit: number }
+interface Route { method: string; path: string; re: RegExp; keys: string[]; h: Handler; public: boolean; raw: boolean; limit: number | ((url: URL) => number) }
 const routes: Route[] = [];
 /** Every registered route (tests: isolation.test.ts fails on a route it has not classified). */
 export const routeTable = () => routes.map(r => ({ method: r.method, path: r.path, public: r.public }));
@@ -37,7 +37,7 @@ export const routeTable = () => routes.map(r => ({ method: r.method, path: r.pat
  * (sent as 200 JSON), `undefined` (204), or write to `c.res` themselves and return `RAW`.
  * opts.public: no session needed. opts.raw: body is a Buffer (uploads). opts.limit: max body bytes (default 2 MB, 256 KB in public mode).
  */
-export function route(method: string, path: string, h: Handler, opts: { public?: boolean; raw?: boolean; limit?: number } = {}) {
+export function route(method: string, path: string, h: Handler, opts: { public?: boolean; raw?: boolean; limit?: number | ((url: URL) => number) } = {}) {
   const keys: string[] = [];
   const re = new RegExp('^' + path.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([^/]+)' }) + '$');
   routes.push({ method, path, re, keys, h, public: !!opts.public, raw: !!opts.raw, limit: opts.limit ?? (isPublic ? 256 * 1024 : 2 * 1024 * 1024) });
@@ -69,7 +69,8 @@ const SECURITY_HEADERS: Record<string, string> = { 'x-content-type-options': 'no
 const CSP = "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://data-api.binance.vision wss://data-stream.binance.vision; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 function serveStatic(c: Ctx): boolean {
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return false;
-  const p = normalize(decodeURIComponent(c.url.pathname)).replace(/^([/\\])+/, '');
+  let p: string; try { p = normalize(decodeURIComponent(c.url.pathname)) } catch { throw new HttpError(400, 'Bad path') }
+  p = p.replace(/^([/\\])+/, '');
   if (p.includes('..')) return false;
   let file = join(DIST, p);
   const missing = !p || !existsSync(file) || statSync(file).isDirectory();
@@ -96,6 +97,9 @@ function take(key: string, rate: number, burst: number): number {
 }
 if (isPublic) setInterval(() => { const old = Date.now() - 120_000; for (const [k, b] of buckets) if (b.at < old) buckets.delete(k) }, 60_000).unref();
 const inflight = new Map<number, number>();
+// Bytes of request bodies being received right now (public mode): each upload reserves what it declares, or its route limit.
+const BUDGET = (Number(process.env.CT_BODY_BUDGET_MB) || 64) * 1024 * 1024;
+let inBytes = 0;
 const MUST_CHANGE_OK = new Set(['/api/auth/password', '/api/auth/logout']);
 const slow = (s: number, msg: string) => Object.assign(new HttpError(429, msg), { retryAfter: s });
 
@@ -140,27 +144,39 @@ export async function handle(req: IncomingMessage, res: ServerResponse, listener
     const m = url.pathname.match(r.re)!;
     r.keys.forEach((k, i) => (c.params[k] = decodeURIComponent(m[i + 1])));
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      const buf = await readBody(req, r.limit);
-      c.body = r.raw ? buf : buf.length ? JSON.parse(buf.toString('utf8')) : undefined;
+      const limit = typeof r.limit === 'function' ? r.limit(url) : r.limit;
+      let held = 0;
+      if (isPublic) {   // refuse by the declared size before reading a byte, and keep a global budget for bodies in flight
+        const declared = req.headers['content-length'] === undefined ? NaN : Number(req.headers['content-length']);
+        if (declared > limit) throw Object.assign(new HttpError(413, 'Body too large'), { closeConn: true });
+        held = Number.isFinite(declared) ? declared : limit;
+        if (inBytes + held > BUDGET) throw Object.assign(new HttpError(503, 'The server is busy receiving other uploads. Try again in a moment'), { retryAfter: 2, closeConn: true });
+        inBytes += held;
+      }
+      try {
+        const buf = await readBody(req, limit);
+        c.body = r.raw ? buf : buf.length ? JSON.parse(buf.toString('utf8')) : undefined;
+      } finally { inBytes -= held }
     }
     const out = await r.h(c);
     if (out === RAW) return;
     if (out === undefined) { res.writeHead(204, SECURITY_HEADERS).end(); return }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY_HEADERS }).end(JSON.stringify(out));
   } catch (e) {
-    const err = e as Error & { errcode?: number; code?: string; retryAfter?: number };
+    const err = e as Error & { errcode?: number; code?: string; retryAfter?: number; closeConn?: boolean };
     const full = err.errcode === 13;   // SQLITE_FULL: the user's file hit its size ceiling
-    const status = e instanceof HttpError ? e.status : e instanceof SyntaxError ? 400 : full ? 413 : isPublic ? 500 : 502;
+    const status = e instanceof HttpError ? e.status : e instanceof SyntaxError || e instanceof URIError ? 400 : full ? 413 : isPublic ? 500 : 502;
     // Public servers do not echo internal error text (paths, SQL); HttpErrors are written for users and pass through.
-    const msg = e instanceof HttpError || e instanceof SyntaxError || !isPublic ? err.message : full ? 'Your storage is full' : 'Internal error';
-    if (isPublic && !(e instanceof HttpError)) console.error(`[http] ${req.method} ${url.pathname}: ${String(err.message).replace(/\s+/g, ' ').slice(0, 300)}`);
+    const msg = e instanceof HttpError || e instanceof SyntaxError || e instanceof URIError || !isPublic ? err.message : full ? 'Your storage is full' : 'Internal error';
+    if (isPublic && !(e instanceof HttpError || e instanceof URIError || e instanceof SyntaxError)) console.error(`[http] ${req.method} ${url.pathname}: ${String(err.message).replace(/\s+/g, ' ').slice(0, 300)}`);
     const send = () => {
-      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json', ...(err.retryAfter ? { 'retry-after': String(err.retryAfter) } : {}), ...SECURITY_HEADERS }).end(JSON.stringify({ error: msg, ...(err.code === 'must_change' ? { code: 'must_change' } : {}) }));
+      if (!res.headersSent) res.writeHead(status, { 'content-type': 'application/json', ...(err.retryAfter ? { 'retry-after': String(err.retryAfter) } : {}), ...SECURITY_HEADERS }).end(JSON.stringify({ error: msg, ...(err.code === 'must_change' ? { code: 'must_change' } : {}), ...(e instanceof HttpError ? e.extra : {}) }));
       else res.end();
     };
     // After a 413 the rest of the body is still arriving (readBody drains it). Answer once it has, or the client gets a
     // connection reset instead of the 413; a client that keeps sending is cut off after 5 s.
-    if (status === 413 && !req.readableEnded) {
+    if (err.closeConn) { send(); req.resume(); setTimeout(() => req.destroy(), 2000).unref() }   // refused unread: do not wait for the rest of the body
+    else if (status === 413 && !req.readableEnded) {
       const t = setTimeout(() => { res.setHeader('connection', 'close'); send(); req.destroy() }, 5000);
       req.once('end', () => { clearTimeout(t); send() });
     } else send();

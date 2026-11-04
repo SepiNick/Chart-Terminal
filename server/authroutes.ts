@@ -79,7 +79,7 @@ if (!isPublic) {
     c.res.setHeader('set-cookie', clearCookie(c.secure));
   });
   route('POST', '/api/auth/password', async c => {
-    if (!await U.confirmPassword(c.user.id, body(c).current)) throw new HttpError(401, 'Current password is wrong');
+    if (!await U.confirmPassword(c.user.id, body(c).current, c.req)) throw new HttpError(401, 'Current password is wrong');
     const next = U.checkNewPassword(body(c).password, c.user.name);
     await U.setPassword(c.user.id, next);   // every session of this user ends, including this one
     closeClients(cl => cl.userId === c.user.id);
@@ -94,7 +94,7 @@ if (!isPublic) {
     return { ok: true, recoveryCodes: r.recoveryCodes };
   }, { public: true, limit: 4096 });
   route('POST', '/api/auth/recovery-codes', async c => {
-    if (!await U.confirmPassword(c.user.id, body(c).password)) throw new HttpError(401, 'Wrong password');
+    if (!await U.confirmPassword(c.user.id, body(c).password, c.req)) throw new HttpError(401, 'Wrong password');
     U.audit(c.user.id, clientIp(c.req), 'recovery codes renewed');
     return { recoveryCodes: U.newRecoveryCodes(c.user.id) };
   }, { limit: 4096 });
@@ -107,7 +107,7 @@ if (!isPublic) {
   // Administration needs the admin role AND the admin's password again (step-up). Everyone else sees a 404.
   const admin = async (c: Ctx) => {
     if (c.user.role !== 'admin') throw new HttpError(404, 'Not found');
-    if (!await U.confirmPassword(c.user.id, body(c).password)) throw new HttpError(401, 'Enter your password again to use admin tools');
+    if (!await U.confirmPassword(c.user.id, body(c).password, c.req)) throw new HttpError(401, 'Enter your password again to use admin tools');
   };
   route('POST', '/api/admin/invites', async c => {
     await admin(c);

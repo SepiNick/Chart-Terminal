@@ -148,6 +148,7 @@ test('WebSocket caps: sockets per user and message flood', async () => {
 });
 
 test('failed logins lock the (account, address) pair; the right password is refused while locked', async () => {
+  (await import('./core/db.ts')).db.exec('DELETE FROM login_attempts');   // earlier tests failed on purpose from the same address
   const bob = await signup(b, 'bob');
   void bob;
   const c = client(b.base);

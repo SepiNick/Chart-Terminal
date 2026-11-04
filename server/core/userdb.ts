@@ -23,7 +23,10 @@ export function userMigration(name: string, sql: string) {
 
 const DIR = join(DATA_DIR, 'users');
 const MAX_OPEN = 64, IDLE_MS = 5 * 60_000;
-const open = new Map<number, { d: DatabaseSync; used: number; migs: number }>();   // insertion order = least recently used first
+const open = new Map<number, { d: DatabaseSync; used: number; migs: number; checked: number }>();
+/** users.ts: the account is still there and not being deleted (null = gone). Checked at most every 2 s per open handle, so a deletion done by the CLI process reaches this one quickly. */
+let alive: (id: number) => boolean = () => true;
+export const setAliveCheck = (f: typeof alive) => { alive = f };   // insertion order = least recently used first
 const file = (id: number) => join(DIR, `${id}.db`);
 const closeQuiet = (d: DatabaseSync) => { try { d.close() } catch {} };
 
@@ -31,6 +34,7 @@ function openFile(id: number, create: boolean): DatabaseSync {
   if (!Number.isInteger(id) || id < 1) throw Error('no such user');
   if (!create && !existsSync(file(id))) throw Error('no such user');
   mkdirSync(DIR, { recursive: true });
+  if (create) for (const x of ['', '-wal', '-shm']) rmSync(file(id) + x, { force: true });   // a brand-new account never inherits a leftover file
   const d = new DatabaseSync(file(id));
   d.exec(PRAGMAS);
   d.exec('CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, at INTEGER NOT NULL)');
@@ -41,10 +45,14 @@ function openFile(id: number, create: boolean): DatabaseSync {
 function handle(id: number, create: boolean): DatabaseSync {
   let h = open.get(id);
   if (!h) {
-    h = { d: openFile(id, create), used: 0, migs: 0 };
+    if (!create && !alive(id)) throw Error('no such user');
+    h = { d: openFile(id, create), used: 0, migs: 0, checked: Date.now() };
     open.set(id, h);
     while (open.size > MAX_OPEN) { const [k, v] = open.entries().next().value!; closeQuiet(v.d); open.delete(k) }
-  } else { open.delete(id); open.set(id, h) }
+  } else {
+    if (Date.now() - h.checked > 2000) { h.checked = Date.now(); if (!alive(id)) { closeQuiet(h.d); open.delete(id); throw Error('no such user') } }
+    open.delete(id); open.set(id, h);
+  }
   while (h.migs < migs.length) { const m = migs[h.migs++]; runMigration(h.d, m.name, m.sql) }
   h.used = Date.now();
   return h.d;
@@ -58,7 +66,7 @@ export function userDb(id: number): DatabaseSync {
   return handle(id, false);
 }
 /** Create the file of a brand-new user (registration). */
-export function createUserDb(id: number): DatabaseSync { return isPublic ? handle(id, true) : db }
+export function createUserDb(id: number): DatabaseSync { if (isPublic) closeUserDb(id); return isPublic ? handle(id, true) : db }
 export function closeUserDb(id: number) { const h = open.get(id); if (h) { closeQuiet(h.d); open.delete(id) } }
 /** Delete the user's whole data (account deletion). */
 export function deleteUserDb(id: number) {
@@ -71,4 +79,5 @@ export function userDbBytes(id: number): number {
   try { const d = userDb(id); const p = (d.prepare('PRAGMA page_count').get() as { page_count: number }).page_count, s = (d.prepare('PRAGMA page_size').get() as { page_size: number }).page_size; return p * s } catch { return 0 }
 }
 
-if (isPublic) setInterval(() => { for (const [k, v] of open) if (Date.now() - v.used > IDLE_MS) { closeQuiet(v.d); open.delete(k) } }, 60_000).unref();
+// Every 2 s: close idle handles and the handles of accounts that were deleted from another process (the CLI), so their files can be removed.
+if (isPublic) setInterval(() => { for (const [k, v] of open) if (Date.now() - v.used > IDLE_MS || !alive(k)) { closeQuiet(v.d); open.delete(k) } }, 2000).unref();

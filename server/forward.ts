@@ -55,9 +55,9 @@ export function freshFills(fills: SimpleFill[], start: number | null, done: Set<
 
 /** Market order on the shared paper account at `px`; returns the error text or null. */
 export function mirror(sym: string, f: SimpleFill, qty: number, px: number, ts: number): string | null {
-  const a = stateGet<Account>('acct')?.value ?? newAccount();
+  const cur = stateGet<Account>('acct'), a = cur?.value ?? newAccount();
   const err = placeOrder(a, { sym, side: f.side, type: 'market', qty }, px, ts);
-  if (!err) stateSet('acct', a);
+  if (!err) stateSet('acct', a, undefined, undefined, cur?.rev ?? 0);   // compare-and-set on the revision we read
   return err;
 }
 

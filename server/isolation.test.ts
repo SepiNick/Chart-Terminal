@@ -134,21 +134,21 @@ test('features that do not exist on a public server answer 404; script and webho
   assert.equal((await sub('https://evil.example/x')).status, 400);
 });
 
-test('a push endpoint follows the account that subscribed last', async () => {
+test('the same push endpoint can belong to two accounts; neither can remove the row of the other', async () => {
   const ep = 'https://fcm.googleapis.com/fcm/send/shared-browser';
   const sub = { subscription: { endpoint: ep, keys: { p256dh: 'BPaaaa', auth: 'bbbb' } } };
   await A.c.json('POST', '/api/notify/push/subscribe', sub);
   await Bu.c.json('POST', '/api/notify/push/subscribe', sub);
   const n = async (c: typeof A.c) => (await c.json('GET', '/api/notify/settings')).body.push.subscriptions.filter((s: { endpoint: string }) => s.endpoint === ep).length;
+  assert.equal(await n(A.c), 1, 'B subscribing never removes A'); assert.equal(await n(Bu.c), 1);
+  await A.c.json('POST', '/api/notify/push/unsubscribe', { endpoint: ep });   // removes A's own row only
   assert.equal(await n(A.c), 0); assert.equal(await n(Bu.c), 1);
-  await A.c.json('POST', '/api/notify/push/unsubscribe', { endpoint: ep });   // no longer A's: no effect on B
-  assert.equal(await n(Bu.c), 1);
 });
 
 test('deleting A removes the file, the session and the share link; B is untouched', async () => {
   const f = join(b.dir, 'users', '1.db');
   assert.ok(existsSync(f));
-  b.U.removeUser('alice-a');
+  await b.U.removeUser('alice-a');
   assert.ok(!existsSync(f));
   assert.equal((await A.c.json('GET', '/api/state')).status, 401);
   assert.equal((await fetch(`${b.base}/s/${ids.snap}`)).status, 404);

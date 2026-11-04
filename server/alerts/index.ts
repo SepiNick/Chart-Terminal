@@ -188,18 +188,26 @@ function fire(a: Alert, st: E.EvalState, bars: Bar[], i: number, now: number, ou
   const auto = E.recordFire(st, bars[i].time, now, a.autoStop);
   if (a.frequency === 'once') a.active = false;
   if (auto) { a.active = false; a.stoppedReason = auto }
-  save(a); changed(uid);
+  // The new state and its log row are one transaction; people are told only after it committed, and the popup / log do not
+  // wait for the slowest channel (telegram, email, webhook): their results arrive later as 'alert.delivered'.
+  const d = userDb(uid);
+  let id = 0;
   const channels = [...new Set<Channel>(['popup', ...a.channels])], price = bars[i].close;
+  d.exec('BEGIN');
+  try {
+    save(a);
+    id = Number(d.prepare('INSERT INTO alert_log (alert_id, at, message, price, deliveries) VALUES (?, ?, ?, ?, ?)').run(a.id, now, message, price, '[]').lastInsertRowid);
+    if (id % 100 === 0) d.prepare('DELETE FROM alert_log WHERE id <= ?').run(id - keep);
+    d.exec('COMMIT');
+  } catch (e) { d.exec('ROLLBACK'); throw e }
+  changed(uid);
+  broadcastTo(uid, { type: 'alert.fired', log: { id, alertId: a.id, at: now, message, price, deliveries: [] } satisfies AlertLog });
   const webhook = a.webhook && channels.includes('webhook') ? { url: a.webhook.url, body: a.webhook.body ? E.render(a.webhook.body, { ...vars, message }) : message } : undefined;
   deps.notify({ userId: uid, title: `${a.name || a.sym} alert`, body: message, channels, sound: true, webhook, data: { alertId: a.id, sym: a.sym, tf: a.tf, price, url: `/?symbol=${encodeURIComponent(a.sym)}&tf=${encodeURIComponent(a.tf)}` } })
     .catch(e => [{ channel: 'popup' as Channel, ok: false, error: String((e as Error).message ?? e) }])
     .then(deliveries => {
-      const d = userDb(uid);   // fetched now: the handle may have been closed while the notice was in flight
-      const r = d.prepare('INSERT INTO alert_log (alert_id, at, message, price, deliveries) VALUES (?, ?, ?, ?, ?)').run(a.id, now, message, price, JSON.stringify(deliveries));
-      const id = Number(r.lastInsertRowid);
-      if (id % 100 === 0) d.prepare('DELETE FROM alert_log WHERE id <= ?').run(id - keep);
-      const log: AlertLog = { id, alertId: a.id, at: now, message, price, deliveries };
-      broadcastTo(uid, { type: 'alert.fired', log });
+      userDb(uid).prepare('UPDATE alert_log SET deliveries = ? WHERE id = ?').run(JSON.stringify(deliveries), id);   // fetched now: the handle may have been closed meanwhile
+      broadcastTo(uid, { type: 'alert.delivered', id, alertId: a.id, deliveries });
     })
     .catch(e => console.error(`[alerts] log ${a.id}: ${(e as Error).message}`));   // the account may have been deleted meanwhile
 }
@@ -261,7 +269,7 @@ export function importLog(body: unknown, uid = soleUser()): number {
   } catch (e) { d.exec('ROLLBACK'); throw e }
   return n;
 }
-route('POST', '/api/alerts/log/import', c => ({ added: importLog(c.body, c.user.id) }), { limit: 8 * 1024 * 1024 });
+route('POST', '/api/alerts/log/import', c => ({ added: importLog(c.body, c.user.id) }), { limit: isPublic ? 1024 * 1024 : 8 * 1024 * 1024 });
 route('PUT', '/api/alerts/:id', c => {
   const uid = c.user.id, old = get(uid, c.params.id);
   if (!c.body || typeof c.body !== 'object' || Array.isArray(c.body)) throw bad('Body must be an object');
@@ -280,7 +288,8 @@ route('DELETE', '/api/alerts/:id', c => {
 });
 
 /** An account was removed in this process: stop its alerts. */
-export function dropUserAlerts(uid: number) { regs.delete(uid); sync() }
+export function dropUserAlerts(uid: number) { regs.delete(uid); for (const k of [...states.keys()]) if (k.startsWith(uid + ':')) states.delete(k); sync() }
+U?.onRemoved(dropUserAlerts);
 
 if (isPublic) { for (const uid of U!.usersWithAlerts()) try { reg(uid) } catch (e) { console.error(`[alerts] user ${uid}: ${(e as Error).message}`) } }
 else reg(1);
