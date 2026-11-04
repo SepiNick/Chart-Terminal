@@ -11,14 +11,17 @@ export function baseUrl(raw?: string | null) {
   const s = (raw || process.env.CT_LLM_URL || DEFAULTS[0]).trim().replace(/\/+$/, '');
   let u: URL; try { u = new URL(s) } catch { throw bad('Model URL is not a URL') }
   if (!/^https?:$/.test(u.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname) || u.username || u.password) throw bad('Only a model server on this computer (127.0.0.1 / localhost) is allowed');
-  return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+  const path = u.pathname.replace(/\/+$/, ''), env = process.env.CT_LLM_URL ? new URL(process.env.CT_LLM_URL).port : '';
+  // Fixed ports and path: an override can't be used to probe other local services (databases, this server, dev tools).
+  if (path !== '/v1' || u.search || ![...DEFAULTS.map(d => new URL(d).port), env].includes(u.port)) throw bad('Model URL must be http://127.0.0.1:11434/v1 (Ollama), :1234/v1 (LM Studio) or the port in CT_LLM_URL');
+  return `${u.origin}${path}`;
 }
 async function call(url: string, init: RequestInit = {}, ms = 10_000) {
   let r: Response;
   try { r = await deps.fetch(url, { ...init, signal: AbortSignal.timeout(ms) }) }
   catch (e) { throw new HttpError(502, (e as Error).name === 'TimeoutError' ? 'The model took too long to answer' : 'No model server is running — start Ollama (ollama serve) or LM Studio\'s server') }
   const j = await r.json().catch(() => ({})) as Record<string, unknown>;
-  if (!r.ok) throw new HttpError(502, `Model server: ${String((j.error as { message?: string })?.message ?? j.error ?? r.status)}`);
+  if (!r.ok) throw new HttpError(502, `Model server answered with an error (${r.status})`);
   return j;
 }
 /** Which server answers and its models; tries the configured URL, then Ollama's and LM Studio's defaults. */

@@ -11,7 +11,7 @@ const L = await import('./llm.ts');
 test('model URL: loopback only', () => {
   assert.equal(L.baseUrl('http://127.0.0.1:11434/v1/'), 'http://127.0.0.1:11434/v1');
   assert.equal(L.baseUrl('http://localhost:1234/v1'), 'http://localhost:1234/v1');
-  for (const u of ['http://10.0.0.5:11434/v1', 'http://evil.com/v1', 'http://127.0.0.1.evil.com/v1', 'file:///etc/passwd', 'http://user:pw@127.0.0.1/v1', 'nonsense']) assert.throws(() => L.baseUrl(u), /computer|URL/, u);
+  for (const u of ['http://10.0.0.5:11434/v1', 'http://evil.com/v1', 'http://127.0.0.1.evil.com/v1', 'file:///etc/passwd', 'http://user:pw@127.0.0.1/v1', 'nonsense', 'http://127.0.0.1:8787/v1', 'http://127.0.0.1:1234/api/x', 'http://127.0.0.1:1234/v1?a=1']) assert.throws(() => L.baseUrl(u), /computer|URL|Model URL/, u);
 });
 test('status falls back across local servers; chat forwards and strips <think>', async () => {
   const seen: { url: string; body?: string }[] = [];
