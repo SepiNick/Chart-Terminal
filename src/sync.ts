@@ -26,7 +26,7 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   const r = await fetch(path, { method: init.method ?? (init.body === undefined ? 'GET' : 'POST'), headers, body: init.body === undefined ? undefined : blob ? init.body as Blob : JSON.stringify(init.body), credentials: 'same-origin', keepalive: init.keepalive });
   if (r.status === 204) return undefined as T;
   const j = await r.json().catch(() => ({ error: `Server error ${r.status}` }));
-  if (!r.ok) throw Object.assign(Error((j as { error?: string }).error ?? String(r.status)), { status: r.status });
+  if (!r.ok) throw Object.assign(Error((j as { error?: string }).error ?? String(r.status)), { status: r.status, data: j });
   return j as T;
 }
 
@@ -88,11 +88,12 @@ async function send(key: string, attempt: number) {
   let next = 400;
   try {
     if (value === undefined) { await api(`/api/state/${key}`, { method: 'DELETE' }); revs.delete(key) }
-    else revs.set(key, (await api<{ rev: number }>(`/api/state/${key}`, { method: 'PUT', body: { value } })).rev);
+    else revs.set(key, (await api<{ rev: number }>(`/api/state/${key}`, { method: 'PUT', body: { value, baseRev: revs.get(key) ?? 0 } })).rev);
     failing = false; attempt = 0;
   } catch (e) {
     const s = (e as { status?: number }).status;
-    if (s === 400 || s === 413) note(`Could not save "${key}" on the server: ${(e as Error).message}`);
+    if (s === 409) conflict(key, (e as { data?: { rev?: number; value?: unknown } }).data);
+    else if (s === 400 || s === 413) note(`Could not save "${key}" on the server: ${(e as Error).message}`);
     else {
       if (!pending.has(key)) pending.set(key, value);
       failing = true; next = Math.min(30_000, 1000 * 2 ** attempt++);
@@ -104,11 +105,23 @@ async function send(key: string, attempt: number) {
     status();
   }
 }
+/**
+ * Another device changed this key since we last saw it. Never overwrite it: take the server's version (which the server sent
+ * along), drop our queued edit for the key and tell the user. Edits made after the conflict are based on the new revision.
+ */
+export function conflict(key: string, server?: { rev?: number; value?: unknown }) {
+  if (!server || typeof server.rev !== 'number') return;
+  pending.delete(key);
+  revs.set(key, server.rev);
+  const json = JSON.stringify(server.value);
+  try { if (server.rev) localStorage.setItem('ct.' + key, json); else localStorage.removeItem('ct.' + key); memo.delete(key) } catch { memo.set(key, json) }
+  note(`"${key}" was changed on another device; that version was kept and your last edit here was not saved`, { label: 'Reload', run: () => location.reload() });
+}
 /** Send everything queued now (before logging out / leaving). keepalive lets small writes survive the page closing. */
 export async function flushNow(keepalive = false) {
   await Promise.allSettled([...pending].map(([key, value]) => {
     clearTimeout(timers.get(key)); timers.delete(key); pending.delete(key);
-    return value === undefined ? api(`/api/state/${key}`, { method: 'DELETE', keepalive }) : api(`/api/state/${key}`, { method: 'PUT', body: { value }, keepalive });
+    return value === undefined ? api(`/api/state/${key}`, { method: 'DELETE', keepalive }) : api(`/api/state/${key}`, { method: 'PUT', body: { value, baseRev: revs.get(key) ?? 0 }, keepalive }).then(r => { revs.set(key, (r as { rev: number }).rev); return r });
   }));
 }
 

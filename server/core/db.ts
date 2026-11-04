@@ -12,7 +12,7 @@ export const DATA_DIR = process.env.CT_DATA_DIR ?? join(dirname(fileURLToPath(im
 mkdirSync(DATA_DIR, { recursive: true });
 assertPublicSafe(DATA_DIR);
 
-export const PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA journal_size_limit = 33554432;';   // WAL file shrinks back to 32 MB after a checkpoint
+export const PRAGMAS = 'PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA journal_size_limit = 33554432; PRAGMA busy_timeout = 5000;';   // WAL file shrinks back to 32 MB after a checkpoint
 export const db = new DatabaseSync(isPublic ? join(DATA_DIR, 'users.db') : process.env.CT_DB ?? join(DATA_DIR, 'chart-terminal.db'));
 db.exec(PRAGMAS);
 db.exec('CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, at INTEGER NOT NULL)');

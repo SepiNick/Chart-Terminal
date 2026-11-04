@@ -42,7 +42,8 @@ route('GET', '/api/media/:id', c => {
   const r = c.db.prepare('SELECT type, data FROM media WHERE id = ?').get(c.params.id) as { type: string; data: Uint8Array } | undefined;
   if (!r) throw new HttpError(404, 'No such media');
   c.res.writeHead(200, {
-    'content-type': r.type, 'content-length': r.data.byteLength, 'cache-control': 'private, max-age=31536000, immutable',
+    'content-type': r.type, 'content-length': r.data.byteLength, 'cache-control': isPublic ? 'private, max-age=86400' : 'private, max-age=31536000, immutable',   // public: a shared PC must not keep a year-long copy after logout
+   
     'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'referrer-policy': 'no-referrer',
   }).end(r.data);
   return RAW;

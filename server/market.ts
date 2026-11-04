@@ -80,11 +80,15 @@ async function marketRoute(u: URL): Promise<unknown> {
 }
 
 // ---------- live candles: one upstream feed per (exchange, symbol, tf), fanned out to subscribers ----------
-interface Feed { subs: Set<WsClient>; stop: () => void }
+interface Feed { subs: Set<WsClient>; stop: () => void; kind: 'candles' | 'trades' | 'book' | 'fx' }
+/** Public mode: distinct upstream feeds the whole server may hold (CT_FEED_LIMIT_CANDLES / _TRADES / _BOOK / _FX). */
+const FEED_CAP = { candles: 300, trades: 60, book: 40, fx: 100 };
+const feedCap = (kind: Feed['kind']) => (isPublic ? Number(process.env['CT_FEED_LIMIT_' + kind.toUpperCase()]) || FEED_CAP[kind] : Infinity);
+const feedsOf = (kind: Feed['kind']) => { let n = 0; for (const f of feeds.values()) if (f.kind === kind) n++; return n };
 const feeds = new Map<string, Feed>();
 const keyOf = (e: string, s: string, tf: string) => `${e}|${s}|${tf}`;
 
-export function startFeed(exchange: string, symbol: string, tf: string, send: (b: Bar) => void): () => void {
+export function startFeed(exchange: string, symbol: string, tf: string, send: (b: Bar) => void, onFail?: () => void): () => void {
   const sec = tfSeconds(tf);
   let cur = -1, parts = new Map<number, Bar>();
   // Aggregate base-timeframe candles into the requested timeframe (weeks anchored to Monday, like data.ts).
@@ -110,7 +114,7 @@ export function startFeed(exchange: string, symbol: string, tf: string, send: (b
   let stop = () => {};
   cx.ohlcv(exchange, symbol, tf, undefined, 2).then(({ base }) => {
     stop = cx.watch(exchange, symbol, base, base === tf ? send : emitAgg);
-  }).catch(() => {});
+  }).catch(() => onFail?.());
   return () => stop();
 }
 
@@ -127,7 +131,17 @@ function capOk(c: WsClient, mine: Set<string>) {
   if (mine.size >= L.subsSocket || userSubs(c.userId) >= L.subsUser) { c.send({ type: 'error', code: 'feed_limit', msg: 'Too many chart subscriptions' }); return false }
   return true;
 }
-function onMarket(c: WsClient, m: Record<string, unknown>) {
+/** A feed that could not start is removed, and its subscribers are told, so the slot is free and a later subscribe can retry. */
+function failFeed(k: string, f: Feed) {
+  if (feeds.get(k) !== f) return;
+  feeds.delete(k);
+  for (const s of f.subs) { mineOf(s).delete(k); s.send({ type: 'error', code: 'feed_failed', msg: 'This market could not be subscribed' }) }
+  f.subs.clear(); f.stop();
+}
+/** Public mode: only symbols the exchange really lists may start an upstream feed (a made-up symbol would still cost a connection attempt). */
+async function listed(exchange: string, symbol: string) { return LOCAL.has(exchange) || (await cx.markets(exchange)).list.some(x => x.sym === symbol) }
+function onMarket(c: WsClient, m: Record<string, unknown>, checked = false) {
+  if (checked && c.ws.readyState !== 1) return;   // left while the market list was being checked
   const exchange = String(m.exchange ?? ''), symbol = String(m.symbol ?? '').toUpperCase(), tf = String(m.tf ?? ''), mine = mineOf(c);
   if (m.kind === 'trades' || m.kind === 'book') {
     // Order flow feeds share the same fan-out map, keyed by kind instead of timeframe.
@@ -136,8 +150,10 @@ function onMarket(c: WsClient, m: Record<string, unknown>) {
     if (m.op === 'unsub') return drop(c, k);
     if (mine.has(k) || !capOk(c, mine)) return;
     let f = feeds.get(k);
+    if (!f && isPublic && !checked) return void listed(exchange, symbol).then(ok => ok ? onMarket(c, m, true) : c.send({ type: 'error', code: 'unknown_symbol', msg: 'Unknown market' })).catch(() => c.send({ type: 'error', code: 'unknown_symbol', msg: 'Could not check the market' }));
+    if (!f && feedsOf(kind) >= feedCap(kind)) return void c.send({ type: 'error', code: 'feed_limit', msg: 'The server is at its limit of live feeds' });
     if (!f) {
-      const feed: Feed = { subs: new Set(), stop: () => {} };
+      const feed: Feed = { subs: new Set(), stop: () => {}, kind };
       const out = (data: unknown) => feed.subs.forEach(s => s.send({ kind, exchange, symbol, data }));
       feed.stop = kind === 'trades' ? cx.watchPrints(exchange, symbol, out) : cx.watchBook(exchange, symbol, out);
       feeds.set(k, (f = feed));
@@ -151,15 +167,18 @@ function onMarket(c: WsClient, m: Record<string, unknown>) {
   if (m.op === 'unsub') return drop(c, k);
   if (mine.has(k) || !capOk(c, mine)) return;
   let f = feeds.get(k);
+  if (!f && isPublic && !checked) return void listed(exchange, symbol).then(ok => ok ? onMarket(c, m, true) : c.send({ type: 'error', code: 'unknown_symbol', msg: 'Unknown market' })).catch(() => c.send({ type: 'error', code: 'unknown_symbol', msg: 'Could not check the market' }));
+  const kind = exchange === 'fx' ? 'fx' : 'candles';
+  if (!f && feedsOf(kind) >= feedCap(kind)) return void c.send({ type: 'error', code: 'feed_limit', msg: 'The server is at its limit of live feeds' });
   if (!f) {
-    const feed: Feed = { subs: new Set(), stop: () => {} };
-    feed.stop = startFeed(exchange, symbol, tf, bar => feed.subs.forEach(s => s.send({ exchange, symbol, tf, bar })));
+    const feed: Feed = { subs: new Set(), stop: () => {}, kind };
+    feed.stop = startFeed(exchange, symbol, tf, bar => feed.subs.forEach(s => s.send({ exchange, symbol, tf, bar })), () => failFeed(k, feed));
     feeds.set(k, (f = feed));
   }
   f.subs.add(c); mine.add(k);
 }
-onWs('sub', onMarket);
-onWs('unsub', onMarket);
+onWs('sub', (c, m) => onMarket(c, m));
+onWs('unsub', (c, m) => onMarket(c, m));
 onWsClose(c => [...mineOf(c)].forEach(k => drop(c, k)));
 
 route('GET', '/api/health', () => ({ ok: true, exchanges: cx.exchangeIds().length }), { public: true });

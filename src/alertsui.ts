@@ -177,7 +177,9 @@ let logTimer = 0;
 export function initServerAlerts(h: AlertsHost) {
   host = h;
   onServer('alerts', m => { if (Array.isArray(m.alerts)) { alerts = m.alerts as Alert[]; host.changed(); renderAlertsPanel() } });
-  onServer('alert.fired', () => { clearTimeout(logTimer); logTimer = window.setTimeout(loadLog, 300) });
+  const reloadLog = () => { clearTimeout(logTimer); logTimer = window.setTimeout(loadLog, 300) };
+  onServer('alert.fired', reloadLog);
+  onServer('alert.delivered', reloadLog);   // channel results arrive after the alert itself
   onServer('notify', m => {
     const title = String(m.title ?? 'Alert'), body = String(m.body ?? '');
     toast(`⏰ ${title}${body ? ' — ' + body : ''}`, host.toastMs());

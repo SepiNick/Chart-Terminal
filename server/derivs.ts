@@ -8,6 +8,7 @@
 // after the last poll. Exchanges that geo-block this machine fail with a clear message (the client shows it in the pane).
 import { ccxtLib } from './ccxtlib.ts';
 import { route, bad, HttpError } from './core/http.ts';
+import { isPublic } from './core/mode.ts';
 import * as cx from './ccxt.ts';
 import { normFunding, normFundingHist, normLiq, normOI, normRatio, type Liq } from '../src/derivs/model.ts';
 
@@ -71,6 +72,8 @@ const need = (x: Ex, m: string, ex: string) => { if (!x.has[m]) throw bad(`${ex}
 interface LiqFeed { list: Liq[]; seen: number; alive: boolean; err?: string }
 const liqFeeds = new Map<string, LiqFeed>();
 const KEEP = 500, IDLE = 120_000;
+/** Public mode: every liquidation feed is a live exchange connection, so the server holds at most CT_FEED_LIMIT_LIQ of them. */
+const LIQ_CAP = isPublic ? Number(process.env.CT_FEED_LIMIT_LIQ) || 40 : Infinity;
 function pushLiqs(f: LiqFeed, ex: string, rows: unknown[], contractSize = 1) {
   const have = new Set(f.list.slice(-200).map(l => `${l.t}|${l.px}|${l.qty}`));
   for (const r of rows) {
@@ -86,6 +89,7 @@ function liqFeed(ex: string, sym: string): LiqFeed {
   const k = `${ex}|${sym}`;
   let f = liqFeeds.get(k);
   if (f) { f.seen = Date.now(); return f }
+  if (liqFeeds.size >= LIQ_CAP) throw new HttpError(503, 'The server is already following as many liquidation feeds as it can. Try again later');
   const feed: LiqFeed = { list: [], seen: Date.now(), alive: true };
   liqFeeds.set(k, (f = feed));
   (async () => {

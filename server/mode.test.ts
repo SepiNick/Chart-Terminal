@@ -12,7 +12,7 @@ const run = (env: Record<string, string>, code = "await import('./core/db.ts')")
   for (const k of Object.keys(clean)) if (k.startsWith('CT_')) delete clean[k];
   return spawnSync(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', code], { cwd: import.meta.dirname, env: { ...clean, ...env }, encoding: 'utf8' });
 };
-const pub = (dir: string, extra: Record<string, string> = {}) => ({ CT_MODE: 'public', CT_DATA_DIR: dir, CT_PUBLIC_URL: 'https://charts.example.com', CT_ALLOWED_HOSTS: 'charts.example.com', ...extra });
+const pub = (dir: string, extra: Record<string, string> = {}) => ({ CT_MODE: 'public', CT_DATA_DIR: dir, CT_PUBLIC_URL: 'https://charts.example.com', CT_ALLOWED_HOSTS: 'charts.example.com', CT_TRUST_PROXY: '1', ...extra });
 const tmp = () => mkdtempSync(join(tmpdir(), 'ct-mode-'));
 
 test('private is the default; an unknown CT_MODE is refused', () => {
@@ -29,6 +29,8 @@ test('public refuses to start unless it is safe', () => {
   fails({ ...pub(tmp()), CT_PUBLIC_URL: '' }, /CT_PUBLIC_URL/);
   fails(pub(tmp(), { CT_PUBLIC_URL: 'http://charts.example.com' }), /https/);
   fails(pub(tmp(), { CT_ALLOWED_HOSTS: '' }), /CT_ALLOWED_HOSTS/);
+  fails(pub(tmp(), { CT_TRUST_PROXY: '' }), /CT_TRUST_PROXY/);
+  assert.equal(run(pub(tmp(), { CT_TRUST_PROXY: '', CT_NO_PROXY: '1' })).status, 0, 'explicit opt-out');
   const legacy = tmp(), old = new DatabaseSync(join(legacy, 'chart-terminal.db'));
   old.exec("CREATE TABLE broker_accounts (id TEXT); INSERT INTO broker_accounts VALUES ('a')"); old.close();
   fails(pub(legacy), /secrets or broker accounts/);

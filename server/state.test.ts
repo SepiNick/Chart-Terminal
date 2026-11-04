@@ -131,3 +131,13 @@ test('share links: public snapshot image, logged-in layout copy', async () => {
   assert.equal((await call('DELETE', `/api/share/${snap.id}`)).status, 204);
   assert.equal((await fetch(base + snap.url)).status, 404);
 });
+
+test('private server: compare-and-set with baseRev / If-Match, stale writers get 409 and the current value', async () => {
+  assert.deepEqual(await (await call('PUT', '/api/state/cas', { value: 'a', baseRev: 0 })).json(), { rev: 1 });
+  const stale = await call('PUT', '/api/state/cas', { value: 'b', baseRev: 0 });
+  assert.equal(stale.status, 409);
+  const j = await stale.json() as { rev: number; value: string };
+  assert.equal(j.rev, 1); assert.equal(j.value, 'a');
+  assert.equal((await call('PUT', '/api/state/cas', { value: 'c' }, { 'if-match': '1' })).status, 200);
+  assert.equal((await call('PUT', '/api/state/cas', { value: 'd' })).status, 200, 'no precondition: last write wins as before');
+});

@@ -19,7 +19,7 @@ const newId = () => randomBytes(16).toString('base64url');
 function put(c: Ctx, kind: 'snap' | 'layout', type: string, data: Uint8Array | string) {
   const L = limits(c.user.id), size = typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength;
   if (Number.isFinite(L.shares) || Number.isFinite(L.shareMb)) {
-    const u = c.db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(length(data)), 0) AS b FROM shares').get() as { n: number; b: number };
+    const u = c.db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(length(CAST(data AS BLOB))), 0) AS b FROM shares').get() as { n: number; b: number };
     if (u.n >= L.shares) throw tooMany('share links', L.shares);
     if (u.b + size > bytes(L.shareMb)) throw new HttpError(413, `Your share links would exceed ${L.shareMb} MB`);
   }

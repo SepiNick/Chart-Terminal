@@ -11,9 +11,14 @@ export const deps = { fetch: (url: string) => fetch(url, { signal: AbortSignal.t
 
 let last = 0, chain: Promise<unknown> = Promise.resolve();
 /** One SEC request at a time, ≥ `gap` ms apart. */
+let waiting = 0;
+const MAX_QUEUE = process.env.CT_MODE === 'public' ? 40 : 1000;   // requests waiting for their turn; beyond this callers are told to come back
 function polite<T>(f: () => Promise<T>): Promise<T> {
+  if (waiting >= MAX_QUEUE) return Promise.reject(new HttpError(503, 'Too many SEC requests are waiting. Try again in a moment'));
+  waiting++;
   const run = chain.then(async () => { const w = last + deps.gap - deps.now(); if (w > 0) await new Promise(r => setTimeout(r, w)); last = deps.now(); return f() });
   chain = run.catch(() => undefined);
+  void chain.then(() => { waiting-- });
   return run;
 }
 const cache = new Map<string, { at: number; data: unknown }>();

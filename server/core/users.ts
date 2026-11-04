@@ -3,11 +3,11 @@
 // three-layer login throttle and an audit trail live in the same central database.
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
-import { db, migration } from './db.ts';
+import { configGet, configSet, db, migration } from './db.ts';
 import { HttpError, bad } from './errors.ts';
 import { REGISTRATION, clientIp } from './mode.ts';
 import { setOverrides, type Limits } from './quota.ts';
-import { createUserDb, deleteUserDb, userDbBytes, type User } from './userdb.ts';
+import { createUserDb, deleteUserDb, setAliveCheck, userDbBytes, type User } from './userdb.ts';
 
 migration('users/1', `
   CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, pw TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user',
@@ -68,12 +68,22 @@ export function checkNewPassword(pw: unknown, name: string): string {
 }
 
 // ---------- rows ----------
-interface Row { id: number; name: string; pw: string; role: 'admin' | 'user'; status: 'active' | 'disabled'; must_change: number; created: number; last_login: number | null; quota: string | null }
+interface Row { id: number; name: string; pw: string; role: 'admin' | 'user'; status: 'active' | 'disabled' | 'deleting'; must_change: number; created: number; last_login: number | null; quota: string | null }
 const byName = (n: string) => db.prepare('SELECT * FROM users WHERE name = ?').get(n) as Row | undefined;
 const byId = (id: number) => db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Row | undefined;
 const toUser = (r: Row): User => ({ id: r.id, name: r.name, role: r.role, ...(r.must_change ? { mustChange: true } : {}) });
 export const userByName = (n: string) => { const r = byName(n.toLowerCase()); return r && toUser(r) };
-export const userExists = (id: number) => !!byId(id);
+export const userExists = (id: number) => { const r = byId(id); return !!r && r.status !== 'deleting' };
+setAliveCheck(userExists);
+/** Ids only go up: a deleted account's id (and so its file name) is never given to anyone else. */
+function nextUserId(): number {
+  const id = Math.max(configGet<number>('users.next_id', 0), (db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM users').get() as { m: number }).m) + 1;
+  configSet('users.next_id', id);
+  return id;
+}
+const removed: ((id: number) => void)[] = [];
+/** Called (in this process) after an account was deleted. */
+export const onRemoved = (f: (id: number) => void) => { removed.push(f) };
 
 let activeAt = 0, activeSet = new Set<number>();
 /** Enabled accounts (30 s cache: the CLI runs in another process). */
@@ -101,21 +111,43 @@ export function audit(userId: number | null, ip: string, event: string) {
 // ---------- throttling ----------
 type Att = { n: number; until: number; at: number };
 const att = (key: string) => db.prepare('SELECT n, until, at FROM login_attempts WHERE key = ?').get(key) as Att | undefined;
+/** IPv6 clients get a whole /64 to themselves, so one machine cannot dodge a limit by rotating addresses inside it. */
+export function ipKey(ip: string): string {
+  ip = ip.toLowerCase().replace(/^::ffff:/, '');
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.split('::'), h = head ? head.split(':') : [], t = tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h;
+  return groups.slice(0, 4).map(g => g.replace(/^0+(?=.)/, '')).join(':') + '::/64';
+}
+/** Beyond 20 failures an hour an account answers one second slower per extra failure (up to 30 s), whoever is asking. */
+export function accountDelayMs(name: string): number {
+  const a = att('acct:' + name);
+  return a && Date.now() - a.at < 3600_000 ? Math.min(30, Math.max(0, a.n - 20)) * 1000 : 0;
+}
 function bump(key: string, windowMs: number, threshold: number, lockMs: number) {
   const now = Date.now(), r = att(key), n = (r && now - r.at < windowMs ? r.n : 0) + 1;
   const until = n >= threshold ? now + Math.min(3600_000, lockMs * 2 ** Math.min(n - threshold, 20)) : 0;
   db.prepare('INSERT INTO login_attempts (key, n, until, at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET n = excluded.n, until = excluded.until, at = excluded.at').run(key, n, until, now);
 }
-/** Throws 429 while this IP or this (account, IP) pair is locked; returns the per-account slowdown in ms. */
-function throttleCheck(ip: string, name: string): number {
-  const now = Date.now();
+function unbump(key: string, threshold: number) {
+  const r = att(key); if (!r) return;
+  const n = Math.max(0, r.n - 1);
+  db.prepare('UPDATE login_attempts SET n = ?, until = ? WHERE key = ?').run(n, n < threshold ? 0 : r.until, key);
+}
+/**
+ * Every password check (login, recovery, password change, admin step-up) takes a slot here BEFORE it runs scrypt: the
+ * attempt is counted at once, so a burst of parallel guesses is cut off by the lock after a handful, not after they all finish.
+ * Throws 429 while this address (/64 for IPv6) or this (account, address) pair is locked. `delay` slows an account that
+ * is being guessed from many addresses (never a lock-out of the owner). `success()` gives the slot back.
+ */
+function reserve(ipRaw: string, name: string): { delay: number; success: () => void } {
+  const now = Date.now(), ip = ipKey(ipRaw);
   const until = Math.max(att('ip:' + ip)?.until ?? 0, att(`pair:${name}|${ip}`)?.until ?? 0);
   if (until > now) throw Object.assign(new HttpError(429, `Too many attempts. Try again in ${Math.ceil((until - now) / 1000)} s`), { retryAfter: Math.ceil((until - now) / 1000) });
-  const a = att('acct:' + name);
-  return a && now - a.at < 3600_000 ? Math.min(10, Math.max(0, a.n - 20)) * 1000 : 0;   // account-wide: slow down, never lock out the owner
+  const delay = accountDelayMs(name);
+  bump('ip:' + ip, 600_000, 10, 60_000); bump(`pair:${name}|${ip}`, 3600_000, 5, 60_000); bump('acct:' + name, 3600_000, Infinity, 0);
+  return { delay, success: () => { db.prepare('DELETE FROM login_attempts WHERE key IN (?, ?)').run(`pair:${name}|${ip}`, 'acct:' + name); unbump('ip:' + ip, 10) } };   // the address counter only gives back this attempt
 }
-const failed = (ip: string, name: string) => { bump('ip:' + ip, 600_000, 10, 60_000); bump(`pair:${name}|${ip}`, 3600_000, 5, 60_000); bump('acct:' + name, 3600_000, Infinity, 0) };
-const succeeded = (name: string, ip: string) => { db.prepare('DELETE FROM login_attempts WHERE key IN (?, ?)').run(`pair:${name}|${ip}`, 'acct:' + name) };   // never the IP counter: a login of your own must not reset guessing elsewhere
 /** Fixed-window counter for things that are not logins (registrations). */
 function allow(key: string, max: number, windowMs: number): boolean {
   const now = Date.now(), r = att(key), live = !!r && now - r.at < windowMs, n = live ? r!.n : 0;   // here `at` is the window start
@@ -174,6 +206,9 @@ export function newRecoveryCodes(userId: number): string[] {
 
 // ---------- registration, login, recovery ----------
 const RESERVED = new Set(['admin', 'administrator', 'root', 'system', 'support', 'owner', 'null', 'undefined', 'api', 'www', 'anonymous']);
+/** Names that could pass for staff: strip separators and trailing digits, then undo common digit/letter swaps (adm1n, supp0rt, r00t, admin_2). */
+const lookalike = (n: string) => n.replace(/[_.-]+/g, '').replace(/\d+$/, '').replace(/0/g, 'o').replace(/[1!]/g, 'i').replace(/3/g, 'e').replace(/4/g, 'a').replace(/5/g, 's').replace(/7/g, 't').replace(/rn/g, 'm');
+const reserved = (n: string) => { const l = lookalike(n); return !!n && (RESERVED.has(n) || RESERVED.has(l) || RESERVED.has(l.replace(/i/g, 'l')) || [...RESERVED].some(r => r.length >= 5 && l.startsWith(r))) };
 export function checkName(n: unknown): string {
   const name = typeof n === 'string' ? n.trim().toLowerCase() : '';
   if (!/^[a-z0-9_.-]{3,32}$/.test(name)) throw bad('Username: 3 to 32 characters, letters, digits, . _ -');
@@ -183,11 +218,11 @@ const adminName = () => (process.env.CT_ADMIN ?? '').trim().toLowerCase();
 
 export async function register(b: { name?: unknown; password?: unknown; invite?: unknown }, req: IncomingMessage): Promise<{ user: User; recoveryCodes: string[] }> {
   if (REGISTRATION === 'closed') throw new HttpError(403, 'Registration is closed on this server');
-  const ip = clientIp(req), name = checkName(b.name), pw = checkNewPassword(b.password, name), invite = typeof b.invite === 'string' ? b.invite.slice(0, 64) : '';
+  const ip = ipKey(clientIp(req)), name = checkName(b.name), pw = checkNewPassword(b.password, name), invite = typeof b.invite === 'string' ? b.invite.slice(0, 64) : '';
   if (!allow('reg:' + ip, Number(process.env.CT_REG_PER_HOUR) || (REGISTRATION === 'open' ? 3 : 10), 3600_000)) throw new HttpError(429, 'Too many sign-ups from this address. Try again later');
   if (REGISTRATION === 'open' && !allow('reg:day', Number(process.env.CT_OPEN_REG_PER_DAY) || 50, 86400_000)) throw new HttpError(429, 'Sign-ups are paused for today');
   if (REGISTRATION === 'invite' && !(invite && inviteOk(invite))) throw new HttpError(403, 'Invalid or expired invite code');
-  if (RESERVED.has(name) || name === adminName()) throw new HttpError(409, 'That username is taken');
+  if (reserved(name) || (adminName() && lookalike(name) === lookalike(adminName()))) throw new HttpError(409, 'That username is taken');
   if (byName(name)) throw new HttpError(409, 'That username is taken');
   const hash = await hashPassword(pw);
   // Everything below is synchronous: the invite is spent and the account created in one step, or neither.
@@ -195,8 +230,8 @@ export async function register(b: { name?: unknown; password?: unknown; invite?:
   let id = 0;
   try {
     if (REGISTRATION === 'invite' && !takeInvite(invite)) throw new HttpError(403, 'Invalid or expired invite code');
-    const r = db.prepare("INSERT INTO users (name, pw, role, created, invited_by) VALUES (?, ?, 'user', ?, (SELECT created_by FROM invites WHERE code_hash = ?))").run(name, hash, Date.now(), sha(invite));
-    id = Number(r.lastInsertRowid);
+    id = nextUserId();
+    db.prepare("INSERT INTO users (id, name, pw, role, created, invited_by) VALUES (?, ?, ?, 'user', ?, (SELECT created_by FROM invites WHERE code_hash = ?))").run(id, name, hash, Date.now(), sha(invite));
     createUserDb(id);
     const recoveryCodes = newRecoveryCodes(id);
     db.exec('COMMIT');
@@ -212,22 +247,25 @@ export async function register(b: { name?: unknown; password?: unknown; invite?:
 
 export async function login(b: { name?: unknown; password?: unknown }, req: IncomingMessage): Promise<User> {
   const ip = clientIp(req), name = typeof b.name === 'string' ? b.name.trim().toLowerCase().slice(0, 64) : '', pw = typeof b.password === 'string' ? b.password.slice(0, 1000) : '';
-  const delay = throttleCheck(ip, name);
-  if (delay) await new Promise(r => setTimeout(r, delay));
+  const slot = reserve(ip, name);
+  if (slot.delay) await new Promise(r => setTimeout(r, slot.delay));
   const row = byName(name);
   const ok = row ? await verifyPassword(row.pw, pw) : (await verifyPassword(await DUMMY, pw), false);
-  if (!ok || !row) { failed(ip, name); audit(row?.id ?? null, ip, 'login fail'); throw new HttpError(401, UNIFORM_LOGIN_ERROR) }
+  if (!ok || !row) { audit(row?.id ?? null, ip, 'login fail'); throw new HttpError(401, UNIFORM_LOGIN_ERROR) }
   if (row.status !== 'active') { audit(row.id, ip, 'login disabled'); throw new HttpError(403, 'This account is disabled') }   // only someone holding the right password learns this
-  succeeded(name, ip);
+  slot.success();
   db.prepare('UPDATE users SET last_login = ? WHERE id = ?').run(Date.now(), row.id);
   if (outdated(row.pw)) db.prepare('UPDATE users SET pw = ? WHERE id = ?').run(await hashPassword(pw), row.id);
   audit(row.id, ip, 'login');
   return toUser(row);
 }
 /** Verify the logged-in user's own password (password change, admin step-up). */
-export async function confirmPassword(userId: number, pw: unknown): Promise<boolean> {
-  const row = byId(userId);
-  return !!row && typeof pw === 'string' && await verifyPassword(row.pw, pw.slice(0, 1000));
+export async function confirmPassword(userId: number, pw: unknown, req: IncomingMessage): Promise<boolean> {
+  const slot = reserve(clientIp(req), 'uid:' + userId), row = byId(userId);   // same throttle as login, keyed on account + address
+  if (slot.delay) await new Promise(r => setTimeout(r, slot.delay));
+  const ok = !!row && typeof pw === 'string' && await verifyPassword(row.pw, pw.slice(0, 1000));
+  if (ok) slot.success();
+  return ok;
 }
 export async function setPassword(userId: number, pw: string, o: { mustChange?: boolean } = {}) {
   const hash = await hashPassword(pw);
@@ -237,13 +275,13 @@ export async function setPassword(userId: number, pw: string, o: { mustChange?: 
 /** Reset with a recovery code. Same throttle as login; an unknown name costs the same work and gets the same answer. */
 export async function recover(b: { name?: unknown; code?: unknown; newPassword?: unknown }, req: IncomingMessage): Promise<{ user: User; recoveryCodes: string[] }> {
   const ip = clientIp(req), name = typeof b.name === 'string' ? b.name.trim().toLowerCase().slice(0, 64) : '';
-  const delay = throttleCheck(ip, name);
-  if (delay) await new Promise(r => setTimeout(r, delay));
+  const slot = reserve(ip, name);
+  if (slot.delay) await new Promise(r => setTimeout(r, slot.delay));
   const pw = checkNewPassword(b.newPassword, name), hash = await hashPassword(pw);
   const row = byName(name), code = typeof b.code === 'string' ? b.code.slice(0, 64) : '';
   const ok = !!row && row.status === 'active' && db.prepare('UPDATE recovery_codes SET used = 1 WHERE user_id = ? AND code_hash = ? AND used = 0').run(row.id, codeKey(code)).changes === 1;
-  if (!ok || !row) { failed(ip, name); audit(row?.id ?? null, ip, 'recover fail'); throw new HttpError(401, 'Wrong username or recovery code') }
-  succeeded(name, ip);
+  if (!ok || !row) { audit(row?.id ?? null, ip, 'recover fail'); throw new HttpError(401, 'Wrong username or recovery code') }
+  slot.success();
   db.prepare('UPDATE users SET pw = ?, must_change = 0 WHERE id = ?').run(hash, row.id);
   revokeUserSessions(row.id);
   audit(row.id, ip, 'recover');
@@ -255,10 +293,11 @@ const tempPassword = () => randomBytes(12).toString('base64url');
 export async function createAdmin(name: string): Promise<string> {
   name = checkName(name);
   if (byName(name)) throw bad('That user exists already');
-  const pw = tempPassword(), r = db.prepare("INSERT INTO users (name, pw, role, must_change, created) VALUES (?, ?, 'admin', 1, ?)").run(name, await hashPassword(pw), Date.now());
-  createUserDb(Number(r.lastInsertRowid));
-  newRecoveryCodes(Number(r.lastInsertRowid));
-  audit(Number(r.lastInsertRowid), 'cli', 'create admin');
+  const pw = tempPassword(), hash = await hashPassword(pw), id = nextUserId();
+  db.prepare("INSERT INTO users (id, name, pw, role, must_change, created) VALUES (?, ?, ?, 'admin', 1, ?)").run(id, name, hash, Date.now());
+  createUserDb(id);
+  newRecoveryCodes(id);
+  audit(id, 'cli', 'create admin');
   return pw;
 }
 /** CT_ADMIN=<name>: on the first start without that user, create it with a one-time password (printed once). Never by a race on /register. */
@@ -282,24 +321,27 @@ export function setStatus(name: string, status: 'active' | 'disabled') {
   activeAt = 0;
   audit(row.id, 'cli', status === 'disabled' ? 'disable' : 'enable');
 }
-export function removeUser(name: string): number {
+/**
+ * Delete an account and all its data. The row is marked 'deleting' first (sessions end, every process drops its handle
+ * within ~2 s), then the files go, and only then the row. If the files cannot be removed this throws and the account
+ * stays disabled; run it again.
+ */
+export async function removeUser(name: string): Promise<number> {
   const row = byName(name.toLowerCase()); if (!row) throw new HttpError(404, 'No such user');
-  db.prepare('DELETE FROM users WHERE id = ?').run(row.id);   // sessions, recovery codes, push endpoints and share index cascade
-  deleteUserDb(row.id);
-  activeAt = 0;
+  db.prepare("UPDATE users SET status = 'deleting' WHERE id = ?").run(row.id);
+  revokeUserSessions(row.id); activeAt = 0; qCache.delete(row.id);
+  for (let i = 0; ; i++) {
+    try { deleteUserDb(row.id); break }
+    catch (e) { if (i >= 20) throw Error(`Could not remove the data of user ${row.id} (${(e as Error).message}); the account is left disabled. Stop the server or run this again`); await new Promise(r => setTimeout(r, 500)) }
+  }
+  db.prepare('DELETE FROM users WHERE id = ?').run(row.id);   // sessions, recovery codes and the share index cascade
   audit(null, 'cli', `delete user ${row.id}`);
+  for (const f of removed) f(row.id);
   return row.id;
 }
 export const listUsers = () => (db.prepare('SELECT id, name, role, status, created, last_login FROM users ORDER BY id').all() as { id: number }[]).map(u => ({ ...u, bytes: userDbBytes(u.id) }));
 
-// ---------- central indexes (push endpoints, public share links) ----------
-/** Give a push endpoint to `uid`; returns the user that had it before, if any (the caller removes it from that user's file). */
-export function claimPushEndpoint(endpoint: string, uid: number): number | null {
-  const prev = (db.prepare('SELECT user_id FROM push_endpoints WHERE endpoint = ?').get(endpoint) as { user_id: number } | undefined)?.user_id ?? null;
-  db.prepare('INSERT INTO push_endpoints (endpoint, user_id) VALUES (?, ?) ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id').run(endpoint, uid);
-  return prev !== uid ? prev : null;
-}
-export const releasePushEndpoint = (endpoint: string, uid: number) => { db.prepare('DELETE FROM push_endpoints WHERE endpoint = ? AND user_id = ?').run(endpoint, uid) };
+// ---------- central index (public share links) ----------
 export const indexShare = (id: string, uid: number) => { db.prepare('INSERT INTO share_index (id, user_id) VALUES (?, ?)').run(id, uid) };
 export const unindexShare = (id: string) => { db.prepare('DELETE FROM share_index WHERE id = ?').run(id) };
 export const shareOwner = (id: string) => (db.prepare('SELECT user_id FROM share_index WHERE id = ?').get(id) as { user_id: number } | undefined)?.user_id ?? null;
@@ -308,5 +350,5 @@ setInterval(() => {
   const now = Date.now();
   db.prepare('DELETE FROM sessions WHERE expires < ? OR last_seen < ?').run(now, now - IDLE_MS);
   db.prepare('DELETE FROM invites WHERE expires < ? OR uses_left <= 0').run(now - 86400_000);
-  db.prepare('DELETE FROM login_attempts WHERE until < ? AND at < ?').run(now, now - 86400_000);
+  db.prepare("DELETE FROM login_attempts WHERE until < ? AND ((key LIKE 'reg:%' AND at < ?) OR (key NOT LIKE 'reg:%' AND at < ?))").run(now, now - 86400_000, now - 3600_000);
 }, 600_000).unref();

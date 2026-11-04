@@ -5,6 +5,7 @@
 import { soleUser, userDb, userMigration } from './core/userdb.ts';
 import { HttpError, bad, broadcastTo, onWs, onWsClose, route, type Ctx, type WsClient } from './core/http.ts';
 import { bytes, limits, tooBig, tooMany } from './core/quota.ts';
+import { isPublic } from './core/mode.ts';
 import './media.ts';
 
 userMigration('state/1', `CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL, rev INTEGER NOT NULL, updated INTEGER NOT NULL)`);
@@ -21,19 +22,24 @@ function checkQuota(uid: number, key: string, size: number) {
   const L = limits(uid), cap = key === 'journal' ? L.journalKeyMb : L.stateKeyMb;
   if (size > bytes(cap)) throw tooBig(`"${key}"`, cap);
   if (!Number.isFinite(L.stateKeys) && !Number.isFinite(L.stateMb)) return;
-  const d = userDb(uid), u = d.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(length(value)), 0) AS b FROM state').get() as { n: number; b: number };
-  const old = d.prepare('SELECT length(value) AS l FROM state WHERE key = ?').get(key) as { l: number } | undefined;
+  const d = userDb(uid), u = d.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(length(CAST(value AS BLOB))), 0) AS b FROM state').get() as { n: number; b: number };
+  const old = d.prepare('SELECT length(CAST(value AS BLOB)) AS l FROM state WHERE key = ?').get(key) as { l: number } | undefined;
   if (!old && u.n >= L.stateKeys) throw tooMany('synced documents', L.stateKeys);
   if (u.b - (old?.l ?? 0) + size > bytes(L.stateMb)) throw new HttpError(413, `Your synced data would exceed ${L.stateMb} MB`);
 }
 /**
  * Write a key (last write wins), bump its revision and tell every connected client of the same user except `origin`
- * with `{ type: 'state', key, rev, value, updated }`. Returns the new revision.
+ * with `{ type: 'state', key, rev, value, updated }`. Returns the new revision. With `baseRev` the write only happens when
+ * that is still the stored revision, else HttpError 409 carrying the current { rev, value, updated }.
  */
-export function stateSet(key: string, value: unknown, origin?: WsClient, uid = origin?.userId ?? soleUser()): number {
+export function stateSet(key: string, value: unknown, origin?: WsClient, uid = origin?.userId ?? soleUser(), baseRev?: number): number {
   if (!KEY_RE.test(key)) throw Error('Bad state key');
   const updated = Date.now(), json = JSON.stringify(value);
-  checkQuota(uid, key, json.length);
+  if (baseRev !== undefined) {   // optimistic concurrency: the writer says which revision it saw (0 = it expects the key not to exist)
+    const cur = userDb(uid).prepare('SELECT value, rev, updated FROM state WHERE key = ?').get(key) as { value: string; rev: number; updated: number } | undefined;
+    if ((cur?.rev ?? 0) !== baseRev) throw new HttpError(409, 'This was changed somewhere else', { rev: cur?.rev ?? 0, updated: cur?.updated ?? 0, value: cur ? JSON.parse(cur.value) : null });
+  }
+  checkQuota(uid, key, Buffer.byteLength(json));
   const r = userDb(uid).prepare('INSERT INTO state (key, value, rev, updated) VALUES (?, ?, 1, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, rev = state.rev + 1, updated = excluded.updated RETURNING rev')
     .get(key, json, updated) as { rev: number };
   broadcastTo(uid, { type: 'state', key, rev: r.rev, value, updated }, origin);
@@ -57,6 +63,8 @@ const tabs = new Map<string, WsClient>();
 onWs('sync.hello', (c, m) => {
   const id = String(m.client ?? '');
   if (!/^[\w-]{8,64}$/.test(id)) return;
+  const old = c.data.get('sync.id') as string | undefined;   // one id per socket: a client that says hello again does not leave its old key behind
+  if (old && old !== id && tabs.get(`${c.userId}:${old}`) === c) tabs.delete(`${c.userId}:${old}`);
   tabs.set(`${c.userId}:${id}`, c); c.data.set('sync.id', id);
 });
 onWsClose(c => { const id = c.data.get('sync.id') as string | undefined, k = `${c.userId}:${id}`; if (id && tabs.get(k) === c) tabs.delete(k) });
@@ -70,6 +78,9 @@ route('GET', '/api/state', c => stateAll(c.user.id));
 route('PUT', '/api/state/:key', c => {
   const key = keyOf(c), b = c.body as { value?: unknown } | null | undefined;
   if (!b || typeof b !== 'object' || b.value === undefined) throw bad('Body must be { value }');
-  return { rev: stateSet(key, b.value, originOf(c), c.user.id) };
-}, { limit: 8 * 1024 * 1024 });
+  // If-Match: <rev> (or body.baseRev) turns the write into a compare-and-set; without either it stays last-write-wins.
+  const im = String(c.req.headers['if-match'] ?? '').replace(/^W\/|"/g, '').trim(), raw = im !== '' ? Number(im) : (b as { baseRev?: unknown }).baseRev;
+  if (raw !== undefined && !(Number.isInteger(raw) && (raw as number) >= 0)) throw bad('baseRev must be a revision number');
+  return { rev: stateSet(key, b.value, originOf(c), c.user.id, raw as number | undefined) };
+}, { limit: u => (!isPublic ? 8 * 1024 * 1024 : u.pathname.endsWith('/journal') ? bytes(limits(0).journalKeyMb) + 4096 : bytes(limits(0).stateKeyMb) + 4096) });
 route('DELETE', '/api/state/:key', c => { stateDel(keyOf(c), originOf(c), c.user.id) });
