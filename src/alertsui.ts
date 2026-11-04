@@ -72,7 +72,7 @@ export interface AlertForm {
   value: string; value2: string; bars: string; frequency: Frequency; expires: string;   // expires: datetime-local value, '' = never
   message: string; channels: Channel[]; webhookUrl: string; webhookBody: string; active?: boolean;
 }
-const SYM_RE = /^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/, TF_RE = /^[1-9]\d{0,3}[smhdwM]$/;
+const SYM_RE = /^([A-Z0-9]+:)?[A-Z0-9_.\u0600-\u06FF]{2,40}$/, TF_RE = /^[1-9]\d{0,3}[smhdwM]$/;
 export function validateAlert(f: AlertForm, now = Date.now()): { input: AlertInput } | { error: string } {
   const sym = f.sym.trim().toUpperCase(), tf = f.tf.trim(), msg = f.message.trim(), num = (s: string) => (s.trim() === '' ? NaN : +s);
   if (!SYM_RE.test(sym)) return { error: 'Enter a valid symbol' };

@@ -271,3 +271,15 @@ table.seas td{font-size:11px;text-align:right}
 #s-ai{padding:6px;display:flex;flex-direction:column;gap:5px}#s-ai textarea{width:100%;font:13px inherit;resize:vertical}#s-ai select,#s-ai input{min-width:0}
 .ai-log{flex:1;min-height:160px;overflow:auto;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.5}.ai-log>div{padding:6px 8px;border-radius:6px;unicode-bidi:plaintext}
 .ai-user{background:var(--hover,rgba(127,127,127,.12));align-self:flex-end;max-width:92%;white-space:pre-wrap}.ai-assistant{border:1px solid var(--border,rgba(127,127,127,.25))}.ai-log pre{overflow:auto;font:12px var(--mono,monospace);background:rgba(127,127,127,.1);padding:6px;border-radius:4px;text-align:left}.ai-log button{margin-top:4px}
+
+/* Persian interface (src/i18n.ts). Panels, dialogs and the journal read right-to-left; the chart, toolbars, code and
+   numbers stay left-to-right, because price charts, time axes and code have a fixed direction. */
+html.fa body { font-family: Vazirmatn, Tahoma, 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif }
+html.fa :is(#panel, dialog, #jw, #bottom .bpane, #bottomBar) { direction: rtl }
+html.fa :is(#grid, #tools, #top, #rail, #replayBar, #favBar, #pnEditor, #pnConsole, #tsEquity) { direction: ltr }
+html.fa :is(#panel, dialog, #jw, #bottom) :is(input[type=number], input[type=datetime-local], input[type=date], input[type=time], input[type=url], input[type=password], code, pre, kbd, .num) { direction: ltr }
+html.fa :is(input[type=text], input:not([type]), textarea) { unicode-bidi: plaintext }
+html.fa :is(#panel, dialog, #jw) :is(td, th) { text-align: start }
+html.fa .sl { direction: rtl }
+html.fa .sl > b { direction: ltr; unicode-bidi: plaintext }
+#s-ai:not(.on){display:none}   /* the id rule above beat .side, so the AI panel showed under every other panel */

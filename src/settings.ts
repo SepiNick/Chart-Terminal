@@ -15,7 +15,7 @@ export interface Settings {
   lastPriceLine: boolean; lastPriceLabel: boolean; countdown: boolean; prevCloseLine: boolean;
   highLowLines: boolean; avgCloseLine: boolean; indLabels: boolean;
   marginTop: number; marginBottom: number; rightOffset: number;
-  dayOfWeek: boolean; dateFormat: 'dd MMM yy' | 'yyyy-MM-dd' | 'MM/dd/yy' | 'dd.MM.yyyy'; hour12: boolean;
+  dayOfWeek: boolean; dateFormat: 'dd MMM yy' | 'yyyy-MM-dd' | 'MM/dd/yy' | 'dd.MM.yyyy'; hour12: boolean; calendar: 'gregorian' | 'jalali';
   // Canvas
   bgType: 'solid' | 'gradient'; bgColor: string; bgColor2: string;
   vertGrid: boolean; horzGrid: boolean; gridColor: string;
@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   legend: true, legendTitle: 'ticker', barChange: true, legendVolume: true, indTitles: true, indArgs: true, indValues: true, legendBg: false,
   scaleMode: 'normal', invert: false, scaleSide: 'right',
   lastPriceLine: true, lastPriceLabel: true, countdown: true, prevCloseLine: false, highLowLines: false, avgCloseLine: false, indLabels: true,
-  marginTop: 10, marginBottom: 8, rightOffset: 8, dayOfWeek: true, dateFormat: 'dd MMM yy', hour12: false,
+  marginTop: 10, marginBottom: 8, rightOffset: 8, dayOfWeek: true, dateFormat: 'dd MMM yy', hour12: false, calendar: 'gregorian',
   bgType: 'solid', bgColor: '', bgColor2: '', vertGrid: true, horzGrid: true, gridColor: '',
   crosshairColor: '#9598a1', crosshairWidth: 1, crosshairStyle: 'dashed', crosshair: 'normal',
   watermark: true, scaleTextColor: '', scaleFontSize: 12, separatorColor: '',
@@ -74,7 +74,7 @@ export const SETTINGS_TABS: { id: string; name: string; rows: Row[] }[] = [
     ['prevCloseLine', 'Previous day close line', 'bool'], ['highLowLines', 'High and low price lines', 'bool'], ['avgCloseLine', 'Average close price line', 'bool'],
     ['indLabels', 'Indicator value labels', 'bool'],
     'Time scale', ['rightOffset', 'Right margin (bars)', 'number', { min: 0, max: 200 }], ['dayOfWeek', 'Day of week on labels', 'bool'],
-    ['dateFormat', 'Date format', ['dd MMM yy', 'yyyy-MM-dd', 'MM/dd/yy', 'dd.MM.yyyy']], ['hour12', '12-hour time', 'bool'],
+    ['calendar', 'Calendar', ['gregorian', 'jalali']], ['dateFormat', 'Date format (Gregorian)', ['dd MMM yy', 'yyyy-MM-dd', 'MM/dd/yy', 'dd.MM.yyyy']], ['hour12', '12-hour time', 'bool'],
   ] },
   { id: 'canvas', name: 'Canvas', rows: [
     'Chart basic styles', ['theme', 'Theme', ['dark', 'light']], ['bgType', 'Background', ['solid', 'gradient']], ['bgColor', 'Background color', 'color'], ['bgColor2', 'Gradient bottom color', 'color'],
