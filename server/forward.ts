@@ -4,7 +4,7 @@
 // which takes the load off the server; otherwise the server runs it in the engine worker thread (engine.ts).
 import { randomUUID } from 'node:crypto';
 import { db, migration } from './core/db.ts';
-import { route, broadcast, bad, HttpError, onWs } from './core/http.ts';
+import { route, bad, HttpError, onWs, broadcastTo } from './core/http.ts';
 import { watchSeries, isExprSym, type Bar } from './core/bars.ts';
 import { stateGet, stateSet } from './state.ts';
 import { notify, type Channel } from './notify/index.ts';
@@ -72,25 +72,33 @@ const info = (r: Row): ForwardInfo => ({ id: r.id, name: r.name, sym: r.sym, tf:
 const rows = () => db.prepare('SELECT * FROM forward ORDER BY created').all() as unknown as Row[];
 const rowOf = (id: string) => db.prepare('SELECT * FROM forward WHERE id = ?').get(id) as Row | undefined;
 export const list = () => rows().map(info);
-const changed = () => broadcast({ type: 'forward', list: list() });
+// shortcut: sent to every connected user (forward tests have no owner yet); the multi-user rewrite should address the owner.
+const changed = () => broadcastTo(1, { type: 'forward', list: list() });
 
 /** Mirror the new ones among `fills` (from the worker or a browser); `last` is the series' latest bar. */
 function apply(id: string, fills: SimpleFill[], last: { time: number; close: number }) {
   const r = rowOf(id); if (!r) return;
   const now = deps.now();
   const step = freshFills(fills, r.start, new Set(JSON.parse(r.done)), last.time);
-  for (const f of step.fresh) {
-    const qty = +(f.qty * r.qty_mult).toFixed(8);
-    const e = qty > 0 ? mirror(r.sym, f, qty, last.close, now / 1000) : 'Size is 0 after the multiplier';
-    db.prepare('INSERT INTO forward_log (fwd, at, t, side, qty, px, error) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, now, f.time, f.side, qty, last.close, e);
-    if (!e) deps.notify({
-      title: `${r.name} forward test`, body: `${f.side === 'buy' ? 'Bought' : 'Sold'} ${qty} ${r.sym} at ${last.close} (paper)`,
-      channels: [...new Set<Channel>(['popup', ...(JSON.parse(r.channels) as Channel[])])],
-      data: { forwardId: id, sym: r.sym, tf: r.tf, side: f.side, qty, price: last.close, url: `/?${new URLSearchParams({ symbol: r.sym, tf: r.tf })}` },
-    }).catch(() => {});
-  }
+  const notices: Parameters<typeof deps.notify>[0][] = [];
+  // Mirror + log + "done" set are one unit: a crash or error in between must not leave a mirrored fill that is mirrored again next run.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const f of step.fresh) {
+      const qty = +(f.qty * r.qty_mult).toFixed(8);
+      const e = qty > 0 ? mirror(r.sym, f, qty, last.close, now / 1000) : 'Size is 0 after the multiplier';
+      db.prepare('INSERT INTO forward_log (fwd, at, t, side, qty, px, error) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, now, f.time, f.side, qty, last.close, e);
+      if (!e) notices.push({
+        title: `${r.name} forward test`, body: `${f.side === 'buy' ? 'Bought' : 'Sold'} ${qty} ${r.sym} at ${last.close} (paper)`,
+        channels: [...new Set<Channel>(['popup', ...(JSON.parse(r.channels) as Channel[])])],
+        data: { forwardId: id, sym: r.sym, tf: r.tf, side: f.side, qty, price: last.close, url: `/?${new URLSearchParams({ symbol: r.sym, tf: r.tf })}` },
+      });
+    }
+    db.prepare('UPDATE forward SET start = ?, done = ?, fills = fills + ?, last_run = ?, last_error = NULL WHERE id = ?').run(step.start, JSON.stringify([...step.done]), step.fresh.length, now, id);
+    db.exec('COMMIT');
+  } catch (e) { try { db.exec('ROLLBACK') } catch {} throw e }
+  for (const n of notices) deps.notify(n).catch(() => {});
   const mirrored = step.fresh.length;
-  db.prepare('UPDATE forward SET start = ?, done = ?, fills = fills + ?, last_run = ?, last_error = NULL WHERE id = ?').run(step.start, JSON.stringify([...step.done]), mirrored, now, id);
   if (mirrored || r.start == null || r.last_error) changed();
 }
 function fail(id: string, msg: string) {
@@ -109,7 +117,8 @@ function schedule(id: string, bars: Bar[]) {
   if (!r || !last) return;
   busy.set(id, null);
   const p: Promise<void> = deps.run({ id, source: JSON.parse(r.source), sym: r.sym, tf: r.tf, inputs: JSON.parse(r.inputs) }, bars)
-    .then(f => { if (!leased(id)) apply(id, f, { time: last.time, close: last.close }) }, e => fail(id, (e as Error).message || String(e)))
+    .then(f => { if (!leased(id)) apply(id, f, { time: last.time, close: last.close }) })
+    .catch(e => fail(id, (e as Error).message || String(e)))
     .finally(() => { inflight.delete(p); const q = busy.get(id); busy.delete(id); if (q && running.has(id)) schedule(id, q) });
   inflight.add(p);
 }
@@ -135,7 +144,8 @@ export function browserFills(id: string, sig: unknown, fills: unknown, last: unk
   if (!fills.every(f => f && finite(f.time) && (f.side === 'buy' || f.side === 'sell') && finite(f.qty) && f.qty > 0)) return false;
   const was = leased(id);
   leases.set(id, deps.now());
-  apply(id, (fills as SimpleFill[]).map(f => ({ time: f.time, side: f.side, qty: f.qty })), { time: l.time, close: l.close });
+  try { apply(id, (fills as SimpleFill[]).map(f => ({ time: f.time, side: f.side, qty: f.qty })), { time: l.time, close: l.close }) }
+  catch (e) { fail(id, (e as Error).message || String(e)); return false }
   if (!was) changed();
   return true;
 }

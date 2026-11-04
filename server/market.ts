@@ -12,12 +12,16 @@
 import { aggregate, tfSeconds, validTf, type Bar } from '../src/data.ts';
 import * as cx from './ccxt.ts';
 import { fxMarkets, yahooBars, yahooDividends, yahooTicker } from './yahoo.ts';
-import { mt5Markets, mt5Ohlcv } from './mt5.ts';
-import { HttpError, bad, onWs, onWsClose, route, type WsClient } from './core/http.ts';
+import { isPublic } from './core/mode.ts';
+import { limits } from './core/quota.ts';
+
+// The MetaTrader bridge client is a private-server feature: a public server never loads it, and 'mt5' is just an unknown exchange there.
+const MT5 = isPublic ? null : await import('./mt5.ts');
+import { HttpError, bad, clients, onWs, onWsClose, route, type WsClient } from './core/http.ts';
 
 export const SYM_RE = /^[A-Z0-9_.]{1,40}$/, EX_RE = /^[a-z0-9]{2,30}$/;
 /** Sources served here rather than through CCXT: Yahoo ('fx') and the local MetaTrader 5 bridge ('mt5'). */
-const LOCAL = new Set(['fx', 'mt5']);
+const LOCAL = new Set(MT5 ? ['fx', 'mt5'] : ['fx']);
 
 
 function params(u: URL) {
@@ -28,7 +32,7 @@ function params(u: URL) {
 const checkSymTf = (symbol: string, tf: string) => { if (!SYM_RE.test(symbol)) throw bad('Bad symbol'); if (!validTf(tf)) throw bad('Bad timeframe') };
 
 export async function bars(exchange: string, symbol: string, tf: string, until?: number, limit = 1000): Promise<{ bars: Bar[]; base: string }> {
-  const r = exchange === 'fx' ? await yahooBars(symbol, tf, until, limit) : exchange === 'mt5' ? await mt5Ohlcv(symbol, tf, until, limit) : await cx.ohlcv(exchange, symbol, tf, until, limit);
+  const r = exchange === 'fx' ? await yahooBars(symbol, tf, until, limit) : exchange === 'mt5' ? await MT5!.mt5Ohlcv(symbol, tf, until, limit) : await cx.ohlcv(exchange, symbol, tf, until, limit);
   if (r.base === tf) return r;
   const agg = aggregate(r.bars, tfSeconds(tf));
   return { bars: agg.length > 1 ? agg.slice(1) : agg, base: r.base };   // first bucket may be partial
@@ -39,11 +43,11 @@ let exchangesCache: { id: string; name: string; ws: boolean }[] | null = null;
 async function marketRoute(u: URL): Promise<unknown> {
   switch (u.pathname) {
     case '/api/exchanges':
-      return (exchangesCache ??= [{ id: 'fx', name: 'Forex, metals, indices & stocks', ws: false }, { id: 'mt5', name: 'MetaTrader 5 (local bridge, demo)', ws: false }, ...cx.exchangeIds().map(id => ({ id, name: id, ws: false }))]);
+      return (exchangesCache ??= [{ id: 'fx', name: 'Forex, metals, indices & stocks', ws: false }, ...(MT5 ? [{ id: 'mt5', name: 'MetaTrader 5 (local bridge, demo)', ws: false }] : []), ...cx.exchangeIds().map(id => ({ id, name: id, ws: false }))]);
     case '/api/markets': {
       const { exchange } = params(u);
       if (exchange === 'fx') return fxMarkets().map(m => ({ sym: m.sym, base: m.sym, quote: '', type: m.type, name: m.name }));
-      if (exchange === 'mt5') return mt5Markets();
+      if (MT5 && exchange === 'mt5') return MT5.mt5Markets();
       return (await cx.markets(exchange)).list.filter(m => m.active).map(({ sym, base, quote, type }) => ({ sym, base, quote, type }));
     }
     case '/api/bars': {
@@ -94,7 +98,7 @@ export function startFeed(exchange: string, symbol: string, tf: string, send: (b
   if (LOCAL.has(exchange)) {
     // Neither Yahoo nor MT5 pushes prices here: poll (the local MT5 bridge often, Yahoo gently).
     let alive = true;
-    const get = exchange === 'fx' ? yahooBars : mt5Ohlcv, every = exchange === 'fx' ? 15000 : 2000;
+    const get = exchange === 'fx' ? yahooBars : MT5!.mt5Ohlcv, every = exchange === 'fx' ? 15000 : 2000;
     (async () => {
       while (alive) {
         try { const r = await get(symbol, tf === '1M' ? '1M' : tf, undefined, 3); if (alive) r.base === tf ? r.bars.slice(-2).forEach(send) : r.bars.slice(-Math.ceil(sec / tfSeconds(r.base)) - 1).forEach(emitAgg) } catch {}
@@ -116,6 +120,13 @@ function drop(c: WsClient, k: string) {
   const f = feeds.get(k); mineOf(c).delete(k); if (!f) return;
   f.subs.delete(c); if (!f.subs.size) { f.stop(); feeds.delete(k) }
 }
+/** Market subscriptions of all of a user's sockets (public mode caps: per socket and per user). */
+const userSubs = (uid: number) => { let n = 0; for (const x of clients) if (x.userId === uid) n += mineOf(x).size; return n };
+function capOk(c: WsClient, mine: Set<string>) {
+  const L = limits(c.userId);
+  if (mine.size >= L.subsSocket || userSubs(c.userId) >= L.subsUser) { c.send({ type: 'error', code: 'feed_limit', msg: 'Too many chart subscriptions' }); return false }
+  return true;
+}
 function onMarket(c: WsClient, m: Record<string, unknown>) {
   const exchange = String(m.exchange ?? ''), symbol = String(m.symbol ?? '').toUpperCase(), tf = String(m.tf ?? ''), mine = mineOf(c);
   if (m.kind === 'trades' || m.kind === 'book') {
@@ -123,7 +134,7 @@ function onMarket(c: WsClient, m: Record<string, unknown>) {
     if (LOCAL.has(exchange) || !cx.isExchange(exchange) || !SYM_RE.test(symbol)) return;
     const kind = m.kind, k = keyOf(exchange, symbol, '#' + kind);
     if (m.op === 'unsub') return drop(c, k);
-    if (mine.has(k)) return;
+    if (mine.has(k) || !capOk(c, mine)) return;
     let f = feeds.get(k);
     if (!f) {
       const feed: Feed = { subs: new Set(), stop: () => {} };
@@ -138,7 +149,7 @@ function onMarket(c: WsClient, m: Record<string, unknown>) {
   if (exchange === 'fx' && !yahooTicker(symbol)) return;
   const k = keyOf(exchange, symbol, tf);
   if (m.op === 'unsub') return drop(c, k);
-  if (mine.has(k)) return;
+  if (mine.has(k) || !capOk(c, mine)) return;
   let f = feeds.get(k);
   if (!f) {
     const feed: Feed = { subs: new Set(), stop: () => {} };

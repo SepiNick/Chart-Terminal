@@ -143,3 +143,30 @@ test('worker thread runs strategies and survives a script error', async () => {
   assert.equal((await F.runInWorker(req, bars)).length, F.runFills(job, bars, {}).length);
   F.stopAll();
 });
+
+test('a failure after mirroring rolls the whole step back: a fill is never mirrored twice', async () => {
+  const { db } = await import('./core/db.ts');
+  let now = 9_000_000;
+  const subs: ((b: Bar[], closed: boolean) => void)[] = [];
+  F.deps.now = () => now;
+  F.deps.watch = (_s, _tf, cb) => { subs.push(cb); return () => {} };
+  F.deps.notify = async () => [];
+  F.deps.run = async (x, b) => F.runFills(F.buildJob(x.source, x.sym, x.tf), b, x.inputs);
+  const feed = async (n: number) => { now += 60_000; subs.at(-1)!(bars.slice(0, n), true); await F.settled() };
+  const id = F.create({ name: 'R', sym: 'BTCUSDT', tf: '1m', source, qtyMult: 1, channels: [] });
+  await feed(30);
+  const count = () => stateGet<Account>('acct')?.value.fills.length ?? 0, base = count();
+  db.exec(`CREATE TEMP TRIGGER boom BEFORE UPDATE OF done ON forward BEGIN SELECT RAISE(ABORT, 'boom'); END`);
+  await feed(45);
+  assert.equal(count(), base, 'the mirrored fills were rolled back with the failed step');
+  assert.equal(F.log(id).length, 0);
+  assert.match(F.list().find(f => f.id === id)!.lastError ?? '', /boom/);
+  db.exec('DROP TRIGGER boom');
+  await feed(45);
+  const once = count() - base;
+  assert.ok(once >= 4, `mirrored after recovery (${once})`);
+  assert.equal(F.log(id).length, once);
+  await feed(45);
+  assert.equal(count() - base, once, 'not mirrored twice');
+  F.remove(id);
+});

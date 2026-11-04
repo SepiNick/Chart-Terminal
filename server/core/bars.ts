@@ -25,15 +25,18 @@ export function streamBars(sym: string, tf: string, onBar: (b: Bar) => void): ()
  * Keeps a rolling bar series per (symbol, tf) shared by every server consumer: history once, then live updates.
  * `onUpdate(bars, closed)` gets the whole array; `closed` is true when the previous bar just closed (a new bar began).
  */
-const series = new Map<string, { bars: Bar[]; subs: Set<(b: Bar[], closed: boolean) => void>; stop: () => void; ready: Promise<void> }>();
+const series = new Map<string, { bars: Bar[]; subs: Set<(b: Bar[], closed: boolean) => void>; stop: () => void; ready: Promise<void>; dead: boolean }>();
+/** Swappable for tests (no network). */
+export const deps = { fetchBars, streamBars };
 export function watchSeries(sym: string, tf: string, onUpdate: (bars: Bar[], closed: boolean) => void): () => void {
   const k = `${sym}|${tf}`;
   let s = series.get(k);
   if (!s) {
-    const entry = { bars: [] as Bar[], subs: new Set<(b: Bar[], closed: boolean) => void>(), stop: () => {}, ready: Promise.resolve() };
+    const entry = { bars: [] as Bar[], subs: new Set<(b: Bar[], closed: boolean) => void>(), stop: () => {}, ready: Promise.resolve(), dead: false };
     // Exchanges answer blocks with whole HTML pages: keep the log to one short line.
-    entry.ready = fetchBars(sym, tf).then(b => { entry.bars = b.slice(-1500) }).catch(e => console.error(`[bars] ${k}: ${(e as Error).message.replace(/\s+/g, ' ').slice(0, 200)}`)).then(() => {
-      entry.stop = streamBars(sym, tf, b => {
+    entry.ready = deps.fetchBars(sym, tf).then(b => { entry.bars = b.slice(-1500) }).catch(e => console.error(`[bars] ${k}: ${(e as Error).message.replace(/\s+/g, ' ').slice(0, 200)}`)).then(() => {
+      if (entry.dead) return;   // everyone left before the history arrived: no feed or socket may start now
+      entry.stop = deps.streamBars(sym, tf, b => {
         const last = entry.bars.at(-1);
         if (last && b.time < last.time) return;
         const closed = !!last && b.time > last.time;
@@ -45,5 +48,5 @@ export function watchSeries(sym: string, tf: string, onUpdate: (bars: Bar[], clo
   }
   s.subs.add(onUpdate);
   s.ready.then(() => { if (s!.subs.has(onUpdate) && s!.bars.length) onUpdate(s!.bars, false) });
-  return () => { s!.subs.delete(onUpdate); if (!s!.subs.size) { s!.stop(); series.delete(k) } };
+  return () => { s!.subs.delete(onUpdate); if (!s!.subs.size) { s!.dead = true; s!.stop(); if (series.get(k) === s) series.delete(k) } };
 }

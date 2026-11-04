@@ -6,13 +6,22 @@ import { createRequire } from 'node:module';
 import type webpush from 'web-push';
 import type nodemailerNs from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
-import { broadcast, route, bad } from '../core/http.ts';
-import { db, migration, configGet, configSet } from '../core/db.ts';
-import { secretGet, secretSet, secretHas, secretDel } from '../core/secrets.ts';
+import { HttpError, broadcastTo, route, bad } from '../core/http.ts';
+import { soleUser, userDb, userMigration } from '../core/userdb.ts';
+import { isPublic, publicUrl } from '../core/mode.ts';
+import { limits, tooMany } from '../core/quota.ts';
+
+// Private server: telegram / email / webhook with their secrets and the single settings table. A public server never
+// loads the secret store (no key file, no SMTP or bot credentials of users) and has push + the in-app popup only.
+const P = isPublic ? null : { ...(await import('../core/db.ts')), ...(await import('../core/secrets.ts')) };
+const U = isPublic ? await import('../core/users.ts') : null;
+const configGet = <T>(k: string, f: T) => P!.configGet<T>(k, f), configSet = (k: string, v: unknown) => P!.configSet(k, v);
+const secretGet = (n: string) => (P ? P.secretGet(n) : null), secretSet = (n: string, v: string) => P!.secretSet(n, v), secretHas = (n: string) => !!P && P.secretHas(n), secretDel = (n: string) => P!.secretDel(n);
 
 import type { Channel } from '../../src/alerttypes.ts';
 export type { Channel };
 export interface Notice {
+  userId?: number;                               // whose notice it is (default: the single user of a private server)
   title: string;
   body: string;
   channels: Channel[];
@@ -30,7 +39,7 @@ let wp: typeof webpush | undefined, nm: typeof nodemailerNs | undefined;
 const webpushLib = () => wp ??= req('web-push') as typeof webpush;
 const nodemailer = () => nm ??= req('nodemailer') as typeof nodemailerNs;
 
-migration('notify/1', `
+userMigration('notify/1', `
   CREATE TABLE notify_push_subs (endpoint TEXT PRIMARY KEY, p256dh TEXT NOT NULL, auth TEXT NOT NULL, agent TEXT NOT NULL, created INTEGER NOT NULL, last_ok INTEGER);
   CREATE TABLE notify_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, deliveries TEXT NOT NULL);`);
 
@@ -77,8 +86,11 @@ const tgCfg = () => configGet<TelegramCfg>('notify.telegram', { chatId: '' });
 const emailCfg = () => configGet<EmailCfg>('notify.email', { host: '', port: 587, secure: false, user: '', from: '', to: '' });
 const hookCfg = () => configGet<WebhookCfg>('notify.webhook', { url: '' });
 
-export function settingsGet() {
-  const subs = db.prepare('SELECT endpoint, agent, created, last_ok FROM notify_push_subs ORDER BY created').all() as { endpoint: string; agent: string; created: number; last_ok: number | null }[];
+const EMPTY = { telegram: { chatId: '', hasToken: false }, email: { host: '', port: 587, secure: false, user: '', from: '', to: '', hasPassword: false }, webhook: { url: '' } };
+/** Public mode: only push (and the popup) exist; the other channels report empty and `disabled`. */
+export function settingsGet(uid = soleUser()) {
+  const subs = userDb(uid).prepare('SELECT endpoint, agent, created, last_ok FROM notify_push_subs ORDER BY created').all() as { endpoint: string; agent: string; created: number; last_ok: number | null }[];
+  if (!P) return { ...EMPTY, disabled: ['telegram', 'email', 'webhook'], push: { subscriptions: subs.map(s => ({ endpoint: s.endpoint, agent: s.agent, created: s.created, lastOk: s.last_ok })) } };
   return {
     telegram: { chatId: tgCfg().chatId, hasToken: secretHas('telegram.token') },
     email: { ...emailCfg(), hasPassword: secretHas('email.password') },
@@ -111,8 +123,9 @@ export function httpUrl(s: string) {
 }
 
 /** Partial update; validates everything before writing anything. */
-export function settingsPut(body: unknown) {
+export function settingsPut(body: unknown, uid = soleUser()) {
   const b = obj(body, 'body');
+  if (isPublic && (b.telegram !== undefined || b.email !== undefined || b.webhook !== undefined)) throw bad('Telegram, email and webhook notifications are not available on this server');
   const writes: (() => void)[] = [];
   if (b.telegram !== undefined) {
     const t = obj(b.telegram, 'telegram');
@@ -142,7 +155,7 @@ export function settingsPut(body: unknown) {
     }
   }
   writes.forEach(f => f());
-  return settingsGet();
+  return settingsGet(uid);
 }
 
 /** Errors may echo URLs or server replies; make sure no secret rides along into the log or the client. */
@@ -154,22 +167,33 @@ const errText = (e: unknown) => scrub(e instanceof Error ? (e.name === 'TimeoutE
 
 // ---------- push ----------
 export function vapid() {
+  if (isPublic) {   // from the environment only, never generated: a new key would orphan every subscription
+    const publicKey = process.env.CT_VAPID_PUBLIC, privateKey = process.env.CT_VAPID_PRIVATE;
+    if (!publicKey || !privateKey) throw new HttpError(503, 'Push notifications are not configured on this server');
+    return { publicKey, privateKey };
+  }
   let pub = configGet<string>('notify.vapid.public', ''), priv = secretGet('push.vapid.private');
   if (!pub || !priv) {
     const k = webpushLib().generateVAPIDKeys();
     pub = k.publicKey; priv = k.privateKey;
     secretSet('push.vapid.private', priv); configSet('notify.vapid.public', pub);
-    db.exec('DELETE FROM notify_push_subs');   // subscriptions are bound to the old key
+    userDb(1).exec('DELETE FROM notify_push_subs');   // subscriptions are bound to the old key
   }
   return { publicKey: pub, privateKey: priv };
 }
 function vapidSubject() {
+  if (isPublic) { const u = publicUrl(); return process.env.CT_VAPID_SUBJECT || (u?.protocol === 'https:' ? u.origin : 'mailto:chart-terminal@example.com') }
   const m = emailCfg().from.match(/[^\s<>"]+@[^\s<>"]+/) ?? emailCfg().to.match(/[^\s<>",]+@[^\s<>",]+/);
   return 'mailto:' + (m?.[0] ?? 'chart-terminal@example.com');   // Apple rejects malformed subjects
 }
 
+/** Push services a public server will talk to (the endpoint is chosen by the client, so it must not be an arbitrary URL). */
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)notify\.windows\.com$/, /(^|\.)push\.services\.mozilla\.com$/];
+export const pushHostOk = (endpoint: string) => { try { const u = new URL(endpoint); return u.protocol === 'https:' && !u.port && !u.username && PUSH_HOSTS.some(r => r.test(u.hostname)) } catch { return false } };
+
 export async function sendPush(n: Notice): Promise<void> {
-  const subs = db.prepare('SELECT endpoint, p256dh, auth FROM notify_push_subs').all() as { endpoint: string; p256dh: string; auth: string }[];
+  const uid = n.userId ?? soleUser(), d = () => userDb(uid);
+  const subs = d().prepare('SELECT endpoint, p256dh, auth FROM notify_push_subs').all() as { endpoint: string; p256dh: string; auth: string }[];
   if (!subs.length) throw Error('no device subscribed to push');
   const { publicKey, privateKey } = vapid();
   const data: Record<string, unknown> = { url: '/', ...(n.data ?? {}) };
@@ -179,10 +203,10 @@ export async function sendPush(n: Notice): Promise<void> {
   await Promise.all(subs.map(async s => {
     try {
       await senders.push({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, opts);
-      db.prepare('UPDATE notify_push_subs SET last_ok = ? WHERE endpoint = ?').run(Date.now(), s.endpoint);
+      d().prepare('UPDATE notify_push_subs SET last_ok = ? WHERE endpoint = ?').run(Date.now(), s.endpoint);
     } catch (e) {
       const code = (e as { statusCode?: number }).statusCode;
-      if (code === 404 || code === 410) { db.prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(s.endpoint); errs.push('subscription expired (removed)') }
+      if (code === 404 || code === 410) { d().prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(s.endpoint); U?.releasePushEndpoint(s.endpoint, uid); errs.push('subscription expired (removed)') }
       else errs.push(code ? `push service HTTP ${code}` : errText(e));
     }
   }));
@@ -193,18 +217,26 @@ route('GET', '/api/notify/push/key', () => ({ publicKey: vapid().publicKey }));
 route('POST', '/api/notify/push/subscribe', c => {
   const b = obj(c.body, 'body'), s = obj(b.subscription, 'subscription'), keys = obj(s.keys, 'subscription.keys');
   const endpoint = str(s.endpoint, 'endpoint', 2000);
-  if (!endpoint.startsWith('https://') || !httpUrl(endpoint)) throw bad('Invalid endpoint');
+  if (!endpoint.startsWith('https://') || !httpUrl(endpoint) || (isPublic && !pushHostOk(endpoint))) throw bad('Invalid endpoint');
   const p256dh = str(keys.p256dh, 'p256dh', 200, /^[\w-]+=*$/), auth = str(keys.auth, 'auth', 100, /^[\w-]+=*$/);
   if (!p256dh || !auth) throw bad('Missing subscription keys');
   const agent = b.agent == null ? '' : str(String(b.agent).replace(/[\r\n\0]/g, ' ').slice(0, 300), 'agent', 300);
   vapid();
-  db.prepare(`INSERT INTO notify_push_subs (endpoint, p256dh, auth, agent, created) VALUES (?, ?, ?, ?, ?)
+  const uid = c.user.id, mine = c.db;
+  if (isPublic) {
+    const max = limits(uid).pushSubs, has = mine.prepare('SELECT 1 FROM notify_push_subs WHERE endpoint = ?').get(endpoint), n = (mine.prepare('SELECT COUNT(*) AS n FROM notify_push_subs').get() as { n: number }).n;
+    if (!has && n >= max) throw tooMany('push devices', max);
+    const prev = U!.claimPushEndpoint(endpoint, uid);   // the same browser switching accounts: the previous account loses it
+    if (prev) { try { userDb(prev).prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(endpoint) } catch {} }
+  }
+  mine.prepare(`INSERT INTO notify_push_subs (endpoint, p256dh, auth, agent, created) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth, agent = excluded.agent`).run(endpoint, p256dh, auth, agent, Date.now());
   return { ok: true };
 });
 route('POST', '/api/notify/push/unsubscribe', c => {
   const endpoint = str(obj(c.body, 'body').endpoint, 'endpoint', 2000);
-  db.prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(endpoint);
+  c.db.prepare('DELETE FROM notify_push_subs WHERE endpoint = ?').run(endpoint);
+  U?.releasePushEndpoint(endpoint, c.user.id);
   return { ok: true };
 });
 
@@ -234,7 +266,7 @@ export async function sendTelegram(n: Notice): Promise<void> {
 }
 interface TgChat { id: number; type: string; title?: string; username?: string; first_name?: string; last_name?: string }
 /** Chats that recently messaged the bot (or added it), newest first. */
-route('GET', '/api/notify/telegram/chats', async () => {
+if (!isPublic) route('GET', '/api/notify/telegram/chats', async () => {
   try {
     const ups = await tgCall('getUpdates', { limit: 100, allowed_updates: ['message', 'channel_post', 'my_chat_member'] }) as Record<string, { chat?: TgChat }>[];
     const seen = new Map<number, { id: string; name: string; type: string }>();
@@ -278,16 +310,34 @@ export async function sendWebhook(n: Notice): Promise<void> {
 // ---------- dispatch ----------
 const SENDERS: Record<Exclude<Channel, 'popup'>, (n: Notice) => Promise<void>> = { push: sendPush, telegram: sendTelegram, email: sendEmail, webhook: sendWebhook };
 
+// Public mode: 20 notices a minute and 200 a day per user, so one account cannot turn the server into a push cannon.
+const sent = new Map<number, { min: number; nMin: number; day: number; nDay: number }>();
+function withinQuota(uid: number): boolean {
+  const L = limits(uid);
+  if (!Number.isFinite(L.notifyPerMin) && !Number.isFinite(L.notifyPerDay)) return true;
+  const now = Date.now();
+  let w = sent.get(uid);
+  if (!w) sent.set(uid, (w = { min: now, nMin: 0, day: now, nDay: 0 }));
+  if (now - w.min >= 60_000) { w.min = now; w.nMin = 0 }
+  if (now - w.day >= 86400_000) { w.day = now; w.nDay = 0 }
+  if (w.nMin >= L.notifyPerMin || w.nDay >= L.notifyPerDay) return false;
+  w.nMin++; w.nDay++;
+  return true;
+}
+const ONLY_PUBLIC: Channel[] = ['popup', 'push'];
+
 /** Deliver a notice on every requested channel. Never throws; returns one result per channel. */
 export async function notify(n: Notice): Promise<Delivery[]> {
   try {
-    const at = Date.now(), title = String(n.title ?? ''), body = String(n.body ?? '');
+    const uid = n.userId ?? soleUser(), at = Date.now(), title = String(n.title ?? ''), body = String(n.body ?? '');
+    if (!withinQuota(uid)) return [...new Set(n.channels ?? [])].map(channel => ({ channel, ok: false, error: 'notification limit reached (try again later)' }));
     const notice = { ...n, title, body };
     const chans = [...new Set(n.channels ?? [])];
     // Popup first and synchronously, so slow channels never delay it.
     const results = chans.map(async (ch): Promise<Delivery> => {
       try {
-        if (ch === 'popup') { broadcast({ type: 'notify', id: randomUUID(), title, body, sound: n.sound ?? true, data: n.data ?? {}, at }); return { channel: ch, ok: true } }
+        if (isPublic && !ONLY_PUBLIC.includes(ch)) return { channel: ch, ok: false, error: 'not available on this server' };
+        if (ch === 'popup') { broadcastTo(uid, { type: 'notify', id: randomUUID(), title, body, sound: n.sound ?? true, data: n.data ?? {}, at }); return { channel: ch, ok: true } }
         const send = SENDERS[ch as Exclude<Channel, 'popup'>];
         if (!send) return { channel: ch, ok: false, error: 'unknown channel' };
         await send(notice);
@@ -296,8 +346,9 @@ export async function notify(n: Notice): Promise<Delivery[]> {
     });
     const out = await Promise.all(results);
     try {
-      db.prepare('INSERT INTO notify_log (at, title, body, deliveries) VALUES (?, ?, ?, ?)').run(at, title.slice(0, 500), body.slice(0, 4000), JSON.stringify(out));
-      db.prepare('DELETE FROM notify_log WHERE id <= (SELECT MAX(id) FROM notify_log) - 2000').run();
+      const d = userDb(uid);
+      d.prepare('INSERT INTO notify_log (at, title, body, deliveries) VALUES (?, ?, ?, ?)').run(at, title.slice(0, 500), body.slice(0, 4000), JSON.stringify(out));
+      d.prepare('DELETE FROM notify_log WHERE id <= (SELECT MAX(id) FROM notify_log) - 2000').run();
     } catch (e) { console.error('notify log:', (e as Error).message) }
     return out;
   } catch (e) {
@@ -305,16 +356,16 @@ export async function notify(n: Notice): Promise<Delivery[]> {
   }
 }
 
-route('GET', '/api/notify/settings', () => settingsGet());
-route('PUT', '/api/notify/settings', c => settingsPut(c.body));
+route('GET', '/api/notify/settings', c => settingsGet(c.user.id));
+route('PUT', '/api/notify/settings', c => settingsPut(c.body, c.user.id));
 route('POST', '/api/notify/test', async c => {
   const ch = obj(c.body, 'body').channel as Channel;
   if (!CHANNELS.includes(ch)) throw bad('Unknown channel');
-  const [d] = await notify({ title: 'Chart Terminal test', body: `Test notification sent at ${new Date().toISOString().slice(0, 19).replace('T', ' ')} UTC`, channels: [ch], data: { url: '/', test: true } });
+  const [d] = await notify({ title: 'Chart Terminal test', body: `Test notification sent at ${new Date().toISOString().slice(0, 19).replace('T', ' ')} UTC`, channels: [ch], data: { url: '/', test: true }, userId: c.user.id });
   return d;
 });
 route('GET', '/api/notify/log', c => {
   const limit = Math.min(1000, Math.max(1, Number(c.url.searchParams.get('limit')) || 100));
-  const rows = db.prepare('SELECT id, at, title, body, deliveries FROM notify_log ORDER BY id DESC LIMIT ?').all(limit) as { id: number; at: number; title: string; body: string; deliveries: string }[];
+  const rows = c.db.prepare('SELECT id, at, title, body, deliveries FROM notify_log ORDER BY id DESC LIMIT ?').all(limit) as { id: number; at: number; title: string; body: string; deliveries: string }[];
   return rows.map(r => ({ ...r, deliveries: JSON.parse(r.deliveries) as Delivery[] }));
 });

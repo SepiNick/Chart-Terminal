@@ -18,7 +18,8 @@ const KEY = 'AKTESTKEY0123456789', SECRET = 'SECRETVALUE9876543210';
 function fake(spot = false, native: ('stop' | 'stop_limit')[] = ['stop', 'stop_limit']) {
   let n = 0;
   const f = {
-    px: 100, fail: '', withdraw: null as boolean | null, placeFail: '', cancelFail: 0,
+    px: 100, fail: '', withdraw: null as boolean | null, placeFail: '', placeFailN: 0, cancelFail: 0, hang: false, lose: false,
+    cids: [] as (string | undefined)[], byCid: new Map<string, string>(), atCancel: [] as number[],   // open stops still resting when an order was canceled
     balances: [{ asset: 'USDT', free: 10_000, locked: 0 }] as Balance[],
     positions: [] as BrokerPosition[], book: new Map<string, BrokerOrder>(), placed: [] as Native[], canceled: [] as string[],
   };
@@ -33,7 +34,7 @@ function fake(spot = false, native: ('stop' | 'stop_limit')[] = ['stop', 'stop_l
   };
   const ad: Adapter = {
     hosts: ['testnet.example'], native: new Set(native), canEdit: false,
-    async balances() { if (f.fail) throw Error(f.fail); return f.balances.map(b => ({ ...b })) },
+    async balances() { if (f.hang) return new Promise<never>(() => {}); if (f.fail) throw Error(f.fail); return f.balances.map(b => ({ ...b })) },
     async positions() { return f.positions.map(p => ({ ...p })) },
     async openOrders() { return [...f.book.values()].filter(o => o.status === 'open') },
     async order(id) { const o = f.book.get(id); if (!o) throw Error('no such order'); return o },
@@ -41,14 +42,19 @@ function fake(spot = false, native: ('stop' | 'stop_limit')[] = ['stop', 'stop_l
     async price() { return f.px },
     async place(o) {
       if (f.placeFail) throw Error(f.placeFail);
-      f.placed.push(o);
+      if (f.placeFailN > 0) { f.placeFailN--; throw Error('insufficient balance') }
+      const { clientId, ...bare } = o;   // existing assertions compare the order without its clientId
+      f.placed.push(bare); f.cids.push(clientId);
       const id = `n${++n}`, mk = o.kind === 'market';
+      if (clientId) f.byCid.set(clientId, id);
       const r: BrokerOrder = { id, sym: o.sym, side: o.side, kind: o.kind, qty: o.qty, filled: mk ? o.qty : 0, status: mk ? 'filled' : 'open', created: 0, updated: 0, ...(o.price ? { price: o.price } : {}), ...(o.stopPrice ? { stopPrice: o.stopPrice } : {}), ...(o.reduceOnly ? { reduceOnly: true } : {}) };
       f.book.set(id, r);
       if (mk) fill(o);
+      if (f.lose) { f.lose = false; throw Error('timeout') }   // sent, but the answer never arrived
       return r;
     },
-    async cancel(id) { if (f.cancelFail > 0) { f.cancelFail--; throw Error('timeout') } f.canceled.push(id); const o = f.book.get(id); if (o) o.status = 'canceled' },
+    async find(cid) { const id = f.byCid.get(cid); return id ? f.book.get(id)! : null },
+    async cancel(id) { if (f.cancelFail > 0) { f.cancelFail--; throw Error('timeout') } f.atCancel.push([...f.book.values()].filter(x => x.status === 'open' && x.id !== id && /stop/.test(x.kind)).length); f.canceled.push(id); const o = f.book.get(id); if (o) o.status = 'canceled' },
     async canWithdraw() { return f.withdraw },
     close() {},
   };
@@ -71,7 +77,7 @@ async function activeAccount(p: object = {}, fk = fake()) {
 }
 const rejects = (p: Promise<unknown>, re: RegExp) => assert.rejects(p, (e: Error & { status?: number }) => { assert.match(e.message, re); return true });
 
-test('accounts CRUD: keys stored encrypted, never in responses or the accounts table', () => {
+test('accounts CRUD: keys stored encrypted, never in responses or the accounts table', async () => {
   const a = B.createAccount(input({ broker: 'okx', passphrase: 'PASSPHRASE123' }));
   assert.equal(a.status, 'pending'); assert.equal(a.testnet, true); assert.equal(a.hasPassphrase, true);
   assert.deepEqual(a.guard, { maxDailyLossPct: 3, maxPositionPct: 20, requireStop: true, confirmedNoWithdraw: true });
@@ -82,7 +88,7 @@ test('accounts CRUD: keys stored encrypted, never in responses or the accounts t
   assert.equal(secretGet(`broker:${a.id}:apiKey`), KEY);
   assert.equal(secretGet(`broker:${a.id}:passphrase`), 'PASSPHRASE123');
   assert.equal(B.listAccounts().find(x => x.id === a.id)!.label, 'Renamed');
-  B.deleteAccount(a.id);
+  await B.deleteAccount(a.id);
   assert.equal(secretGet(`broker:${a.id}:apiKey`), null);
   assert.equal(secretGet(`broker:${a.id}:secret`), null);
   assert.ok(!B.listAccounts().some(x => x.id === a.id));
@@ -238,7 +244,8 @@ test('stop kinds the exchange lacks are emulated; modify = cancel+replace with a
   assert.ok(f.canceled.includes(sl.id) && moved.id !== sl.id && moved.stopPrice === 96);
   await B.refresh(id);
   f.placeFail = 'insufficient balance';
-  await rejects(B.modifyOrder(id, moved.id, { price: 94.5 }), /canceled but its replacement failed/);
+  const kept = await B.modifyOrder(id, moved.id, { price: 94.5 });   // the exchange refuses the new stop: an emulated copy covers the position
+  assert.ok(kept.id.startsWith('emu:') && /refused the replacement/.test(kept.error!));
   f.placeFail = '';
   const m2 = await B.modifyOrder(id, s.id, { stopPrice: 97 });
   assert.equal(m2.stopPrice, 97);
@@ -495,4 +502,191 @@ test('N1: on a trip, a native limit against the position but bigger than it is c
   f.balances[0].free = 9_600;
   await B.refresh(id);
   assert.ok(f.canceled.includes(flip.id) && !f.canceled.includes(exit.id));
+});
+
+// ---------- race-condition regressions (audit) ----------
+const openStops = (f: ReturnType<typeof fake>['f']) => [...f.book.values()].filter(o => o.status === 'open' && o.kind === 'stop');
+
+test('R1: after an order the guard sees the new position at once (no stale cap check)', async () => {
+  const { id } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 15, sl: 90 });
+  await rejects(B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 10, sl: 90 }), /Position cap/);   // 25 × 100 > 2000
+});
+
+test('R1: a second trigger fired in the same pass sees the first one in the position', async () => {
+  const { id, f } = await activeAccount();
+  const a = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'trailing_stop', trail: { pct: 1 }, qty: 9, sl: 80 });
+  const b = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'trailing_stop', trail: { pct: 1 }, qty: 9, sl: 80 });
+  await B.modifyOrder(id, b.id, { qty: 15 });   // 10 + 15 > the 20 allowed, each alone is fine
+  f.px = 106;
+  const st = await B.refresh(id);
+  assert.equal(f.placed.filter(x => x.kind === 'market' && x.side === 'buy').length, 1, 'only one of them is sent');
+  const rej = st.orders.filter(o => o.status === 'rejected');
+  assert.equal(rej.length, 1); assert.match(rej[0].error!, /Position cap/);
+  assert.ok([a.id, b.id].includes(rej[0].id));
+});
+
+test('R2: close keeps the emulated exits when the market order fails, and cancels the native stop when it works', async () => {
+  const spot = fake(true, ['stop_limit']);
+  const s = await activeAccount({ broker: 'binance', market: 'spot' }, spot);
+  await B.placeOrder(s.id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 5, sl: 90 });
+  await B.refresh(s.id); await B.refresh(s.id);   // fill, then the emulated SL is armed
+  s.f.placeFail = 'exchange down';
+  await rejects(B.closePosition(s.id, { sym: 'BTCUSDT' }), /exchange down/);
+  s.f.placeFail = '';
+  assert.ok((await B.refresh(s.id)).orders.some(o => o.kind === 'stop' && /Emulated/.test(o.error!)), 'the SL still protects the position');
+
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 10, sl: 90 });
+  await B.refresh(id); await B.refresh(id);
+  const sl = openStops(f)[0];
+  await B.closePosition(id, { sym: 'BTCUSDT' });
+  assert.ok(f.canceled.includes(sl.id), 'the reduce-only stop does not outlive the position');
+});
+
+test('R2: closing a spot position whose coins a native stop locks sells them, and puts the stop back if the sale fails', async () => {
+  for (const failFirst of [false, true]) {
+    const spot = fake(true, ['stop_limit']);
+    spot.f.balances.push({ asset: 'BTC', free: 5, locked: 0 });
+    const { id, f } = await activeAccount({ broker: 'binance', market: 'spot' }, spot);
+    const stop = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'stop_limit', stopPrice: 95, price: 94, qty: 5 });
+    f.balances.find(b => b.asset === 'BTC')!.free = 0; f.balances.find(b => b.asset === 'BTC')!.locked = 5;   // what the exchange does
+    await B.refresh(id);
+    if (failFirst) {
+      f.placeFailN = 1;
+      await rejects(B.closePosition(id, { sym: 'BTCUSDT' }), /insufficient/);
+      assert.equal(f.placed.filter(x => x.kind === 'stop_limit').length, 2, 'the stop was put back');
+      assert.ok(!f.placed.some(x => x.kind === 'market'));
+    } else {
+      await B.closePosition(id, { sym: 'BTCUSDT' });
+      assert.ok(f.canceled.includes(stop.id));
+      assert.deepEqual(f.placed.at(-1), { sym: 'BTCUSDT', side: 'sell', kind: 'market', qty: 5, reduceOnly: true });
+    }
+  }
+});
+
+test('R3: a timed-out send that went through is found by its clientId, not sent twice; user clientIds are deduped', async () => {
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 10, sl: 80 });
+  await B.refresh(id); await B.refresh(id);
+  const t = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'sell', kind: 'trailing_stop', qty: 10, trail: { pct: 1 }, reduceOnly: true });
+  const before = f.placed.length;
+  f.px = 90; f.lose = true;
+  await B.refresh(id); await B.refresh(id); await B.refresh(id);
+  assert.equal(f.placed.length - before, 1, 'one order on the exchange');
+  assert.ok(!(await B.refresh(id)).orders.some(o => o.id === t.id));
+  for (const c of f.cids.slice(before)) assert.match(c ?? '', /^[0-9a-f]{1,32}$/);
+
+  const x1 = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 50, qty: 1, sl: 40, clientId: 'my-id-1' });
+  const n = f.placed.length;
+  const x2 = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 50, qty: 1, sl: 40, clientId: 'my-id-1' });
+  assert.equal(x2.id, x1.id); assert.equal(f.placed.length, n);
+});
+
+test('R3/R4: a crash while the bracket legs go out resumes without a second native SL and without losing the TP', async () => {
+  const { id, f } = await activeAccount();
+  const e = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10, tp: 120, sl: 90 });
+  await B.refresh(id);
+  f.book.get(e.id)!.status = 'filled'; f.book.get(e.id)!.filled = 10; f.positions.push({ sym: 'BTCUSDT', qty: 10, entry: 99 });
+  db.exec(`CREATE TEMP TRIGGER crash BEFORE INSERT ON broker_emu WHEN NEW.data LIKE '%bracket take profit%' BEGIN SELECT RAISE(ABORT, 'crash'); END`);
+  await assert.rejects(B.refresh(id), /crash/);   // native SL is out, the TP record could not be written
+  assert.equal(openStops(f).length, 1);
+  db.exec('DROP TRIGGER crash');
+  const st = await B.refresh(id);
+  assert.equal(openStops(f).length, 1, 'no second native SL');
+  assert.ok(st.orders.some(o => o.kind === 'limit' && o.id.startsWith('emu:') && o.price === 120), 'the TP is armed after the resume');
+  assert.ok(st.orders.some(o => o.kind === 'stop'), 'the SL stays');
+});
+
+test('R5: a native stop is replaced new-first, and an emulated one covers the position if the exchange refuses the new one', async () => {
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'market', qty: 10, sl: 90 });
+  await B.refresh(id); await B.refresh(id);
+  const sl = openStops(f)[0];
+  const moved = await B.modifyOrder(id, sl.id, { stopPrice: 91 });
+  assert.ok(f.atCancel.at(-1)! >= 1, 'the new stop was already resting when the old one was canceled');
+  assert.equal(f.book.get(moved.id)!.stopPrice, 91);
+
+  f.placeFail = 'refused';
+  const again = await B.modifyOrder(id, moved.id, { stopPrice: 92 });
+  f.placeFail = '';
+  assert.ok(again.id.startsWith('emu:') && again.stopPrice === 92, 'an emulated stop took over');
+  assert.ok(!f.book.get(moved.id) || f.book.get(moved.id)!.status === 'canceled');
+});
+
+test('R6: a failed cancel of the peer stop is retried instead of swallowed', async () => {
+  const { id, f } = await activeAccount();
+  const e = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 99, qty: 10, tp: 120, sl: 90 });
+  await B.refresh(id);
+  f.book.get(e.id)!.status = 'filled'; f.book.get(e.id)!.filled = 10; f.positions.push({ sym: 'BTCUSDT', qty: 10, entry: 99 });
+  await B.refresh(id); await B.refresh(id);
+  const sl = openStops(f)[0];
+  f.px = 121; f.cancelFail = 1;
+  await B.refresh(id);
+  assert.ok(!f.canceled.includes(sl.id), 'the first cancel failed');
+  await B.refresh(id);
+  assert.ok(f.canceled.includes(sl.id), 'canceled on the retry');
+});
+
+test('R9: deleting an account waits for its running operation, cancels resting orders and removes every row', async () => {
+  const { id, f } = await activeAccount();
+  const o = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 50, qty: 1, sl: 40 });
+  await B.deleteAccount(id);
+  assert.ok(f.canceled.includes(o.id));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM broker_emu WHERE account = ?').get(id)!.n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM broker_day WHERE account = ?').get(id)!.n, 0);
+  assert.ok(!B.listAccounts().some(a => a.id === id));
+});
+
+test('R9: the guardian check queues behind a running operation', async () => {
+  const { id, ad } = await activeAccount();
+  let release!: () => void;
+  const gate = new Promise<void>(r => (release = r)), orig = ad.place;
+  ad.place = async n => { await gate; return orig.call(ad, n) };
+  const p = B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 50, qty: 1, sl: 40 });
+  await new Promise(r => setTimeout(r, 20));
+  let checked = false;
+  const c = B.check(id).then(r => { checked = true; return r });
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(checked, false, 'the check waits for the lock');
+  release(); await p; assert.equal((await c).ok, true);
+  ad.place = orig;
+});
+
+test('R10: an account back from a connection error emulates in the same pass', async () => {
+  const { id, f } = await activeAccount();
+  await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'trailing_stop', trail: { pct: 1 }, qty: 5, sl: 80 });
+  f.fail = 'network down';
+  await assert.rejects(B.refresh(id));
+  assert.equal(B.listAccounts().find(x => x.id === id)!.status, 'error');
+  f.fail = ''; f.px = 106;
+  await B.refresh(id);
+  assert.ok(f.placed.some(x => x.kind === 'market' && x.side === 'buy' && x.qty === 5), 'the trigger fired');
+});
+
+test('R11: after a restart the day starts from the last equity seen before it, so a loss while down still trips the breaker', async () => {
+  clock = Date.parse('2026-11-02T20:00:00Z');
+  const { id, f } = await activeAccount();
+  await B.refresh(id);
+  f.balances[0].free = 9_500;   // −5% while the server is down
+  clock = Date.parse('2026-11-03T08:00:00Z');
+  const restartUrl = './index.ts?restart-day';
+  const B2 = await import(restartUrl) as typeof B;
+  B2.deps.adapter = B.deps.adapter; B2.deps.now = B.deps.now;
+  const st = await B2.refresh(id);
+  assert.equal(st.dayStartEquity, 10_000);
+  assert.equal(B2.listAccounts().find(x => x.id === id)!.status, 'tripped');
+});
+
+test('R12/poll: a hung poll does not hold the account lock', { timeout: 8000 }, async () => {
+  clock = Date.parse('2026-11-05T08:00:00Z');
+  const { id, f } = await activeAccount();
+  const o = await B.placeOrder(id, { sym: 'BTCUSDT', side: 'buy', kind: 'limit', price: 50, qty: 1, sl: 40 });
+  B.deps.pollMs = 50;
+  f.hang = true;
+  await assert.rejects(B.refresh(id), /did not answer/);
+  f.hang = false;
+  await B.cancelOrder(id, o.id);
+  assert.ok(f.canceled.includes(o.id));
+  B.deps.pollMs = 30_000;
 });
