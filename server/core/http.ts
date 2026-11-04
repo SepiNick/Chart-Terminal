@@ -10,13 +10,12 @@ import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { authenticate, protocolToken, userOfToken } from './auth.ts';
-import { HttpError, bad } from './errors.ts';
+import { HttpError, bad, obj } from './errors.ts';
 import { CORS_ORIGINS, clientIp, isHttps, isPublic } from './mode.ts';
 import { limits } from './quota.ts';
 import { ANON, userDb, type User } from './userdb.ts';
 
-export { HttpError, bad };
-export type { User };
+export { HttpError, bad, obj };
 
 export interface Ctx {
   req: IncomingMessage; res: ServerResponse; url: URL; params: Record<string, string>;
@@ -212,7 +211,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, listener
     } else send();
   } finally { if (counted) inflight.set(counted, Math.max(0, (inflight.get(counted) ?? 1) - 1)) }
 }
-export function sameOrigin(req: IncomingMessage) {
+function sameOrigin(req: IncomingMessage) {
   const o = req.headers.origin; if (!o) return true;   // non-browser clients (curl, tests) send no Origin
   try { return new URL(o).host === req.headers.host } catch { return false }
 }
@@ -233,9 +232,9 @@ function machineIps() {
   return ownIps;
 }
 const extraHosts = () => new Set((process.env.CT_ALLOWED_HOSTS ?? '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
-export const hostName = (req: IncomingMessage) => String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+const hostName = (req: IncomingMessage) => String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
 export const isLoopbackHost = (req: IncomingMessage) => LOOPBACK.has(hostName(req));
-export function allowedHost(req: IncomingMessage, path = '') {
+function allowedHost(req: IncomingMessage, path = '') {
   const h = hostName(req);
   if (isPublic) return extraHosts().has(h) || (path === '/api/health' && LOOPBACK.has(h));
   return LOOPBACK.has(h) || machineIps().has(h) || extraHosts().has(h);

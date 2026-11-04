@@ -3,6 +3,7 @@
 // rating, seasonals, news). Keyless sources only: exchanges, DexScreener, CoinGecko, ForexFactory, RSS (server/marketdata.ts).
 import { fetch24h, fetchBars, fetchExchanges, isRemote, serverJson, splitSym, type Bar, type Ticker24 } from '../data.ts';
 import { $, calcPrec, esc, fmtVol, store } from '../store.ts';
+import { STANDALONE_WHY, isStandalone } from '../servers.ts';
 import { movers, seasonals, squarify, technicalRating, type Rating } from './analysis.ts';
 import { describe, matches, needsBars, parseQuery, test1, type Query, type Row as QRow } from './query.ts';
 import { ema, rsi, sma } from '../indicators.ts';
@@ -27,6 +28,8 @@ async function loadCalendar() { calendar ??= await serverJson<CalEv[]>('/api/cal
 const TABS = { scr: 'Screener', dex: 'DEX', heat: 'Heatmap', mov: 'Movers', cal: 'Calendar', news: 'News' } as const;
 type Tab = keyof typeof TABS;
 let tab: Tab = store.get('mktTab', 'scr');
+/** Tabs whose data comes from the server (the screener on Binance is fetched by the browser). */
+const SERVER_TABS: Tab[] = ['dex', 'heat', 'mov', 'cal', 'news'];
 
 export function initMarket(h: MarketHost) {
   host = h;
@@ -41,7 +44,12 @@ export function initMarket(h: MarketHost) {
   if (calCfg.onChart) loadCalendar().then(() => host.refreshCharts()).catch(() => {});
 }
 export function renderMarket() {
-  document.querySelectorAll<HTMLElement>('#mktTabs button').forEach(b => b.classList.toggle('on', b.dataset.mt === tab));
+  if (isStandalone() && SERVER_TABS.includes(tab)) tab = 'scr';
+  document.querySelectorAll<HTMLButtonElement>('#mktTabs button').forEach(b => {
+    b.classList.toggle('on', b.dataset.mt === tab);
+    const off = isStandalone() && SERVER_TABS.includes(b.dataset.mt as Tab);
+    b.disabled = off; b.title = off ? STANDALONE_WHY : '';
+  });
   const v = $('#mktView');
   ({ scr: screener, dex: dexView, heat: heatmap, mov: moversView, cal: calendarView, news: newsView })[tab](v);
 }
@@ -82,6 +90,7 @@ async function tickersOf(ex: string): Promise<Ticker24[]> {
   return r;
 }
 async function screener(v: HTMLElement) {
+  if (!exList && isStandalone()) exList = [];
   if (!exList) fetchExchanges().then(l => { exList = l.filter(x => x.id !== 'fx'); if (tab === 'scr') renderMarket() }).catch(() => { exList = [] });
   v.innerHTML = `<div class="row wrap">
     <select id="scrEx" title="Exchange">${[{ id: 'binance', name: 'binance' }, ...(exList ?? []).filter(x => x.id !== 'binance')].map(x => `<option ${x.id === scr.ex ? 'selected' : ''}>${esc(x.id)}</option>`).join('')}</select>

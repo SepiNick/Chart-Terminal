@@ -150,7 +150,8 @@ function serverSocket() {
 function remote(kind: Kind, sym: string, on: (d: unknown) => void): () => void {
   const { exchange, symbol } = splitSym(sym), k = `${kind}|${exchange}|${symbol}`;
   remoteSubs.set(k, on);
-  const s = serverSocket();
+  let s: WebSocket;
+  try { s = serverSocket() } catch { remoteSubs.delete(k); return () => {} }   // standalone / no server
   if (s.readyState === 1) s.send(JSON.stringify({ op: 'sub', kind, exchange, symbol }));
   return () => { remoteSubs.delete(k); if (ws?.readyState === 1) ws.send(JSON.stringify({ op: 'unsub', kind, exchange, symbol })) };
 }

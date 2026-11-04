@@ -28,6 +28,8 @@ import { initJournal, journal, journalBrokers, journalMark, journalSource, journ
 import { journalReplayOrder } from './journal/replay.ts';
 import { initPineUI, openNewScript, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
 import { serverMode, onServer, api } from './sync.ts';
+import { isStandalone } from './servers.ts';
+import { bundledOrigin } from './standalone.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
 import './tooltip.ts';
@@ -662,7 +664,7 @@ async function loadExchanges() {
     exchangesLoaded = true;
     $('#searchEx').innerHTML = '<option value="binance">Binance (direct)</option>' + ex.map(x => `<option value="${esc(x.id)}">${x.id === 'fx' ? 'Forex, metals, indices &amp; stocks' : esc(x.id)}</option>`).join('');
     $<HTMLSelectElement>('#searchEx').value = searchEx;
-  } catch (e) { if (searchEx !== 'binance') toast((e as Error).message, 6000) }
+  } catch (e) { if (isStandalone()) searchEx = 'binance'; else if (searchEx !== 'binance') toast((e as Error).message, 6000) }
 }
 function openSearch(initial: string, mode: 'symbol' | 'compare' = 'symbol') {
   searchMode = mode;
@@ -1229,4 +1231,4 @@ if (serverMode && sharedLayout) {
 }
 
 if (import.meta.env.DEV) Object.assign(window, { __ct: { panes: () => panes, st, history } }); // debugging handle, dev server only
-void registerServiceWorker().catch(() => {});   // at startup, so Chrome on Android offers 'Install app' without push being enabled first
+if (!bundledOrigin()) void registerServiceWorker().catch(() => {});   // at startup, so Chrome on Android offers 'Install app' without push being enabled first

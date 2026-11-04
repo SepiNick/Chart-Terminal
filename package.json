@@ -10,7 +10,8 @@
     "test": "node --experimental-strip-types --test src/*.test.ts src/tools/*.test.ts src/pine/*.test.ts src/pine/lib/*.test.ts src/mql/*.test.ts src/mql/*/*.test.ts src/ninja/*.test.ts src/ninja/*/*.test.ts src/tester/*.test.ts src/orderflow/*.test.ts src/journal/*.test.ts src/risk/*.test.ts src/derivs/*.test.ts src/broker/*.test.ts src/market/*.test.ts src/ai/*.test.ts src/skills/*.test.ts",
     "server": "node server/index.ts",
     "test:server": "npm --prefix server test",
-    "build:lite": "node lite/build.mjs"
+    "build:lite": "node lite/build.mjs",
+    "build:android-standalone": "node android/build-standalone.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",

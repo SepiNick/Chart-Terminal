@@ -27,7 +27,7 @@ async function uploadBlob(blob: Blob): Promise<string> {
 export async function putMedia(blob: Blob): Promise<string> {
   if (serverMode) try { return await uploadBlob(blob) } catch (e) { if ((e as { status?: number }).status) throw e }   // unreachable: keep it here for now
   const id = `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-  await tx('readwrite', s => s.put(blob, id));
+  try { await tx('readwrite', s => s.put(blob, id)) } catch { throw Error('Pictures and voice notes need browser storage, which is unavailable or full on this device') }
   return id;
 }
 const urls = new Map<string, string>();

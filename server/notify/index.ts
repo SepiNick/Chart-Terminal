@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import type webpush from 'web-push';
 import type nodemailerNs from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
-import { HttpError, broadcastTo, route, bad } from '../core/http.ts';
+import { HttpError, broadcastTo, route, bad, obj } from '../core/http.ts';
 import { soleUser, userDb, userMigration } from '../core/userdb.ts';
 import { isPublic, publicUrl } from '../core/mode.ts';
 import { limits, tooMany } from '../core/quota.ts';
@@ -98,10 +98,6 @@ export function settingsGet(uid = soleUser()) {
   };
 }
 
-const obj = (v: unknown, what: string): Record<string, unknown> => {
-  if (v == null || typeof v !== 'object' || Array.isArray(v)) throw bad(`${what} must be an object`);
-  return v as Record<string, unknown>;
-};
 const str = (v: unknown, what: string, max: number, re?: RegExp): string => {
   if (typeof v !== 'string' || v.length > max || /[\r\n\0]/.test(v)) throw bad(`Invalid ${what}`);
   const s = v.trim();

@@ -2,6 +2,7 @@
 // Every section loads and saves on its own, so one unavailable server module doesn't break the rest.
 import { $, esc, fmtVol } from './store.ts';
 import { api, serverMode } from './sync.ts';
+import { STANDALONE_WHY, isStandalone } from './servers.ts';
 import { pushState, enablePush, disablePush, type PushState } from './push.ts';
 
 interface NotifySettings {
@@ -42,6 +43,7 @@ export function initSettingsUI() {
 }
 
 function openServerSettings() {
+  if (isStandalone()) $('#srvOff').textContent = `${STANDALONE_WHY}: server alerts, Telegram, email, webhooks, push and trade recording. Alerts run only in this browser while the app is open. Use "Connect to a server" (bottom left) to add one.`;
   $('#srvOff').hidden = serverMode; $('#srvBody').hidden = !serverMode;
   $<HTMLDialogElement>('#srvDlg').showModal();
   if (!serverMode) return;

@@ -4,7 +4,7 @@ import type { BrokerAccount, Guard, GuardianItem, OrderReq } from '../../src/bro
 export const utcDay = (t = Date.now()) => new Date(t).toISOString().slice(0, 10);
 
 /** Loss so far today in % of start-of-day equity (0 when there is no snapshot yet). */
-export const dayLossPct = (equity: number, dayStart?: number) => (dayStart && dayStart > 0 ? ((dayStart - equity) / dayStart) * 100 : 0);
+const dayLossPct = (equity: number, dayStart?: number) => (dayStart && dayStart > 0 ? ((dayStart - equity) / dayStart) * 100 : 0);
 export const breakerHit = (g: Guard, equity: number, dayStart?: number) => dayLossPct(equity, dayStart) >= g.maxDailyLossPct;
 
 export interface OrderCtx {
@@ -26,7 +26,7 @@ export interface OrderCtx {
 export type Verdict = { ok: true; reducing: boolean } | { ok: false; reason: string; trip?: boolean };
 
 /** Does this order only reduce / close the current position? */
-export function reduces(o: Pick<OrderReq, 'side' | 'qty' | 'reduceOnly'>, c: Pick<OrderCtx, 'spot' | 'pos' | 'spotFree'>): boolean {
+function reduces(o: Pick<OrderReq, 'side' | 'qty' | 'reduceOnly'>, c: Pick<OrderCtx, 'spot' | 'pos' | 'spotFree'>): boolean {
   // Spot can't open a short: every sell reduces. (Comparing with the free balance wrongly blocked protective stops whose
   // coins are locked by the stop itself or shrunk by a fee, exactly when the breaker is tripped.)
   if (c.spot) return o.side === 'sell';

@@ -10,7 +10,7 @@ import { bytes, limits, tooBig, tooMany } from './core/quota.ts';
 userMigration('media/1', `CREATE TABLE media (id TEXT PRIMARY KEY, type TEXT NOT NULL, data BLOB NOT NULL, created INTEGER NOT NULL)`);
 
 // SVG can carry script, so only raster images and audio are accepted.
-export const MEDIA_TYPE_RE = /^(image\/(png|jpeg|gif|webp|avif|bmp)|audio\/[\w.+-]+)$/;
+const MEDIA_TYPE_RE = /^(image\/(png|jpeg|gif|webp|avif|bmp)|audio\/[\w.+-]+)$/;
 const MAGIC: Record<string, (b: Buffer) => boolean> = {
   'image/png': b => b.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])),
   'image/jpeg': b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,

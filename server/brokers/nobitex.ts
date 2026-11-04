@@ -6,7 +6,7 @@ import type { Adapter, Native } from './adapter.ts';
 import { parseSym } from './adapter.ts';
 import { assertTestnetUrl } from './safety.ts';
 
-export const NOBITEX_TESTNET = 'https://testnetapiv2.nobitex.ir';
+const NOBITEX_TESTNET = 'https://testnetapiv2.nobitex.ir';
 type FetchFn = (url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<{ status: number; json(): Promise<unknown> }>;
 
 const cur = (c: string) => (c === 'IRT' ? 'rls' : c.toLowerCase());

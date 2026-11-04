@@ -14,6 +14,12 @@ android {
         versionCode 1
         versionName "1.0"
     }
+    // client = thin client (asks for a server address); standalone = bundles dist/ and needs no server.
+    flavorDimensions "mode"
+    productFlavors {
+        client { dimension "mode"; manifestPlaceholders = [appLabel: "Chart Terminal"] }
+        standalone { dimension "mode"; applicationIdSuffix ".standalone"; versionNameSuffix "-standalone"; manifestPlaceholders = [appLabel: "Chart Terminal Standalone"] }
+    }
     signingConfigs {
         release {
             if (ksFile.exists()) {
@@ -34,3 +40,14 @@ android {
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
+
+// Standalone: copy the built web app (npm run build -> ../dist) into the flavor's assets before they are merged.
+def standaloneWww = layout.projectDirectory.dir("src/standalone/assets/www")
+tasks.register("syncStandaloneAssets", Sync) {
+    from(rootProject.file("../dist")) { exclude "sw.js", "**/*.map" }   // the service worker is not registered in the bundled app
+    into standaloneWww
+    doFirst {
+        if (!rootProject.file("../dist/index.html").exists()) throw new GradleException("dist/ is missing: run `npm run build` in the project root first (or `npm run build:android-standalone`).")
+    }
+}
+tasks.matching { it.name ==~ /merge(Standalone\w*)Assets/ || it.name ==~ /lintVitalAnalyze(Standalone\w*)/ || it.name ==~ /generate(Standalone\w*)LintVitalReportModel/ }.configureEach { dependsOn "syncStandaloneAssets" }

@@ -13,6 +13,13 @@ type Kv = Pick<Storage, 'getItem' | 'setItem'>;
 
 const KEY = 'ctsrv', LOCAL = 'local';
 export const ALL_FEATURES: Features = { trading: true, ai: true, ml: true, forward: true, scripts: true };
+/** Standalone mode (no server at all): only the browser-side scripts remain. */
+export const STANDALONE_FEATURES: Features = { trading: false, ai: false, ml: false, forward: false, scripts: true };
+export const STANDALONE_WHY = 'Standalone mode: this needs a server';
+let standalone = false;
+export const isStandalone = () => standalone;
+export function setStandalone(on: boolean) { if (standalone !== on) { standalone = on; subs.forEach(f => f()) } }
+const standaloneError = () => Object.assign(Error(STANDALONE_WHY), { status: 0, code: 'standalone' });
 
 /** Random id of this tab: sent as `x-ct-client`, so the server doesn't echo our own writes back. */
 export const clientId = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
@@ -89,7 +96,8 @@ export function mixedContentWarning(s: Pick<Server, 'baseUrl'>, pageProtocol = p
 const NO_TRADE = 'No trading server is connected. Trading, forward tests and AI need your own private server (Settings → Servers).';
 const WHY_PUBLIC = 'This public server never stores exchange keys; connect your own private server for trading.';
 /** Is a feature usable, and if not, one short reason. Pure: takes the servers explicitly. */
-export function gateFor(f: keyof Features, sync: Pick<Server, 'features' | 'mode'> | null, trade: Pick<Server, 'features' | 'mode'> | null): { on: boolean; why: string } {
+export function gateFor(f: keyof Features, sync: Pick<Server, 'features' | 'mode'> | null, trade: Pick<Server, 'features' | 'mode'> | null, offline = false): { on: boolean; why: string } {
+  if (offline) return STANDALONE_FEATURES[f] ? { on: true, why: '' } : { on: false, why: STANDALONE_WHY };
   if (f === 'scripts') return sync?.features?.scripts === false ? { on: false, why: 'This server does not run scripts (Pine, MQL, NinjaScript). The chart still runs them in your browser.' } : { on: true, why: '' };
   if (!trade) return { on: false, why: sync?.mode === 'public' ? WHY_PUBLIC : NO_TRADE };
   if (trade.features?.[f] === false) return { on: false, why: `The trading server has this turned off (${f}).` };
@@ -142,7 +150,7 @@ export function tradeServer(): Server | null {
   return canBeTradeServer(s).ok ? s : null;
 }
 const serverFor = (role: Role) => (role === 'trade' ? tradeServer() : syncServer());
-export const gate = (f: keyof Features) => gateFor(f, syncServer(), tradeServer());
+export const gate = (f: keyof Features) => gateFor(f, syncServer(), tradeServer(), standalone);
 
 export function addServer(baseUrl: string, name?: string, origin = originOf()): Server {
   const url = normalizeBaseUrl(baseUrl), c = load();
@@ -177,6 +185,7 @@ export function recordStatus(id: string, st: ServerStatus) {
 // ---------- calls ----------
 /** fetch against the sync (default) or trading server: base URL, bearer token and x-ct-client added. Trading never falls back to the sync server. */
 export async function serverFetch(path: string, init: RequestInit = {}, role: Role = 'sync'): Promise<Response> {
+  if (standalone) throw standaloneError();   // no request leaves the device
   const s = serverFor(role);
   if (!s) throw Object.assign(Error(NO_TRADE), { status: 0, code: 'no-trade-server' });
   const headers = new Headers(init.headers);
@@ -184,6 +193,7 @@ export async function serverFetch(path: string, init: RequestInit = {}, role: Ro
   return fetch(serverUrl(s, path), { ...init, headers, credentials: isSameOrigin(s) ? 'same-origin' : 'omit' });
 }
 export function serverSocket(path: string, role: Role = 'sync'): WebSocket {
+  if (standalone) throw standaloneError();
   const s = serverFor(role);
   if (!s) throw Object.assign(Error(NO_TRADE), { status: 0, code: 'no-trade-server' });
   const a = socketArgs(s, path);
