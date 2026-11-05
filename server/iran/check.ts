@@ -23,7 +23,7 @@ deps.fetch = async (url, init) => {
 
 type Check = { src: string; name: string; run: () => Promise<string> };
 const f = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
-const last = (r: { bars: { close: number; time: number }[] }) => `${r.bars.length} bars, last ${new Date(r.bars.at(-1)!.time * 1000).toISOString().slice(0, 10)} close ${f(r.bars.at(-1)!.close)}`;
+const last = (r: { bars: { close: number; time: number }[] }) => !r.bars.length ? '0 bars (the instrument has no trades in this range)' : `${r.bars.length} bars, last ${new Date(r.bars.at(-1)!.time * 1000).toISOString().slice(0, 10)} close ${f(r.bars.at(-1)!.close)}`;
 const range = (v: number, lo: number, hi: number, what: string) => (v >= lo && v <= hi ? '' : `  ⚠ ${what} looks wrong (expected ${f(lo)}–${f(hi)})`);
 
 const checks: Check[] = [
