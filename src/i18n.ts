@@ -1,4 +1,4 @@
-﻿// Persian interface. English strings in the markup and in the panels are replaced by exact-match lookup in `FA`, in
+// Persian interface. English strings in the markup and in the panels are replaced by exact-match lookup in `FA`, in
 // text and in title / placeholder / aria-label attributes, and again for everything rendered later (a MutationObserver
 // watches the page). Strings that carry numbers or names (e.g. "Order · BTCUSDT") are left in English unless the static
 // part is its own text node. Anything missing from `FA` simply stays English: add the exact English string and its

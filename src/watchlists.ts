@@ -1,4 +1,4 @@
-﻿// Multiple watchlists (pure logic: no DOM, no storage, so node tests cover it).
+// Multiple watchlists (pure logic: no DOM, no storage, so node tests cover it).
 // Synced key `watchLists`: Record<listId, WList>. Merge rule (syncmerge.ts SCHEMA): union by list id with tombstones,
 // per list `syms` = set union with tombstones, `flags` = per-symbol last-writer-wins, name/color/icon/ord = per-field LWW.
 // The old single list (`watch`, `watchFlags`) becomes the list with the stable id 'default'; the legacy keys are never

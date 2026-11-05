@@ -1,4 +1,4 @@
-﻿# Sign in with Google / Apple + "match" of device data and account data
+# Sign in with Google / Apple + "match" of device data and account data
 
 Status: design only (nothing implemented). Scope: public servers (`CT_MODE=public`). Private servers keep the single password.
 Everything below is anchored to the code as it is today (`server/authroutes.ts`, `server/core/users.ts`, `server/core/http.ts`, `server/state.ts`, `src/sync.ts`, `src/boot.ts`, `android/.../MainActivity.java`).

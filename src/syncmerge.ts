@@ -1,4 +1,4 @@
-﻿import { migrate } from './watchlists.ts';
+import { migrate } from './watchlists.ts';
 // Merge of this device's synced data with an account's data (docs/research/oauth-sync-design.md §4). Pure: no DOM, no
 // storage, no network, so node tests cover it. Rules per key come from SCHEMA; unknown keys fall back to a generic rule.
 // Guarantees: nothing is dropped unless it carries a tombstone newer than its last edit; merging twice gives the same
