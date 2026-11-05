@@ -1,11 +1,12 @@
 // Settings → Servers: saved servers, the sync server, the optional trading server, and the feature gates
 // (elements marked data-feature="trading|ai|ml|forward|scripts" are hidden when the matching server does not offer them).
+import { SHOW_AI } from './flags.ts';
 import { dialog, injectStyle } from './login.ts';
 import { esc, toast } from './store.ts';
 import { bundledOrigin, leaveStandalone, watchForServer } from './standalone.ts';
 import { STANDALONE_WHY, addServer, isStandalone, canBeTradeServer, gate, listServers, mixedContentWarning, normalizeBaseUrl, onServersChanged, probeStatus, recordStatus, removeServer, setSyncServer, setTradeServer, syncServer, tradeId, tradeServer, type Features, type ServerStatus } from './servers.ts';
 
-const FEATS: (keyof Features)[] = ['trading', 'ai', 'ml', 'forward', 'scripts'];
+const FEATS = (['trading', 'ai', 'ml', 'forward', 'scripts'] as (keyof Features)[]).filter(f => SHOW_AI || (f !== 'ai' && f !== 'ml'));
 const feats = (f?: Features) => (f ? FEATS.filter(k => f[k]).join(', ') || 'none' : 'unknown');
 
 export function openServers() {

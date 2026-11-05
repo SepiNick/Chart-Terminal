@@ -39,6 +39,7 @@ import { chartEvents, initMarket, renderDetails, renderMarket } from './market/u
 import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
 import { initSkills, renderSkills } from './skills/ui.ts';
 import { initAi, refreshAi } from './ai/panel.ts';
+import { SHOW_AI } from './flags.ts';
 import { registerServiceWorker } from './push.ts';
 import { rMultiple } from './journal.ts';
 import { initI18n } from './i18n.ts';
@@ -818,7 +819,7 @@ function showSide(name: string) {
   if (st.side === 'journal') renderJournal();
   if (st.side === 'accts') renderAccounts();   // accounts
   if (st.side === 'skills') renderSkills();
-  if (st.side === 'ai') void refreshAi();
+  if (SHOW_AI && st.side === 'ai') void refreshAi();
   domSync();
 }
 $('#rail').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) showSide(s) };
@@ -966,7 +967,8 @@ initSkills({
   trades: () => journal().trades.filter(t => t.kind !== 'notrade').map(t => ({ sym: t.sym, dir: t.dir, openTime: t.openTime, closeTime: t.closeTime, net: t.net, r: rMultiple(t), status: t.status, setup: t.setup, mistakes: t.mistakes })),
   json: <T,>(path: string) => serverJson<T>(path),
 });
-initAi({ active, trades: () => journal().trades.filter(t => t.kind !== 'notrade').map(t => ({ sym: t.sym, dir: t.dir, openTime: t.openTime, closeTime: t.closeTime, net: t.net, r: rMultiple(t), status: t.status, setup: t.setup, mistakes: t.mistakes })), openPine: src => { openNewScript(src) } });
+if (SHOW_AI) initAi({ active, trades: () => journal().trades.filter(t => t.kind !== 'notrade').map(t => ({ sym: t.sym, dir: t.dir, openTime: t.openTime, closeTime: t.closeTime, net: t.net, r: rMultiple(t), status: t.status, setup: t.setup, mistakes: t.mistakes })), openPine: src => { openNewScript(src) } });
+else document.querySelectorAll('[data-side="ai"], #s-ai').forEach(e => e.remove());   // hidden until the AI features are finished (src/flags.ts)
 
 // ---------- order ticket & trading panel ----------
 const ticket = { side: 'buy' as Side, type: 'market' as OrderType };
