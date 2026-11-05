@@ -8,7 +8,7 @@ type Node = { k: 'num'; v: number } | { k: 'sym'; s: string } | { k: 'op'; op: s
 export const isExpr = (s: string) => /[+\-*/^()]/.test(s) || /^\d/.test(s.trim());
 
 export function parse(src: string): Node {
-  const toks = src.toUpperCase().match(/\d+(\.\d+)?|[A-Z][A-Z0-9.:_]*|[+\-*/^()]/g) ?? [];
+  const toks = src.toUpperCase().match(/\d+(\.\d+)?|[A-Z][A-Z0-9.:_\u0600-\u06FF]*|[+\-*/^()]/g) ?? [];
   if (toks.join('') !== src.toUpperCase().replace(/\s+/g, '')) throw Error('Invalid character in expression');
   let i = 0;
   const peek = () => toks[i], next = () => toks[i++];

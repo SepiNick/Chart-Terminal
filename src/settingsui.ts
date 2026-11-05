@@ -144,7 +144,7 @@ async function loadRecorder() {
 const bytes = (n = 0) => (n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : n >= 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : (n / 1024).toFixed(0) + ' KB');
 async function saveRecorder() {
   const symbols = [...new Set(val('#recSyms').toUpperCase().split(/[\s,;]+/).filter(Boolean))];
-  const bad = symbols.find(s => !/^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/.test(s));
+  const bad = symbols.find(s => !/^([A-Z0-9]+:)?[A-Z0-9_.\u0600-\u06FF]{2,40}$/.test(s));
   if (bad) return status('#recSt', `Not a valid symbol: ${bad}`, false);
   status('#recSt', 'Saving…');
   try { await api('/api/recorder', { method: 'PUT', body: { symbols } }); status('#recSt', 'Saved', true); loadRecorder() } catch (e) { status('#recSt', errMsg(e), false) }

@@ -41,6 +41,10 @@ import { initSkills, renderSkills } from './skills/ui.ts';
 import { initAi, refreshAi } from './ai/panel.ts';
 import { registerServiceWorker } from './push.ts';
 import { rMultiple } from './journal.ts';
+import { initI18n } from './i18n.ts';
+import { OF_PRESETS } from './orderflow/presets.ts';
+import { describePlan, parseExitPlan, resolvePlan, type ExitPlan } from './exits.ts';
+import { collectReport, installErrorLog } from './diagnostics.ts';
 
 // ---------- layouts (grid arrangements) ----------
 interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
@@ -421,7 +425,7 @@ wireLeftToolbar(drawHost);
 // ---------- top bar ----------
 function setSymbol(raw: string) {
   const s = raw.trim().toUpperCase().replace(/\s+/g, '');
-  try { if (isExpr(s)) parse(s); else if (!/^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/.test(s)) throw Error('Invalid symbol') } catch (e) { return toast((e as Error).message) }
+  try { if (isExpr(s)) parse(s); else if (!/^([A-Z0-9]+:)?[A-Z0-9_.\u0600-\u06FF]{2,40}$/.test(s)) throw Error('Invalid symbol') } catch (e) { return toast((e as Error).message) }
   st.recent = [s, ...st.recent.filter(x => x !== s)].slice(0, 12); store.set('recentSymbols', st.recent);
   targets('symbol').forEach(p => applyCfg(p, { symbol: s }, 'symbol change'));
   const link = st.layout.panes[st.layout.active]?.link;
@@ -433,7 +437,7 @@ function setSymbol(raw: string) {
 var linkChannel = 'BroadcastChannel' in window ? new BroadcastChannel('ct-link') : null;   // eslint-disable-line no-var
 linkChannel?.addEventListener('message', e => {
   const { link, symbol } = (e.data ?? {}) as { link?: unknown; symbol?: unknown };
-  if (typeof link !== 'string' || typeof symbol !== 'string' || !/^([A-Z0-9]+:)?[A-Z0-9_.]{2,40}$/.test(symbol)) return;
+  if (typeof link !== 'string' || typeof symbol !== 'string' || !/^([A-Z0-9]+:)?[A-Z0-9_.\u0600-\u06FF]{2,40}$/.test(symbol)) return;
   panes.forEach((p, i) => { if (st.layout.panes[i]?.link === link && p.cfg.symbol !== symbol) applyCfg(p, { symbol }, 'symbol change') });
 });
 function setTf(tf: string) { targets('tf').forEach(p => applyCfg(p, { tf }, 'interval change')) }
@@ -554,6 +558,16 @@ function shareShot(c: HTMLCanvasElement) {
   }, 'image/png');
 }
 function copyShot(c: HTMLCanvasElement) { c.toBlob(b => b && navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(() => toast('Chart image copied'), () => toast('Clipboard not available'))) }
+initI18n();
+installErrorLog();
+$('#diagRun').onclick = async () => {
+  const out = $<HTMLTextAreaElement>('#diagOut'), stat = $('#diagSt'), copy = $('#diagCopy'), run = $<HTMLButtonElement>('#diagRun');
+  stat.textContent = 'Checking…'; run.disabled = true;
+  try { out.value = await collectReport({ charts: panes.length, theme: st.settings.theme, lang: document.documentElement.lang }); out.hidden = false; copy.hidden = false; stat.textContent = '' }
+  catch (e) { stat.textContent = (e as Error).message }
+  run.disabled = false;
+};
+$('#diagCopy').onclick = async () => { const out = $<HTMLTextAreaElement>('#diagOut'); try { await navigator.clipboard.writeText(out.value); toast('Report copied') } catch { out.select(); toast('Press Ctrl+C to copy') } };
 $('#themeBtn').onclick = () => applySettings({ theme: st.settings.theme === 'dark' ? 'light' : 'dark', bgColor: '', gridColor: '', scaleTextColor: '', separatorColor: '' });
 
 // ---------- replay ----------
@@ -564,6 +578,8 @@ $('#ofBtn').onclick = e => {
   if (!hasOrderFlow(p.cfg.symbol) || isExpr(p.cfg.symbol)) return toast('Order flow needs a crypto symbol (Binance or an exchange via the data server)');
   const num = (q: string, cur: number) => { const v = prompt(q, String(cur)); return v == null || v.trim() === '' || !Number.isFinite(+v) || +v < 0 ? null : +v };
   showMenu(r.left, r.bottom + 2, [
+    { label: 'Quick start', hint: 'ready-made views', sub: OF_PRESETS.map(q => ({ label: q.label, hint: q.hint.split('. ')[0], action: () => set(q.cfg, `order flow: ${q.id}`) })) },
+    { sep: true },
     { label: 'Footprint', sub: (['off', 'bidask', 'delta', 'volume'] as const).map(m => ({ label: { off: 'Off', bidask: 'Bid × Ask', delta: 'Delta', volume: 'Volume profile per bar' }[m], checked: of.footprint === m, action: () => set({ footprint: m }) })) },
     { label: 'Liquidity heatmap (order book history)', checked: of.heatmap, action: () => set({ heatmap: !of.heatmap }) },
     { label: 'Big trades (bubbles)', checked: of.bubbles, action: () => set({ bubbles: !of.bubbles }) },
@@ -654,6 +670,8 @@ const styleOf = (type: string, color: string) => styleFor(TOOL_MAP.get(type)!, c
 // ---------- symbol search ----------
 let allSymbols: string[] = [];
 fetchSymbols().then(s => (allSymbols = s.sort())).catch(() => {});
+// Search tabs of the Iranian sources: Tehran bourse instrument kinds, tgju groups, Nobitex quote currencies.
+const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'] };
 let searchMode: 'symbol' | 'compare' = 'symbol', searchQuote = 'USDT', searchEx = store.get<string>('searchEx', 'binance');
 const marketCache = new Map<string, RemoteMarket[]>();
 let exchangesLoaded = false;
@@ -662,7 +680,7 @@ async function loadExchanges() {
   try {
     const ex = await fetchExchanges();
     exchangesLoaded = true;
-    $('#searchEx').innerHTML = '<option value="binance">Binance (direct)</option>' + ex.map(x => `<option value="${esc(x.id)}">${x.id === 'fx' ? 'Forex, metals, indices &amp; stocks' : esc(x.id)}</option>`).join('');
+    $('#searchEx').innerHTML = '<option value="binance">Binance (direct)</option>' + ex.map(x => `<option value="${esc(x.id)}">${esc(x.name && x.name !== x.id ? x.name : x.id)}</option>`).join('');
     $<HTMLSelectElement>('#searchEx').value = searchEx;
   } catch (e) { if (isStandalone()) searchEx = 'binance'; else if (searchEx !== 'binance') toast((e as Error).message, 6000) }
 }
@@ -679,7 +697,7 @@ async function renderSearch() {
   const q = $<HTMLInputElement>('#searchIn').value.trim().toUpperCase();
   const row = (sym: string, desc: string, i: number) => `<div class="sl${i === 0 ? ' sel' : ''}" data-s="${esc(sym)}"><b>${esc(sym)}</b><span class="muted">${esc(desc)}</span></div>`;
   if (searchEx !== 'binance') {
-    const tabs = searchEx === 'fx' ? ['all', 'forex', 'metal', 'energy', 'index', 'commodity'] : ['all', 'spot', 'swap', 'future'];
+    const tabs = IR_TABS[searchEx] ?? (searchEx === 'fx' ? ['all', 'forex', 'metal', 'energy', 'index', 'commodity'] : ['all', 'spot', 'swap', 'future']);
     if (!tabs.includes(searchQuote)) searchQuote = 'all';
     $('#searchTabs').innerHTML = tabs.map(x => `<button type="button" data-q="${x}" class="${x === searchQuote ? 'on' : ''}">${x === 'swap' ? 'perpetual' : x}</button>`).join('');
     let ms = marketCache.get(searchEx);
@@ -688,12 +706,16 @@ async function renderSearch() {
       try { ms = await fetchMarkets(searchEx); marketCache.set(searchEx, ms) }
       catch (e) { $('#searchList').innerHTML = `<div class="dn sl-h">${esc((e as Error).message)}</div>`; return }
     }
-    const EX = searchEx.toUpperCase(), qq = q.replace('/', '_');
-    const list = ms.filter(m => (searchQuote === 'all' || m.type === searchQuote) && (!q || m.sym.includes(qq) || (m.name ?? '').toUpperCase().includes(q)))
+    const EX = searchEx.toUpperCase(), qq = (searchEx === 'tse' ? q.replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/\s+/g, '_') : q).replace('/', '_');
+    const list = ms.filter(m => (searchQuote === 'all' || m.type === searchQuote || m.quote === searchQuote) && (!q || m.sym.includes(qq) || (m.name ?? '').toUpperCase().includes(q)))
       .sort((a, b) => (a.sym.startsWith(qq) ? 0 : 1) - (b.sym.startsWith(qq) ? 0 : 1) || a.sym.length - b.sym.length).slice(0, 100);
     // FX also accepts any stock ticker typed in.
     const extra = searchEx === 'fx' && q && /^[A-Z0-9.]{1,12}$/.test(q) && !list.some(m => m.sym === q) ? row(`FX:${q}`, 'Stock or other Yahoo ticker', list.length ? 1 : 0) : '';
-    $('#searchList').innerHTML = (list.map((m, i) => row(`${EX}:${m.sym}`, `${m.name ?? `${m.base} / ${m.quote}`} · ${m.type} · ${searchEx}`, i)).join('') + extra) || '<div class="muted sl-h">No matches</div>';
+    // Tehran bourse: any ticker can be typed even when the market list could not be loaded.
+    const tseExtra = searchEx === 'tse' && qq && /^[\u0600-\u06FFA-Z0-9_.]{1,40}$/.test(qq) && !list.some(m => m.sym === qq) ? row(`TSE:${qq}`, 'Ticker as listed on TSETMC', list.length ? 1 : 0) : '';
+    // Nobitex: the Tether premium over the free-market dollar is a symbol expression (daily bars).
+    const premium = searchEx === 'nobitex' && (!q || 'PREMIUM'.includes(q) || 'TETHER'.includes(q) || 'USDT'.includes(q)) ? row('NOBITEX:USDTIRT/TGJU:USD-1', 'Tether premium over the free-market dollar · expression · use 1D', list.length ? 1 : 0) : '';
+    $('#searchList').innerHTML = (list.map((m, i) => row(`${EX}:${m.sym}`, `${m.name ?? `${m.base} / ${m.quote}`} · ${m.type} · ${searchEx}`, i)).join('') + extra + tseExtra + premium) || '<div class="muted sl-h">No matches</div>';
     return;
   }
   const quotes = ['USDT', 'USDC', 'FDUSD', 'BTC', 'ETH', 'TRY', 'EUR'];
@@ -971,7 +993,16 @@ function ticketReq(): { req?: OrderReq; info: string; error?: string } {
   const stopPrice = k === 'stop' || k === 'stop_limit' ? tval('#tStop') : undefined;
   const price = k === 'limit' || k === 'stop_limit' ? tval('#tPrice') : undefined;
   const entry = price ?? stopPrice ?? last ?? 0;
-  const tp = tchk('#tTpOn') ? tval('#tTp') : undefined, sl = tchk('#tSlOn') ? tval('#tSl') : undefined;
+  const tp = tchk('#tTpOn') ? tval('#tTp') : undefined, plain = tchk('#tSlOn') ? tval('#tSl') : undefined;
+  // Exit plan: a stop and a ladder of targets that manage themselves after the entry fills (src/exits.ts).
+  let exits: ExitPlan | undefined;
+  const planText = $<HTMLInputElement>('#tPlan').value.trim(), fail = (m: string) => ({ info: m, error: m });
+  if (planText) {
+    try { exits = parseExitPlan(planText) } catch (e) { return fail(`Exit plan: ${(e as Error).message}`) }
+    if (tp != null || plain != null) return fail('Use the exit plan or TP / SL, not both');
+    if (tchk('#tOcoOn') || k === 'trailing_stop' || tchk('#tReduce')) return fail('An exit plan needs a plain entry order (no OCO, trailing or reduce-only)');
+  }
+  const sl = exits && entry ? resolvePlan(exits, ticket.side === 'buy' ? 1 : -1, entry).sl : plain;
   const mode = $<HTMLSelectElement>('#tSizeMode').value as SizeMode;
   if (mode !== 'units') {
     const bal = quoteBalance(sym, bs?.balances ?? []);
@@ -980,7 +1011,7 @@ function ticketReq(): { req?: OrderReq; info: string; error?: string } {
     if (z.error) return { info: z.error, error: z.error };
   }
   const qty = tval('#tQty');
-  const req: OrderReq = { sym, side: ticket.side, kind: k, qty, price, stopPrice, tp, sl, reduceOnly: tchk('#tReduce') || undefined };
+  const req: OrderReq = { sym, side: ticket.side, kind: k, qty, price, stopPrice, ...(exits ? { exits } : { tp, sl }), reduceOnly: tchk('#tReduce') || undefined };
   if (k === 'trailing_stop') req.trail = $<HTMLSelectElement>('#tTrailUnit').value === 'pct' ? { pct: tval('#tTrail') } : { amount: tval('#tTrail') };
   if (tchk('#tOcoOn')) {
     const ok = $<HTMLSelectElement>('#tOcoKind').value as 'limit' | 'stop', opx = tval('#tOcoPx');
@@ -988,7 +1019,7 @@ function ticketReq(): { req?: OrderReq; info: string; error?: string } {
   }
   const v = entry * qty, risk = sl != null && sl > 0 ? Math.abs(entry - sl) * qty : null, eq = bs?.equity;
   const info = entry && qty ? `Qty ${qty} · value ≈ ${v.toFixed(2)} · fee ≈ ${(v * 0.001).toFixed(2)}${risk != null ? ` · risk ≈ ${risk.toFixed(2)}${eq ? ` (${((risk / eq) * 100).toFixed(2)}% of equity)` : ''}` : ''}` : '';
-  return { req, info };
+  return { req, info: exits ? `${info}${info ? ' · ' : ''}${describePlan(exits)}` : info };
 }
 function renderTicket() {
   const k = ticket.type, units = $<HTMLSelectElement>('#tSizeMode').value === 'units';

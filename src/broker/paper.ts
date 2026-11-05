@@ -20,11 +20,12 @@ export function toOrder(r: Omit<OrderReq, 'ocoWith'>): Omit<Order, 'id'> {
   if (r.reduceOnly) o.reduceOnly = true;
   if (r.tp != null) o.tp = r.tp;
   if (r.sl != null) o.sl = r.sl;
+  if (r.exits) o.plan = r.exits;
   return o;
 }
 /** Engine order (the older call sites build these) → broker order request. */
 export function fromOrder(o: Omit<Order, 'id'>): OrderReq {
-  const r: OrderReq = { sym: o.sym, side: o.side, kind: o.type, qty: o.qty, reduceOnly: o.reduceOnly, tp: o.tp, sl: o.sl };
+  const r: OrderReq = { sym: o.sym, side: o.side, kind: o.type, qty: o.qty, reduceOnly: o.reduceOnly, tp: o.tp, sl: o.sl, ...(o.plan ? { exits: o.plan } : {}) };
   if (o.type === 'limit' || o.type === 'stop_limit') r.price = o.price;
   if (o.type === 'stop') r.stopPrice = o.price;
   if (o.type === 'stop_limit') r.stopPrice = o.stopPx;

@@ -3,6 +3,7 @@ import type { AlertInput, AlertSource, Channel, LineRef, ScriptSource } from '..
 import { validTf } from '../../src/data.ts';
 import { bad, obj } from '../core/http.ts';
 import { EX_RE, SYM_RE } from '../market.ts';
+import { IRAN } from '../iran/index.ts';
 import { isExchange } from '../ccxt.ts';
 import { CONDITIONS, FREQUENCIES, isChannel, isMoving } from './evaluate.ts';
 import { isPublic } from '../core/mode.ts';
@@ -20,12 +21,12 @@ const int = (x: unknown, what: string, lo: number, hi: number) => { if (!Number.
 const str = (x: unknown, what: string, max: number) => { if (typeof x !== 'string' || x.length > max) throw bad(`Bad ${what}`); return x };
 const optBool = (x: unknown, what: string) => { if (x !== undefined && typeof x !== 'boolean') throw bad(`Bad ${what}`); return x as boolean | undefined };
 
-function validSym(sym: unknown): string {
-  const m = typeof sym === 'string' ? /^(?:([A-Z0-9]{2,30}):)?([A-Z0-9_.]{1,40})$/.exec(sym) : null;
+export function validSym(sym: unknown): string {
+  const m = typeof sym === 'string' ? /^(?:([A-Z0-9]{2,30}):)?([A-Z0-9_.\u0600-\u06FF]{1,40})$/.exec(sym) : null;
   if (!m || !SYM_RE.test(m[2])) throw bad('Bad symbol');
   if (m[1] && m[1] !== 'BINANCE') {
     const ex = m[1].toLowerCase();
-    if (!EX_RE.test(ex) || (ex !== 'fx' && !isExchange(ex))) throw bad('Unknown exchange');
+    if (!EX_RE.test(ex) || (ex !== 'fx' && !IRAN[ex] && !isExchange(ex))) throw bad('Unknown exchange');
   }
   return sym as string;
 }

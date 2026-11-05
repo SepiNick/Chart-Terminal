@@ -1,6 +1,7 @@
 // Phase 6 broker contract (docs/phase6-contracts.md), shared by the client and the server. Types only.
 // One model for every account: our paper account (in the browser) and exchange testnet accounts (on the server).
 import type { Side } from '../trading.ts';
+import type { ExitPlan } from '../exits.ts';
 
 export type { Side };
 /** 'paper' is the synced paper account; the rest are exchange TESTNETS only (the server refuses mainnet). */
@@ -43,6 +44,7 @@ export interface OrderReq {
   trail?: { pct?: number; amount?: number };   // trailing_stop: distance from the best price since placement
   reduceOnly?: boolean;
   tp?: number; sl?: number;     // bracket: placed as an OCO pair once this order fills
+  exits?: ExitPlan;             // exit strategy: stop, target ladder, breakeven, trailing (paper account only, src/exits.ts)
   ocoWith?: Omit<OrderReq, 'tp' | 'sl' | 'ocoWith'>;   // standalone OCO: this order and `ocoWith` cancel each other
   clientId?: string;
 }

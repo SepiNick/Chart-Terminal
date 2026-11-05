@@ -38,11 +38,12 @@ function baseOf(tf: string): { base: string; n: number } {
   return { base, n: sec / tfSeconds(base) };
 }
 // Weeks are anchored to Monday (epoch day 0 was a Thursday), like exchange weekly candles.
-const bucket = (t: number, sec: number) => { const a = sec % 604800 === 0 ? 345600 : 0; return Math.floor((t - a) / sec) * sec + a };
-export function aggregate(bars: Bar[], sec: number): Bar[] {
+const bucket = (t: number, sec: number, weekAnchor = 345600) => { const a = sec % 604800 === 0 ? weekAnchor : 0; return Math.floor((t - a) / sec) * sec + a };
+/** `weekAnchor`: where week buckets start; Monday by default, Saturday for Iranian markets. */
+export function aggregate(bars: Bar[], sec: number, weekAnchor?: number): Bar[] {
   const out: Bar[] = [];
   for (const b of bars) {
-    const t = bucket(b.time, sec), last = out.at(-1);
+    const t = bucket(b.time, sec, weekAnchor), last = out.at(-1);
     if (last && last.time === t) { last.high = Math.max(last.high, b.high); last.low = Math.min(last.low, b.low); last.close = b.close; last.volume += b.volume }
     else out.push({ ...b, time: t });
   }

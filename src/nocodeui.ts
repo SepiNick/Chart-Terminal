@@ -12,8 +12,8 @@ let onCreate: (src: string) => void = () => {};
 
 const lenOf = (k: Operand['kind']) => OPERANDS.find(o => o.kind === k)?.len;
 function operandHtml(o: Operand, path: string) {
-  const extra = o.kind === 'value' ? `<input type="number" step="any" data-p="${path}.value" value="${o.value ?? 0}" style="width:80px">`
-    : o.len != null ? `<input type="number" min="1" data-p="${path}.len" value="${o.len}" style="width:56px" title="Length">` : '';
+  const extra = o.kind === 'value' ? `<input type="number" step="any" data-p="${path}.value" value="${esc(String(o.value ?? 0))}" style="width:80px">`
+    : o.len != null ? `<input type="number" min="1" data-p="${path}.len" value="${esc(String(o.len))}" style="width:56px" title="Length">` : '';
   return `<select data-p="${path}.kind">${OPERANDS.map(x => `<option value="${x.kind}" ${x.kind === o.kind ? 'selected' : ''}>${x.label}</option>`).join('')}</select>${extra}`;
 }
 function ruleHtml(key: RuleKey, label: string, r: Rule) {
