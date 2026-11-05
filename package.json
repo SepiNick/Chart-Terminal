@@ -13,7 +13,8 @@
     "check:ir": "node server/iran/check.ts",
     "audit:html": "node scripts/audit-html.mjs",
     "bench": "node --experimental-strip-types --expose-gc scripts/bench.ts",
-    "build:lite": "node lite/build.mjs"
+    "build:lite": "node lite/build.mjs",
+    "build:android-standalone": "node android/build-standalone.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",

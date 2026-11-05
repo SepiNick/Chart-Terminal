@@ -8,14 +8,14 @@ export type { Bar };
 export const isExprSym = (s: string) => /[/*+\-()]/.test(s.replace(/^[A-Z0-9]+:/, ''));
 
 /** Up to ~1000 most recent bars. */
-export async function fetchBars(sym: string, tf: string): Promise<Bar[]> {
+async function fetchBars(sym: string, tf: string): Promise<Bar[]> {
   if (isExprSym(sym)) throw Error('Symbol expressions are not supported on the server');
   if (!isRemote(sym)) return fetchBinance(sym, tf);
   const { exchange, symbol } = splitSym(sym);
   return (await remoteBars(exchange, symbol, tf)).bars;
 }
 /** Live updates of the current (and each new) bar. Returns an unsubscribe function. */
-export function streamBars(sym: string, tf: string, onBar: (b: Bar) => void): () => void {
+function streamBars(sym: string, tf: string, onBar: (b: Bar) => void): () => void {
   if (!isRemote(sym)) return streamBinance(sym, tf, onBar);
   const { exchange, symbol } = splitSym(sym);
   return startFeed(exchange, symbol, tf, onBar);

@@ -4,19 +4,10 @@ import { api, hydrate, localKeys, localSnapshot, queueState, setServerMode, star
 import { store } from './store.ts';
 import { accountMenu, dialog, injectStyle, loginScreen, setupScreen } from './login.ts';
 import { accountScreen, mustChangeScreen } from './accountscreens.ts';
-import { applyGates, offlineBanner } from './serversui.ts';
-import { parseStatus, recordStatus, serverFetch, setToken, syncServer, type ServerStatus } from './servers.ts';
+import { applyGates, standaloneChip } from './serversui.ts';
+import { decideStandalone } from './standalone.ts';
+import { recordStatus, setToken, syncServer } from './servers.ts';
 import { uploadLocalMedia } from './journal/media.ts';
-
-async function authStatus(): Promise<ServerStatus | null> {
-  try {
-    const r = await serverFetch('/api/auth/status');
-    const st = r.ok ? parseStatus(await r.json()) : null;   // Vite without the server answers 5xx; static hosting answers HTML
-    if (st) recordStatus(syncServer().id, st);
-    return st;
-  } catch { return null }
-}
-
 
 function downloadBackup() {
   const a = document.createElement('a');
@@ -55,9 +46,12 @@ function offerUpload(): Promise<void> {
 async function boot() {
   const theme = () => { const t = store.get<{ theme?: string }>('settings', {}).theme; if (t) document.documentElement.dataset.theme = t };
   theme();
-  const st = await authStatus();
-  if (!st) offlineBanner(syncServer().name);
-  else {
+  const { status: st } = await decideStandalone();   // no server answered => standalone: no sign-in, nothing leaves the device
+  if (!st) {
+    standaloneChip();
+    try { void navigator.storage?.persist?.() } catch {}   // ask the browser not to evict this device's only copy of the data
+  } else {
+    recordStatus(syncServer().id, st);
     let me = st.user;
     if (!st.loggedIn) setToken(syncServer().id, undefined);   // a stale token
     if (st.mode === 'public') { if (!st.loggedIn) me = await accountScreen(st); if (me?.mustChange) await mustChangeScreen(me.name) }

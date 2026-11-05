@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+dist
+dist-lite
+desktop/release
+desktop/app
+android
+graphify-out
+.git
+.claude
+**/.claude
+*.apk
+*.jks
+keystore.properties
+server/data

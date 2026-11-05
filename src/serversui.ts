@@ -1,8 +1,9 @@
 // Settings → Servers: saved servers, the sync server, the optional trading server, and the feature gates
 // (elements marked data-feature="trading|ai|ml|forward|scripts" are hidden when the matching server does not offer them).
-import { dialog } from './login.ts';
+import { dialog, injectStyle } from './login.ts';
 import { esc, toast } from './store.ts';
-import { addServer, canBeTradeServer, gate, listServers, mixedContentWarning, normalizeBaseUrl, onServersChanged, probeStatus, recordStatus, removeServer, setSyncServer, setTradeServer, syncServer, tradeId, tradeServer, type Features, type ServerStatus } from './servers.ts';
+import { bundledOrigin, leaveStandalone, watchForServer } from './standalone.ts';
+import { STANDALONE_WHY, addServer, isStandalone, canBeTradeServer, gate, listServers, mixedContentWarning, normalizeBaseUrl, onServersChanged, probeStatus, recordStatus, removeServer, setSyncServer, setTradeServer, syncServer, tradeId, tradeServer, type Features, type ServerStatus } from './servers.ts';
 
 const FEATS: (keyof Features)[] = ['trading', 'ai', 'ml', 'forward', 'scripts'];
 const feats = (f?: Features) => (f ? FEATS.filter(k => f[k]).join(', ') || 'none' : 'unknown');
@@ -21,7 +22,7 @@ export function openServers() {
           <td style="white-space:nowrap">${s.id === syncServer().id ? '' : `<button type="button" data-use="${esc(s.id)}">Use for sync</button> `}${s.id !== 'local' ? `<button type="button" data-rm="${esc(s.id)}">Remove</button>` : ''}</td></tr>`;
       }).join('')}</table>
       <div class="form"><label>Trading server</label><select name="trade"><option value="">Automatic (the sync server when it is private)</option>${eligible.map(s => `<option value="${esc(s.id)}"${s.id === tid ? ' selected' : ''}>${esc(s.serverName ?? s.name)}</option>`).join('')}</select></div>
-      ${FEATS.filter(k => !gate(k).on).slice(0, 1).map(k => `<p class="muted ct-warn">${esc(gate(k).why)}</p>`).join('')}`;
+      ${isStandalone() ? `<p class="muted ct-warn">${STANDALONE_WHY}. Add a server below and press "Use for sync" to connect; until then everything stays on this device.</p>` : FEATS.filter(k => !gate(k).on).slice(0, 1).map(k => `<p class="muted ct-warn">${esc(gate(k).why)}</p>`).join('')}`;
       list.querySelector<HTMLSelectElement>('[name=trade]')!.onchange = e => { try { setTradeServer((e.target as HTMLSelectElement).value || null); toast('Trading server changed — reload to apply'); render() } catch (x) { err.textContent = (x as Error).message } };
     };
     list.onclick = async e => {
@@ -60,6 +61,7 @@ export function applyGates() {
       const g = gate(el.dataset.feature as keyof Features);
       el.hidden = !g.on; el.title = g.on ? el.title : g.why;
     });
+    document.querySelectorAll<HTMLElement>('[data-needs-server]').forEach(el => { el.hidden = isStandalone(); el.title = isStandalone() ? STANDALONE_WHY : el.title });
     // an open side panel whose rail button just disappeared would leave an empty panel
     const open = document.querySelector<HTMLElement>('#rail [data-side].on');
     if (open?.hidden) document.querySelector<HTMLElement>('#rail [data-side="watch"]')?.click();
@@ -80,12 +82,17 @@ export function applyGates() {
   run(); onServersChanged(run);
 }
 
-/** Offline banner: what is wrong, retry, and a way to pick another server. */
-export function offlineBanner(name: string) {
-  const d = document.createElement('div'); d.className = 'ct-banner';
-  d.innerHTML = `Cannot reach ${esc(name)} — showing the data saved on this device. <button data-r>Retry</button><button data-s>Servers…</button><button data-x title="Hide">✕</button>`;
-  d.querySelector<HTMLElement>('[data-r]')!.onclick = () => location.reload();
-  d.querySelector<HTMLElement>('[data-s]')!.onclick = openServers;
-  d.querySelector<HTMLElement>('[data-x]')!.onclick = () => d.remove();
+/** Standalone chip: says where the data lives, offers the server picker, and turns into a "switch" prompt if a server appears. */
+export function standaloneChip() {
+  injectStyle();
+  const d = document.createElement('div'); d.className = 'ct-banner'; d.id = 'standaloneChip';
+  d.innerHTML = '<span data-t>Standalone · data stays on this device</span><button data-s title="Pick or add a Chart Terminal server">Connect to a server</button>';
+  // the bundled Android app only talks to Binance, so a server needs the client app instead
+  d.querySelector<HTMLElement>('[data-s]')!.onclick = bundledOrigin() ? () => toast('This is the standalone app and only talks to Binance. To use your own server, install the Chart Terminal client app.', 8000) : openServers;
   document.body.append(d);
+  watchForServer(() => {
+    d.querySelector('[data-t]')!.textContent = 'A server is reachable now';
+    const b = d.querySelector<HTMLElement>('[data-s]')!;
+    b.textContent = 'Switch'; b.onclick = () => { leaveStandalone(); location.reload() };
+  });
 }

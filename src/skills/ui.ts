@@ -2,17 +2,22 @@
 // per skill in this browser; results are recomputed on Run. Nothing here places orders: skills only propose.
 import { $, esc, store } from '../store.ts';
 import { SKILLS } from './index.ts';
+import { STANDALONE_WHY, isStandalone } from '../servers.ts';
 import type { Ctx, Input, Result, Skill } from './types.ts';
 
+/** Skills that read /api (SEC filings, stock lists, breadth, treasury …): unavailable without a server. */
+const SERVER_SKILLS = new Set(['trader-analyst', 'market-breadth-analyzer', 'stockbee-momentum-burst-screener', 'canslim-screener', 'trader-copycat', 'dividend-growth-pullback-screener', 'downtrend-duration-analyzer', 'earnings-calendar', 'earnings-trade-analyzer', 'exposure-coach', 'institutional-flow-tracker', 'kanchi-dividend-sop', 'kanchi-dividend-review-monitor', 'macro-regime-detector', 'pair-trade-screener', 'parabolic-short-trade-planner', 'pead-screener', 'trader-pelosi', 'stockbee-episodic-pivot-analyzer', 'crypto-regime-analyzer', 'market-top-detector', 'uptrend-analyzer', 'sector-analyst', 'value-dividend-screener', 'vcp-screener']);
+const needsServer = (s: Skill) => isStandalone() && SERVER_SKILLS.has(s.id);
 let ctx: Ctx;
 let cur = store.get<string>('skillCur', SKILLS[0]?.id ?? '');
+if (isStandalone() && SERVER_SKILLS.has(cur)) cur = SKILLS.find(s => !SERVER_SKILLS.has(s.id))?.id ?? cur;
 const saved = store.get<Record<string, Record<string, unknown>>>('skillInputs', {});
 
 export function initSkills(c: Ctx) {
   ctx = c;
   const box = $('#s-skills');
   box.innerHTML = `<h3>Skills <span class="muted">${SKILLS.length} · rules only, no AI</span></h3>
-    <select id="skPick" aria-label="Skill">${[...new Set(SKILLS.map(s => s.group))].map(g => `<optgroup label="${esc(g)}">${SKILLS.filter(s => s.group === g).map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('')}</optgroup>`).join('')}</select>
+    <select id="skPick" aria-label="Skill">${[...new Set(SKILLS.map(s => s.group))].map(g => `<optgroup label="${esc(g)}">${SKILLS.filter(s => s.group === g).map(s => `<option value="${esc(s.id)}"${needsServer(s) ? ' disabled' : ''}>${esc(s.name)}${needsServer(s) ? ' (needs a server)' : ''}</option>`).join('')}</optgroup>`).join('')}</select>
     <div id="skDesc" class="muted"></div><form id="skForm" class="form"></form><div class="row"><button id="skRun" class="on">Run</button><span class="grow"></span><button id="skReset" class="x" title="Back to the default inputs">Reset</button></div><div id="skOut"></div>`;
   $<HTMLSelectElement>('#skPick').onchange = e => { cur = (e.target as HTMLSelectElement).value; store.set('skillCur', cur); renderSkills() };
   $('#skRun').onclick = () => void run();
@@ -49,6 +54,7 @@ function read(s: Skill): Record<string, unknown> {
 }
 async function run() {
   const s = skill(), out = $('#skOut');
+  if (needsServer(s)) { out.innerHTML = `<div class="dn">${esc(STANDALONE_WHY)}</div>`; return }
   out.innerHTML = '<div class="muted">Running…</div>';
   try { out.innerHTML = view(await s.run(read(s), ctx)) }
   catch (e) { out.innerHTML = `<div class="dn">${esc((e as Error).message)}</div>` }

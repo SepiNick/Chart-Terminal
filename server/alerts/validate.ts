@@ -1,7 +1,7 @@
 // Strict validation of AlertInput coming from clients (another device may send anything).
 import type { AlertInput, AlertSource, Channel, LineRef, ScriptSource } from '../../src/alerttypes.ts';
 import { validTf } from '../../src/data.ts';
-import { bad } from '../core/http.ts';
+import { bad, obj } from '../core/http.ts';
 import { EX_RE, SYM_RE } from '../market.ts';
 import { IRAN } from '../iran/index.ts';
 import { isExchange } from '../ccxt.ts';
@@ -16,7 +16,6 @@ const CHANNELS: Channel[] = ['popup', 'push', 'telegram', 'email', 'webhook'];
 const KEYS = new Set(['name', 'sym', 'tf', 'source', 'condition', 'value', 'value2', 'bars', 'frequency', 'expires', 'channels', 'webhook', 'message', 'active', 'autoStop']);
 const MAX_NUM = 1e15;
 
-const obj = (x: unknown, what: string) => { if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad(`${what} must be an object`); return x as Record<string, unknown> };
 const num = (x: unknown, what: string) => { if (typeof x !== 'number' || !Number.isFinite(x) || Math.abs(x) > MAX_NUM) throw bad(`Bad ${what}`); return x };
 const int = (x: unknown, what: string, lo: number, hi: number) => { if (!Number.isInteger(x) || (x as number) < lo || (x as number) > hi) throw bad(`${what} must be an integer ${lo}–${hi}`); return x as number };
 const str = (x: unknown, what: string, max: number) => { if (typeof x !== 'string' || x.length > max) throw bad(`Bad ${what}`); return x };

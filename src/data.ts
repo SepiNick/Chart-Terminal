@@ -1,5 +1,5 @@
 // Market data: Binance public mirror (no key, CORS-enabled). Exchange accounts come later via the local server.
-import { serverFetch, serverSocket } from './servers.ts';
+import { STANDALONE_WHY, isStandalone, serverFetch, serverSocket } from './servers.ts';
 import { ofTfLabel, ofTfName, parseOfTf } from './orderflow/tfbars.ts';
 export interface Bar { time: number; open: number; high: number; low: number; close: number; volume: number }
 
@@ -57,6 +57,7 @@ export const isRemote = (s: string) => /^[A-Z0-9]+:/.test(s) && !s.startsWith('B
 export const splitSym = (s: string) => { const i = s.indexOf(':'); return { exchange: s.slice(0, i).toLowerCase(), symbol: s.slice(i + 1) } };
 export async function serverJson<T>(path: string): Promise<T> {
   let r: Response;
+  if (isStandalone()) throw Error(STANDALONE_WHY);
   try { r = await serverFetch(path) } catch { throw Error('Data server is not running — start it with: npm run server') }
   const j = await r.json().catch(() => ({ error: `Data server error ${r.status} — is it running? (npm run server)` }));
   if (!r.ok) throw Error((j as { error?: string }).error ?? String(r.status));
@@ -70,21 +71,22 @@ async function fetchRemote(sym: string, tf: string, endTime?: number): Promise<B
 }
 /** One shared socket to the data server; subscriptions are re-sent after reconnects. */
 const remoteSubs = new Map<string, Set<(b: Bar) => void>>();
-let remoteWs: WebSocket | null = null;
+let remoteWs: WebSocket | null = null, remoteWait = 3000;
 function remoteSocket(): WebSocket {
   if (remoteWs && remoteWs.readyState <= 1) return remoteWs;
   const ws = serverSocket('/ws');
   remoteWs = ws;
-  ws.onopen = () => remoteSubs.forEach((_, k) => { const [exchange, symbol, tf] = k.split('|'); ws.send(JSON.stringify({ op: 'sub', exchange, symbol, tf })) });
+  ws.onopen = () => { remoteWait = 3000; remoteSubs.forEach((_, k) => { const [exchange, symbol, tf] = k.split('|'); ws.send(JSON.stringify({ op: 'sub', exchange, symbol, tf })) }) };
   ws.onmessage = e => { const m = JSON.parse(e.data); remoteSubs.get(`${m.exchange}|${m.symbol}|${m.tf}`)?.forEach(f => f(m.bar)) };
-  ws.onclose = () => { if (remoteWs === ws) { remoteWs = null; if (remoteSubs.size) setTimeout(remoteSocket, 3000) } };
+  ws.onclose = () => { if (remoteWs === ws) { remoteWs = null; if (remoteSubs.size) { setTimeout(() => { try { remoteSocket() } catch {} }, remoteWait); remoteWait = Math.min(remoteWait * 2, 60_000) } } };
   return ws;
 }
 function streamRemote(sym: string, tf: string, onBar: (b: Bar) => void): () => void {
   const { exchange, symbol } = splitSym(sym), k = `${exchange}|${symbol}|${tf}`;
   const set = remoteSubs.get(k) ?? new Set();
   remoteSubs.set(k, set); set.add(onBar);
-  const ws = remoteSocket();
+  let ws: WebSocket;
+  try { ws = remoteSocket() } catch { remoteSubs.delete(k); return () => {} }   // standalone / no server: nothing to stream
   if (set.size === 1 && ws.readyState === 1) ws.send(JSON.stringify({ op: 'sub', exchange, symbol, tf }));
   return () => {
     set.delete(onBar);

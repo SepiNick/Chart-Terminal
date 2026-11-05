@@ -19,7 +19,8 @@ const CSS = `
 #acctBtn{position:relative}#acctBtn i{position:absolute;right:3px;top:3px;width:7px;height:7px;border-radius:50%;background:var(--up)}
 #acctBtn i.saving{background:var(--accent)}#acctBtn i.offline{background:var(--down)}
 .ct-banner{position:fixed;left:8px;bottom:8px;z-index:70;background:var(--panel);color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:11px}
-.ct-banner button{border:0;background:none;color:inherit;padding:0 0 0 6px}`;
+.ct-banner button{border:0;background:none;color:inherit;padding:0 0 0 6px}
+#standaloneChip{left:56px;max-width:calc(100vw - 64px);display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px}#standaloneChip button{padding:0;text-decoration:underline;color:var(--accent)}`;
 let styled = false;
 export function injectStyle() { if (styled) return; styled = true; const s = document.createElement('style'); s.textContent = CSS; document.head.append(s) }
 

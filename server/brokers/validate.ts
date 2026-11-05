@@ -1,6 +1,6 @@
 // Strict validation of broker API input (any device on the LAN can send anything).
 import type { AccountInput, Guard, OrderKind, OrderPatch, OrderReq } from '../../src/broker/types.ts';
-import { bad } from '../core/http.ts';
+import { bad, obj } from '../core/http.ts';
 import { parseSym } from './adapter.ts';
 
 export const KUCOIN_MSG = 'KuCoin is not available: CCXT 4.5 has no KuCoin sandbox (KuCoin closed its sandbox), so there is no testnet to trade on';
@@ -8,7 +8,6 @@ const BROKERS = ['binance', 'binanceusdm', 'bybit', 'okx', 'kucoin', 'nobitex', 
 const KINDS: OrderKind[] = ['market', 'limit', 'stop', 'stop_limit', 'trailing_stop'];
 const MAX = 1e15;
 
-const obj = (x: unknown, what: string) => { if (!x || typeof x !== 'object' || Array.isArray(x)) throw bad(`${what} must be an object`); return x as Record<string, unknown> };
 const only = (o: Record<string, unknown>, keys: string[]) => { for (const k of Object.keys(o)) if (!keys.includes(k)) throw bad(`Unknown field ${k.slice(0, 40)}`) };
 const pos = (x: unknown, what: string) => { if (typeof x !== 'number' || !Number.isFinite(x) || x <= 0 || x > MAX) throw bad(`Bad ${what}`); return x };
 const pct = (x: unknown, what: string) => { if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > 100) throw bad(`${what} must be 0–100`); return x };

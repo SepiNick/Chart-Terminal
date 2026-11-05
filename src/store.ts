@@ -1,7 +1,9 @@
 import { memo, queueState } from './sync.ts';
+import { isStandalone } from './servers.ts';
 
 // App state: localStorage (`ct.<key>`) as the working copy; in server mode every write is also queued to the server
 // (sync.ts). Every access is guarded: storage can be missing, blocked or full.
+let full = false;
 export const store = {
   get<T>(key: string, fallback: T): T {
     let v: string | null | undefined = memo.get(key);   // newer than localStorage when present
@@ -12,7 +14,7 @@ export const store = {
   set(key: string, value: unknown): boolean {
     let ok = true;
     try { localStorage.setItem('ct.' + key, JSON.stringify(value)); memo.delete(key) }
-    catch { ok = false; const j = JSON.stringify(value); if (j !== undefined) memo.set(key, j) }
+    catch { ok = false; if (isStandalone() && !full) { full = true; setTimeout(() => toast('Device storage is full: recent changes may be lost on restart. Delete old scripts or journal pictures.', 8000), 0) } const j = JSON.stringify(value); if (j !== undefined) memo.set(key, j) }
     queueState(key, value);
     return ok;
   },

@@ -14,7 +14,7 @@ if (!isPublic) migration('auth/1', `CREATE TABLE sessions (token_hash TEXT PRIMA
 
 if (!isPublic) migration('auth/2', `ALTER TABLE sessions ADD COLUMN device TEXT`);   // non-NULL = Bearer device token (label)
 
-export const COOKIE = 'ct_session';
+const COOKIE = 'ct_session';
 const SESSION_DAYS = isPublic ? (Number(process.env.CT_SESSION_DAYS) > 0 ? Number(process.env.CT_SESSION_DAYS) : 30) : 60;
 const hash = (t: string) => createHash('sha256').update(t).digest('hex');
 /** Public + HTTPS: `__Host-` (Secure, Path=/, no Domain) so a sibling subdomain cannot plant a cookie. Everything else keeps the old name. */
@@ -59,7 +59,7 @@ export function createDevice(req: IncomingMessage, label: string, user: User = P
   return token;
 }
 export function endSession(token: string) { if (U) U.endSession(token); else db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hash(token)) }
-export function cookieToken(req: IncomingMessage, secure = false): string | null {
+function cookieToken(req: IncomingMessage, secure = false): string | null {
   const m = String(req.headers.cookie ?? '').match(new RegExp(`(?:^|;\\s*)${cookieName(secure)}=([^;]+)`));
   if (!m) return null;
   try { return decodeURIComponent(m[1]) } catch { return null }
@@ -90,8 +90,6 @@ export function authenticate(req: IncomingMessage, secure: boolean, wsToken?: st
   const user = userOfToken(token, 'cookie');
   return user ? { token, user, bearer: false } : null;
 }
-/** Valid session token for this request, or null. */
-export const sessionOf = (req: IncomingMessage, secure = false): string | null => authenticate(req, secure)?.token ?? null;
 export const sessionCookie = (token: string, secure: boolean) => `${cookieName(secure)}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_DAYS * 86400}${secure ? '; Secure' : ''}`;
 export const clearCookie = (secure: boolean) => `${cookieName(secure)}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure ? '; Secure' : ''}`;
 /** Public id of a session: a prefix of its token's hash (never the token). `current` marks the caller's own. */
