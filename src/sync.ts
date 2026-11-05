@@ -1,6 +1,7 @@
 // Client side of the server connection (docs/phase5-contracts.md §3): one event WebSocket with server messages fanned
 // out by `type`, the queue that pushes `store.set` writes to the server, and the localStorage <-> server helpers boot uses.
 // Imports nothing from the app so every module (store.ts included) can use it.
+import { mergeMeta, type Meta } from './syncmerge.ts';
 import { clientId as cid, serverFetch, serverSocket, syncServer, tradeServer, type Role } from './servers.ts';
 type Handler = (msg: Record<string, unknown>) => void;
 const handlers = new Map<string, Set<Handler>>();
@@ -38,7 +39,7 @@ export const apiTrade: typeof api = (path, init) => api(path, { ...init, role: '
 /** Keys the running app applies live when another device or the server changes them (the server writes `acct` for forward-test fills). */
 const HOT_KEYS = new Set(['acct']);
 /** Per-device UI state: never sent to the server. */
-const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx']);
+const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx', 'aiUrl', 'brokerActive']);   // aiUrl may hold credentials / a LAN address; brokerActive names a broker that exists on one server only
 const KEY_RE = /^[A-Za-z0-9_.-]{1,64}$/;   // same as server/state.ts
 export const isSynced = (key: string) => KEY_RE.test(key) && !LOCAL_KEYS.has(key);
 
@@ -70,6 +71,18 @@ export function hydrate(state: ServerState, ls: Kv = localStorage) {
     const json = JSON.stringify(row.value);
     try { ls.setItem('ct.' + k, json); memo.delete(k) } catch { ls.removeItem('ct.' + k); memo.set(k, json) }
   }
+}
+
+/** Remove every synced key and the owner marker (public-server logout: the data is on the server). */
+export function clearSynced(ls: Kv & { removeItem(k: string): void } = localStorage) {
+  for (const k of localKeys(ls)) ls.removeItem('ct.' + k);
+  ls.removeItem('ctown'); memo.clear(); revs.clear();
+}
+export function downloadBackup() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(localSnapshot(), null, 1)], { type: 'application/json' }));
+  a.download = `chart-terminal-browser-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }
 
 // ---------- outgoing writes: debounced per key, retried with backoff, last write wins on the server ----------
@@ -115,6 +128,13 @@ async function send(key: string, attempt: number) {
  */
 function conflict(key: string, server?: { rev?: number; value?: unknown }) {
   if (!server || typeof server.rev !== 'number') return;
+  if (key === 'syncmeta') {   // edit/delete stamps must never be dropped: combine both and send again
+    const mine = (pending.get(key) ?? (() => { try { return JSON.parse(localStorage.getItem('ct.syncmeta') ?? 'null') } catch { return null } })()) as Meta | null;
+    const merged = mergeMeta(server.value as Meta, mine ?? undefined);
+    revs.set(key, server.rev);
+    try { localStorage.setItem('ct.syncmeta', JSON.stringify(merged)) } catch {}
+    pending.set(key, merged); schedule(key, 400, 0); return;
+  }
   pending.delete(key);
   revs.set(key, server.rev);
   const json = JSON.stringify(server.value);
@@ -122,11 +142,13 @@ function conflict(key: string, server?: { rev?: number; value?: unknown }) {
   note(`"${key}" was changed on another device; that version was kept and your last edit here was not saved`, { label: 'Reload', run: () => location.reload() });
 }
 /** Send everything queued now (before logging out / leaving). keepalive lets small writes survive the page closing. */
-export async function flushNow(keepalive = false) {
-  await Promise.allSettled([...pending].map(([key, value]) => {
+export async function flushNow(keepalive = false): Promise<boolean> {
+  const rs = await Promise.allSettled([...pending].map(([key, value]) => {
     clearTimeout(timers.get(key)); timers.delete(key); pending.delete(key);
-    return value === undefined ? api(`/api/state/${key}`, { method: 'DELETE', keepalive }) : api(`/api/state/${key}`, { method: 'PUT', body: { value, baseRev: revs.get(key) ?? 0 }, keepalive }).then(r => { revs.set(key, (r as { rev: number }).rev); return r });
+    return (value === undefined ? api(`/api/state/${key}`, { method: 'DELETE', keepalive }) : api(`/api/state/${key}`, { method: 'PUT', body: { value, baseRev: revs.get(key) ?? 0 }, keepalive }).then(r => { revs.set(key, (r as { rev: number }).rev); return r }))
+      .catch(e => { if (!pending.has(key)) pending.set(key, value); throw e });   // not sent: keep it queued
   }));
+  return rs.every(r => r.status === 'fulfilled');
 }
 
 // ---------- status for the account button ----------

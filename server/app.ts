@@ -9,6 +9,7 @@ import { isPublic } from './core/mode.ts';
 await import('./market.ts');
 await import('./authroutes.ts');
 await import('./state.ts');
+await import('./restore.ts');
 await import('./notify/index.ts');
 await import('./alerts/index.ts');
 if (!isPublic) { await import('./forward.ts'); await import('./recorder.ts') }

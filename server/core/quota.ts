@@ -7,13 +7,13 @@ import { isPublic } from './mode.ts';
 const MB = 1024 * 1024;
 const PUBLIC = {
   alerts: 50, watchUser: 30, watchServer: 400, alertLog: 1000, pushSubs: 5, notifyPerMin: 20, notifyPerDay: 200,
-  stateMb: 20, stateKeys: 200, stateKeyMb: 2, journalKeyMb: 8, mediaMb: 100, mediaItems: 200, mediaEachMb: 15,
+  stateMb: 20, stateKeys: 200, stateKeyMb: 2, journalKeyMb: 8, restoreMb: 30, mediaMb: 100, mediaItems: 200, mediaEachMb: 15,
   shares: 50, shareMb: 30, snapMb: 4, dbMb: 150, rps: 20, burst: 60, inflight: 16, sockets: 4, wsMsgPerSec: 20, subsSocket: 40, subsUser: 100,
 };
 export type Limits = typeof PUBLIC;
 const PRIVATE: Limits = {   // what the single-user server always allowed; everything else unlimited
   alerts: 500, watchUser: Infinity, watchServer: Infinity, alertLog: 5000, pushSubs: Infinity, notifyPerMin: Infinity, notifyPerDay: Infinity,
-  stateMb: Infinity, stateKeys: Infinity, stateKeyMb: Infinity, journalKeyMb: Infinity, mediaMb: Infinity, mediaItems: Infinity, mediaEachMb: 15,
+  stateMb: Infinity, stateKeys: Infinity, stateKeyMb: Infinity, journalKeyMb: Infinity, restoreMb: Infinity, mediaMb: Infinity, mediaItems: Infinity, mediaEachMb: 15,
   shares: Infinity, shareMb: Infinity, snapMb: 8, dbMb: Infinity, rps: Infinity, burst: Infinity, inflight: Infinity, sockets: Infinity, wsMsgPerSec: Infinity, subsSocket: Infinity, subsUser: Infinity,
 };
 const snake = (k: string) => k.replace(/[A-Z]/g, c => '_' + c).toUpperCase();

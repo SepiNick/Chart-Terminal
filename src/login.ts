@@ -1,6 +1,6 @@
 // Sign-in screens (first password, login) and the account menu in the top bar. Built at runtime so index.html stays
 // the app's markup; styled with the app's CSS variables.
-import { api, flushNow, onSyncStatus, type SyncStatus } from './sync.ts';
+import { api, clearSynced, downloadBackup, flushNow, onSyncStatus, type SyncStatus } from './sync.ts';
 import { deviceLabel, gate, isSameOrigin, setToken, syncServer } from './servers.ts';
 import { releasePushOnServer } from './push.ts';
 import { esc, toast } from './store.ts';
@@ -101,7 +101,7 @@ export function accountMenu() {
     const r = b.getBoundingClientRect();
     m.style.top = `${r.bottom + 4}px`; m.style.right = `${Math.max(4, innerWidth - r.right)}px`;
     m.innerHTML = `<div class="ctx-i muted" style="pointer-events:none">Signed in · ${esc(LABEL[st])}</div><hr>
-      ${gate('trading').on ? '<div class="ctx-i" data-a="accts">Exchange accounts…</div>' : ''}<div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div>${syncServer().mode === 'public' ? '<div class="ctx-i" data-a="codes">New recovery codes…</div>' : ''}<div class="ctx-i" data-a="servers">Servers…</div><hr>
+      ${gate('trading').on ? '<div class="ctx-i" data-a="accts">Exchange accounts…</div>' : ''}<div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div>${syncServer().mode === 'public' ? '<div class="ctx-i" data-a="methods">Sign-in methods…</div><div class="ctx-i" data-a="codes">New recovery codes…</div>' : ''}<div class="ctx-i" data-a="restore">Restore points…</div><div class="ctx-i" data-a="servers">Servers…</div><hr>
       <div class="ctx-i" data-a="logout">Log out</div>`;
     document.body.append(m);
     const off = () => { m.remove(); removeEventListener('pointerdown', out, true) };
@@ -116,16 +116,22 @@ export function accountMenu() {
       if (a === 'password') changePassword();
       if (a === 'servers') openServers();
       if (a === 'codes') newCodes();
+      if (a === 'methods') void import('./signinmethods.ts').then(m => m.signInMethods());
+      if (a === 'restore') void import('./matchui.ts').then(m => m.restorePoints());
       if (a === 'logout') void logout();
     };
   };
 }
 async function logout() {
-  await flushNow();
+  if (!(await flushNow())) {   // some edits never reached the server: do not clear them without a copy
+    if (!confirm('Some recent changes could not be saved on the server. Log out anyway? A backup file of this browser will be downloaded first.')) return;
+    downloadBackup();
+  }
   const s = syncServer();
   if (s.mode === 'public') await releasePushOnServer().catch(() => {});   // someone else may sign in on this browser next
   await api('/api/auth/logout', { method: 'POST' }).catch(() => {});
   setToken(s.id, undefined);
+  if (s.mode === 'public') clearSynced();   // the next person on this browser must not inherit (or upload) this account's data
   location.reload();
 }
 function newCodes() {

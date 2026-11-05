@@ -4,21 +4,28 @@ import { api } from './sync.ts';
 import { esc } from './store.ts';
 import { authPost, screen, val } from './login.ts';
 import { checkName, checkPassword, codesOf, formatRecoveryCodes } from './authrules.ts';
-import type { ServerStatus } from './servers.ts';
+import { parseStatus, type ServerStatus } from './servers.ts';
+import { oauthSignup } from './oauthapi.ts';
+import { oauthAvailable, startOAuth, takeFlash } from './oauth.ts';
 
 type User = ServerStatus['user'];
 const head = (st: Pick<ServerStatus, 'mode' | 'serverName'>) => `<h2>${esc(st.serverName ?? 'Chart Terminal')}</h2><p class="muted">${st.mode === 'public' ? 'Public server: your account and synced data live here. It never stores exchange keys or places orders.' : 'Private server'}</p>`;
 const NAME = '<input name="name" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false">';
 
+/** "Continue with Google / Apple" buttons; only for providers the server reports as configured. */
+const oauthButtons = (st: ServerStatus) => !oauthAvailable() || !(st.oauth.google || st.oauth.apple) ? '' :
+  `<hr style="width:100%;border:0;border-top:1px solid var(--line)">${st.oauth.google ? '<button type="button" data-go="oauth:google">Continue with Google</button>' : ''}${st.oauth.apple ? '<button type="button" data-go="oauth:apple">Continue with Apple</button>' : ''}`;
+
 export async function accountScreen(st: ServerStatus): Promise<User> {
-  let view = 'login', user: User;
+  let view = 'login', user: User, msg = takeFlash();
   for (;;) {
     let n: string;
+    const flashed = msg ? `<p class="ct-err" role="alert">${esc(msg)}</p>` : ''; msg = '';
     if (view === 'login') {
-      n = await screen(`${head(st)}${NAME}<input type="password" name="pw" placeholder="Password" autocomplete="current-password">`, async f => {
+      n = await screen(`${head(st)}${flashed}${NAME}<input type="password" name="pw" placeholder="Password" autocomplete="current-password">`, async f => {
         const name = val(f, 'name').trim(), pw = val(f, 'pw'); if (!name || !pw) throw Error('Enter your username and password');
         user = (await authPost<{ user?: User }>('/api/auth/login', { name, password: pw })).user;
-      }, `<div class="row"><button type="button" data-go="recover">Forgot password?</button><span class="grow"></span>${st.registration !== 'closed' ? '<button type="button" data-go="register">Create account</button>' : ''}</div>`, 'Sign in');
+      }, `<div class="row"><button type="button" data-go="recover">Forgot password?</button><span class="grow"></span>${st.registration !== 'closed' ? '<button type="button" data-go="register">Create account</button>' : ''}</div>${oauthButtons(st)}`, 'Sign in');
     } else if (view === 'register') {
       n = await screen(`${head(st)}<p>Create an account</p>${NAME}
         <input type="password" name="pw" placeholder="Password (at least 10 characters)" autocomplete="new-password">
@@ -30,7 +37,7 @@ export async function accountScreen(st: ServerStatus): Promise<User> {
         if (st.registration === 'invite' && !invite) throw Error('Enter the invite code you were given');
         const j = await authPost<{ user?: User }>('/api/auth/register', { name, password: pw, ...(invite ? { invite } : {}) });
         user = j.user; await recoveryCodesScreen(codesOf(j), name);
-      }, '<div class="row"><button type="button" data-go="login">I already have an account</button></div>', 'Create account');
+      }, `<div class="row"><button type="button" data-go="login">I already have an account</button></div>${oauthButtons(st)}`, 'Create account');
     } else {
       n = await screen(`${head(st)}<p>Enter one of the recovery codes you saved when you created the account, and choose a new password.</p>${NAME}
         <input name="code" placeholder="Recovery code" autocomplete="off" autocapitalize="none" spellcheck="false">
@@ -44,6 +51,7 @@ export async function accountScreen(st: ServerStatus): Promise<User> {
       }, '<div class="row"><button type="button" data-go="login">Back to sign in</button></div>', 'Set new password');
     }
     if (n === 'done') break;
+    if (n.startsWith('oauth:')) { try { await startOAuth(n.slice(6) as 'google' | 'apple') } catch (e) { msg = (e as Error).message } continue }
     view = n;
   }
   return user;
@@ -80,4 +88,18 @@ export function mustChangeScreen(name: string): Promise<string> {
     if (pw !== val(f, 'pw2')) throw Error('The passwords don’t match');
     await api('/api/auth/password', { body: { current: val(f, 'cur'), password: pw } });
   });
+}
+
+/** After Google / Apple confirmed an identity that has no account yet: choose a username (and the invite code in invite mode). */
+export async function oauthSignupScreen(s: { ticket: string; verifier: string }): Promise<void> {
+  const st = parseStatus(await api<unknown>('/api/auth/status').catch(() => null));
+  await screen(`<h2>Choose a username</h2><p>Your Google / Apple sign-in is confirmed. Pick the username for your new account.</p>
+    <p class="muted">Already have an account here? Cancel, sign in with your password, then link Google or Apple under Account -> Sign-in methods.</p>
+    ${NAME}${st?.registration === 'invite' ? '<input name="invite" placeholder="Invite code" autocomplete="off" autocapitalize="none" spellcheck="false">' : ''}`, async f => {
+    const name = checkName(val(f, 'name')), invite = (f.elements.namedItem('invite') as HTMLInputElement | null)?.value ?? '';
+    const needInvite = st?.registration === 'invite';
+    if (needInvite && !invite.trim()) throw Error('Enter the invite code you were given');
+    const j = await oauthSignup({ ticket: s.ticket, verifier: s.verifier, name, ...(needInvite ? { invite: invite.trim() } : {}) });
+    await recoveryCodesScreen(codesOf(j), name);
+  }, '<div class="row"><button type="button" data-go="cancel">Cancel</button></div>', 'Create account');
 }

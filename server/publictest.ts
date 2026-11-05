@@ -5,14 +5,14 @@ import { join } from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-export async function boot(env: Record<string, string> = {}) {
+export async function boot(env: Record<string, string> = {}, port = 0) {
   const dir = mkdtempSync(join(tmpdir(), 'ct-pub-'));
   Object.assign(process.env, { CT_MODE: 'public', CT_DATA_DIR: dir, CT_PUBLIC_URL: 'http://localhost', CT_ALLOWED_HOSTS: 'localhost', CT_NO_AUTOSTART: '1', CT_REGISTRATION: 'invite', CT_NO_PROXY: '1' }, env);
   delete process.env.CT_SECRET_KEY;
   const app = await import('./app.ts');
   const U = await import('./core/users.ts');
   const server: Server = app.createServer();
-  await new Promise<void>(r => server.listen(0, 'localhost', r));
+  await new Promise<void>(r => server.listen(port, 'localhost', r));
   const base = `http://localhost:${(server.address() as AddressInfo).port}`;
   const close = () => { server.closeAllConnections(); server.close(); try { rmSync(dir, { recursive: true, force: true }) } catch {} };
   return { dir, U, base, server, close };

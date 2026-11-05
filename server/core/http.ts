@@ -64,7 +64,7 @@ function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
 
 // CT_DIST_DIR: the desktop app bundles the server, so the built client isn't at ../../dist there.
 const DIST = process.env.CT_DIST_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'dist');
-const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.crt': 'application/x-x509-ca-cert', '.mobileconfig': 'application/x-apple-aspen-config' };
+const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.crt': 'application/x-x509-ca-cert', '.mobileconfig': 'application/x-apple-aspen-config' };
 const SECURITY_HEADERS: Record<string, string> = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY', ...(isPublic ? { 'permissions-policy': 'camera=(), geolocation=(), payment=(), usb=(), microphone=(self)' } : {}) };
 
 /** Serve the built app (dist/) with an SPA fallback, for phones/other devices that don't go through Vite. */
@@ -105,8 +105,12 @@ const inflight = new Map<number, number>();
 const BUDGET = (Number(process.env.CT_BODY_BUDGET_MB) || 64) * 1024 * 1024;
 let inBytes = 0;
 const inBytesBy = new Map<string, number>();   // per principal: one account or address may hold at most a quarter of the budget
+const ANON_RPS = Number(process.env.CT_ANON_RPS) || 5, ANON_BURST = Number(process.env.CT_ANON_BURST) || 30;   // anonymous requests per address
+const AUTH_RPS = Number(process.env.CT_AUTH_RPS) || 1, AUTH_BURST = Number(process.env.CT_AUTH_BURST) || 60;   // anonymous /api/auth/* bucket per address
 const MUST_CHANGE_OK = new Set(['/api/auth/password', '/api/auth/logout']);
-const DEVICE_AUTH = new Set(['/api/auth/login', '/api/auth/register', '/api/auth/recover']);
+const DEVICE_AUTH = new Set(['/api/auth/login', '/api/auth/register', '/api/auth/recover', '/api/auth/oauth/start', '/api/auth/oauth/exchange', '/api/auth/oauth/signup']);
+/** Apple posts its answer from appleid.apple.com with a browser form: no Origin of ours, no x-ct-client. Authenticated by the one-time `state`, not by a cookie, so CSRF does not apply. This one path only. */
+const APPLE_CALLBACK = '/api/auth/oauth/callback/apple';
 const slow = (s: number, msg: string) => Object.assign(new HttpError(429, msg), { retryAfter: s });
 
 /** CSRF. Private: a request with an Origin must match Host (curl, tests and the app send none or a matching one). Public: browsers only. */
@@ -147,7 +151,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, listener
     const a = authenticate(req, secure);
     if (a) { c.session = a.token; c.user = a.user; c.bearer = a.bearer }
     if (isPublic && (!a || r.public)) {   // anonymous callers: per-IP bucket, and a stricter one for the login/register family
-      const w = take('ip:' + ip, 5, 30) || (url.pathname.startsWith('/api/auth/') ? take('auth:' + ip, 1, 60) : 0);
+      const w = take('ip:' + ip, ANON_RPS, ANON_BURST) || (url.pathname.startsWith('/api/auth/') ? take('auth:' + ip, AUTH_RPS, AUTH_BURST) : 0);
       if (w) throw slow(w, 'Too many requests');
     }
     if (!r.public && !a) throw new HttpError(401, 'Login required');
@@ -155,7 +159,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, listener
     // A Bearer header cannot be sent by a cross-site form, so token requests skip the Origin check but still need x-ct-client.
     const xct = /^[\w-]{8,64}$/.test(String(req.headers['x-ct-client'] ?? ''));
     if (a?.bearer && !xct) throw new HttpError(403, 'Missing client header');
-    if (req.method !== 'GET' && req.method !== 'HEAD' && !a?.bearer && !csrfOk(req)) {
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !a?.bearer && !csrfOk(req) && !(req.method === 'POST' && url.pathname === APPLE_CALLBACK)) {
       // The one cross-origin door: device login/register/recover from a listed origin (or a non-browser client). The handler refuses it without `device`.
       const o = req.headers.origin;
       const ok = req.method === 'POST' && DEVICE_AUTH.has(url.pathname) && xct && (typeof o === 'string' ? CORS_ORIGINS.has(o) : !req.headers['sec-fetch-site']);

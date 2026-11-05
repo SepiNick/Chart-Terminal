@@ -1,9 +1,21 @@
 import { memo, queueState } from './sync.ts';
 import { isStandalone } from './servers.ts';
+import { emptyMeta, hasSchema, pruneMeta, stampChange, type Meta } from './syncmerge.ts';
 
 // App state: localStorage (`ct.<key>`) as the working copy; in server mode every write is also queued to the server
 // (sync.ts). Every access is guarded: storage can be missing, blocked or full.
 let full = false;
+/** Edit / delete stamps for merging (sync tombstones). Never blocks or breaks a save. */
+function stamp(key: string, value: unknown) {
+  if (!hasSchema(key)) return;
+  try {
+    const prev = memo.get(key) ?? localStorage.getItem('ct.' + key), next = JSON.stringify(value);
+    if (prev === next || next === undefined) return;
+    const m = store.get<Meta>('syncmeta', emptyMeta());
+    stampChange(m, key, prev ? JSON.parse(prev) : undefined, value, Date.now());
+    store.set('syncmeta', pruneMeta(m, Date.now()));
+  } catch {}
+}
 export const store = {
   get<T>(key: string, fallback: T): T {
     let v: string | null | undefined = memo.get(key);   // newer than localStorage when present
@@ -13,6 +25,7 @@ export const store = {
   /** Returns false when this browser's storage refused the value (it is still kept for this session and sent to the server). */
   set(key: string, value: unknown): boolean {
     let ok = true;
+    stamp(key, value);
     try { localStorage.setItem('ct.' + key, JSON.stringify(value)); memo.delete(key) }
     catch { ok = false; if (isStandalone() && !full) { full = true; setTimeout(() => toast('Device storage is full: recent changes may be lost on restart. Delete old scripts or journal pictures.', 8000), 0) } const j = JSON.stringify(value); if (j !== undefined) memo.set(key, j) }
     queueState(key, value);

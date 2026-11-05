@@ -14,6 +14,7 @@
 //   POST /api/auth/logout · POST /api/auth/password { current, password } · POST /api/auth/recover { name, code, newPassword }
 //   POST /api/auth/recovery-codes { password } → a fresh set of 8 (the old ones stop working)
 //   GET /api/auth/sessions · DELETE /api/auth/sessions/:id   (only the caller's own)
+//   Google / Apple sign-in, identities, password/set: see oauth.ts. GET /api/auth/status also carries oauth: { google, apple }.
 // Both servers, clients on another origin (docs/multi-server.md): login/register/recover accept "device": "<label>" and then
 // answer { ok, token, user } with NO cookie. Every route accepts `Authorization: Bearer <token>`.
 //   GET /api/auth/devices → [{ id, label, created, lastUsed, ip, current }] · DELETE /api/auth/devices/:id (the caller's own)
@@ -42,7 +43,7 @@ const info = (features: Record<string, boolean>) => ({ version, serverName: SERV
 
 if (!isPublic) {
   const isLocal = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-  route('GET', '/api/auth/status', c => ({ setup: !hasPassword(), loggedIn: !!c.session, mode: 'private', registration: 'closed', ...info({ trading: true, ai: true, ml: true, forward: true, scripts: true }) }), { public: true });
+  route('GET', '/api/auth/status', c => ({ setup: !hasPassword(), loggedIn: !!c.session, mode: 'private', registration: 'closed', oauth: { google: false, apple: false }, ...info({ trading: true, ai: true, ml: true, forward: true, scripts: true }) }), { public: true });
   route('POST', '/api/auth/setup', c => {
     if (hasPassword()) throw new HttpError(409, 'Already set up');
     // Loopback address AND loopback Host name: a rebinding page can't claim the server before the owner does.
@@ -80,6 +81,7 @@ if (!isPublic) {
   });
 } else {
   const U = await import('./core/users.ts');
+  const O = await import('./oauth.ts');
   const FEATURES = { trading: false, scripts: false, brokers: false, forward: false, scriptAlerts: false, recorder: false, ai: false, ml: false, lan: false, telegram: false, email: false, webhook: false };
   const start = (c: Ctx, userId: number) => {   // always a brand-new token: a cookie sent by the client is never adopted (no session fixation)
     if (c.bearer) return;   // a token client that changed its password signs in again; it gets no cookie
@@ -91,7 +93,7 @@ if (!isPublic) {
     label ? { token: createDevice(c.req, label, user) } : (start(c, user.id), {});
   route('GET', '/api/auth/status', c => {
     const u = c.session ? c.user : null;
-    return { setup: false, mode: 'public', registration: REGISTRATION, loggedIn: !!u, ...(u ? { user: { name: u.name, role: u.role, mustChange: !!u.mustChange } } : {}), ...info(FEATURES) };
+    return { setup: false, mode: 'public', registration: REGISTRATION, oauth: O.oauthStatus(), loggedIn: !!u, ...(u ? { user: { name: u.name, role: u.role, mustChange: !!u.mustChange } } : {}), ...info(FEATURES) };
   }, { public: true });
   route('POST', '/api/auth/register', async c => {
     const label = device(c);
@@ -137,6 +139,8 @@ if (!isPublic) {
     if (!endDeviceById(c.params.id, c.user)) throw new HttpError(404, 'No such device');   // a foreign id looks exactly like a missing one
     closeClients(cl => cl.userId === c.user.id && sessionId(cl.session) === c.params.id);
   });
+
+  O.mountOAuth({ device, body, issue, start });   // Google / Apple sign-in (routes answer 404 for a provider that is not configured)
 
   // Administration needs the admin role AND the admin's password again (step-up). Everyone else sees a 404.
   const admin = async (c: Ctx) => {

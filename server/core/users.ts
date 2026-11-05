@@ -25,6 +25,23 @@ migration('users/1', `
 
 migration('users/2', `ALTER TABLE sessions ADD COLUMN device TEXT`);   // non-NULL = a Bearer device token (label); NULL = a browser cookie session
 
+// Sign in with Google / Apple (docs/research/oauth-sync-design.md section 2). An identity is (provider, provider-subject); the e-mail is
+// display information only and is never used to find or link an account. OAuth-only accounts store pw='oauth$' and has_pw=0.
+migration('users/3', `
+  CREATE TABLE identities (provider TEXT NOT NULL, subject TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users ON DELETE CASCADE,
+    email TEXT, relay INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL, last_login INTEGER, PRIMARY KEY (provider, subject));
+  CREATE INDEX identities_user ON identities (user_id);
+  CREATE UNIQUE INDEX identities_one_per_provider ON identities (user_id, provider);`);
+migration('users/4', `ALTER TABLE users ADD COLUMN has_pw INTEGER NOT NULL DEFAULT 1`);
+migration('users/5', `
+  CREATE TABLE oauth_state (state_hash TEXT PRIMARY KEY, provider TEXT NOT NULL, nonce TEXT NOT NULL, p_verifier TEXT NOT NULL, c_challenge TEXT NOT NULL, intent TEXT NOT NULL,
+    user_id INTEGER, ret TEXT NOT NULL, port INTEGER, device TEXT, created INTEGER NOT NULL, expires INTEGER NOT NULL);
+  CREATE TABLE oauth_code (code_hash TEXT PRIMARY KEY, kind TEXT NOT NULL, user_id INTEGER, provider TEXT NOT NULL, subject TEXT NOT NULL, email TEXT, relay INTEGER NOT NULL DEFAULT 0,
+    c_challenge TEXT NOT NULL, device TEXT, expires INTEGER NOT NULL);
+  CREATE TABLE oauth_signup (ticket_hash TEXT PRIMARY KEY, provider TEXT NOT NULL, subject TEXT NOT NULL, email TEXT, relay INTEGER NOT NULL DEFAULT 0,
+    c_challenge TEXT NOT NULL, device TEXT, expires INTEGER NOT NULL);
+  CREATE TABLE oauth_stepup (user_id INTEGER PRIMARY KEY REFERENCES users ON DELETE CASCADE, at INTEGER NOT NULL);`);
+
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const SESSION_MS = (Number(process.env.CT_SESSION_DAYS) > 0 ? Number(process.env.CT_SESSION_DAYS) : 30) * 86400_000, IDLE_MS = 14 * 86400_000, MAX_SESSIONS = 20;
 const UNIFORM_LOGIN_ERROR = 'Wrong username or password';
@@ -70,7 +87,7 @@ export function checkNewPassword(pw: unknown, name: string): string {
 }
 
 // ---------- rows ----------
-interface Row { id: number; name: string; pw: string; role: 'admin' | 'user'; status: 'active' | 'disabled' | 'deleting'; must_change: number; created: number; last_login: number | null; quota: string | null }
+interface Row { id: number; name: string; pw: string; role: 'admin' | 'user'; status: 'active' | 'disabled' | 'deleting'; must_change: number; has_pw: number; created: number; last_login: number | null; quota: string | null }
 const byName = (n: string) => db.prepare('SELECT * FROM users WHERE name = ?').get(n) as Row | undefined;
 const byId = (id: number) => db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Row | undefined;
 const toUser = (r: Row): User => ({ id: r.id, name: r.name, role: r.role, ...(r.must_change ? { mustChange: true } : {}) });
@@ -151,12 +168,15 @@ function reserve(ipRaw: string, name: string): { delay: number; success: () => v
   return { delay, success: () => { db.prepare('DELETE FROM login_attempts WHERE key IN (?, ?)').run(`pair:${name}|${ip}`, 'acct:' + name); unbump('ip:' + ip, 10) } };   // the address counter only gives back this attempt
 }
 /** Fixed-window counter for things that are not logins (registrations). */
-function allow(key: string, max: number, windowMs: number): boolean {
+export function allow(key: string, max: number, windowMs: number): boolean {
   const now = Date.now(), r = att(key), live = !!r && now - r.at < windowMs, n = live ? r!.n : 0;   // here `at` is the window start
   if (n >= max) return false;
   db.prepare('INSERT INTO login_attempts (key, n, until, at) VALUES (?, ?, 0, ?) ON CONFLICT(key) DO UPDATE SET n = excluded.n, at = excluded.at').run(key, n + 1, live ? r!.at : now);
   return true;
 }
+
+/** True when `key` already used up its `max` hits in the window (does not count). */
+export function blocked(key: string, max: number, windowMs: number): boolean { const r = att(key); return !!r && Date.now() - r.at < windowMs && r.n >= max }
 
 // ---------- sessions ----------
 /** `device` = label: the row is a Bearer device token (never pruned by the cookie-session cap, never listed with sessions). */
@@ -225,14 +245,17 @@ export function checkName(n: unknown): string {
 }
 const adminName = () => (process.env.CT_ADMIN ?? '').trim().toLowerCase();
 
+function nameFree(name: string) {
+  if (reserved(name) || (adminName() && lookalike(name) === lookalike(adminName()))) throw new HttpError(409, 'That username is taken');
+  if (byName(name)) throw new HttpError(409, 'That username is taken');
+}
 export async function register(b: { name?: unknown; password?: unknown; invite?: unknown }, req: IncomingMessage): Promise<{ user: User; recoveryCodes: string[] }> {
   if (REGISTRATION === 'closed') throw new HttpError(403, 'Registration is closed on this server');
   const ip = ipKey(clientIp(req)), name = checkName(b.name), pw = checkNewPassword(b.password, name), invite = typeof b.invite === 'string' ? b.invite.slice(0, 64) : '';
   if (!allow('reg:' + ip, Number(process.env.CT_REG_PER_HOUR) || (REGISTRATION === 'open' ? 3 : 10), 3600_000)) throw new HttpError(429, 'Too many sign-ups from this address. Try again later');
   if (REGISTRATION === 'open' && !allow('reg:day', Number(process.env.CT_OPEN_REG_PER_DAY) || 50, 86400_000)) throw new HttpError(429, 'Sign-ups are paused for today');
   if (REGISTRATION === 'invite' && !(invite && inviteOk(invite))) throw new HttpError(403, 'Invalid or expired invite code');
-  if (reserved(name) || (adminName() && lookalike(name) === lookalike(adminName()))) throw new HttpError(409, 'That username is taken');
-  if (byName(name)) throw new HttpError(409, 'That username is taken');
+  nameFree(name);
   const hash = await hashPassword(pw);
   // Everything below is synchronous: the invite is spent and the account created in one step, or neither.
   db.exec('BEGIN IMMEDIATE');
@@ -259,7 +282,7 @@ export async function login(b: { name?: unknown; password?: unknown }, req: Inco
   const slot = reserve(ip, name);
   if (slot.delay) await new Promise(r => setTimeout(r, slot.delay));
   const row = byName(name);
-  const ok = row ? await verifyPassword(row.pw, pw) : (await verifyPassword(await DUMMY, pw), false);
+  const ok = row?.has_pw ? await verifyPassword(row.pw, pw) : (await verifyPassword(await DUMMY, pw), false);   // OAuth-only rows cost the same scrypt as an unknown name (no timing oracle)
   if (!ok || !row) { audit(row?.id ?? null, ip, 'login fail'); throw new HttpError(401, UNIFORM_LOGIN_ERROR) }
   if (row.status !== 'active') { audit(row.id, ip, 'login disabled'); throw new HttpError(403, 'This account is disabled') }   // only someone holding the right password learns this
   slot.success();
@@ -272,13 +295,13 @@ export async function login(b: { name?: unknown; password?: unknown }, req: Inco
 export async function confirmPassword(userId: number, pw: unknown, req: IncomingMessage): Promise<boolean> {
   const slot = reserve(clientIp(req), 'uid:' + userId), row = byId(userId);   // same throttle as login, keyed on account + address
   if (slot.delay) await new Promise(r => setTimeout(r, slot.delay));
-  const ok = !!row && typeof pw === 'string' && await verifyPassword(row.pw, pw.slice(0, 1000));
+  const ok = row?.has_pw ? typeof pw === 'string' && await verifyPassword(row.pw, pw.slice(0, 1000)) : (await verifyPassword(await DUMMY, 'x'), false);
   if (ok) slot.success();
   return ok;
 }
 export async function setPassword(userId: number, pw: string, o: { mustChange?: boolean } = {}) {
   const hash = await hashPassword(pw);
-  db.prepare('UPDATE users SET pw = ?, must_change = ? WHERE id = ?').run(hash, o.mustChange ? 1 : 0, userId);
+  db.prepare('UPDATE users SET pw = ?, must_change = ?, has_pw = 1 WHERE id = ?').run(hash, o.mustChange ? 1 : 0, userId);
   revokeUserSessions(userId);   // a new password signs every device out
 }
 /** Reset with a recovery code. Same throttle as login; an unknown name costs the same work and gets the same answer. */
@@ -291,7 +314,7 @@ export async function recover(b: { name?: unknown; code?: unknown; newPassword?:
   const ok = !!row && row.status === 'active' && db.prepare('UPDATE recovery_codes SET used = 1 WHERE user_id = ? AND code_hash = ? AND used = 0').run(row.id, codeKey(code)).changes === 1;
   if (!ok || !row) { audit(row?.id ?? null, ip, 'recover fail'); throw new HttpError(401, 'Wrong username or recovery code') }
   slot.success();
-  db.prepare('UPDATE users SET pw = ?, must_change = 0 WHERE id = ?').run(hash, row.id);
+  db.prepare('UPDATE users SET pw = ?, must_change = 0, has_pw = 1 WHERE id = ?').run(hash, row.id);   // the recovery codes are the way back for someone who lost their Google/Apple account
   revokeUserSessions(row.id);
   audit(row.id, ip, 'recover');
   return { user: toUser(row), recoveryCodes: newRecoveryCodes(row.id) };
@@ -348,7 +371,114 @@ export async function removeUser(name: string): Promise<number> {
   for (const f of removed) f(row.id);
   return row.id;
 }
-export const listUsers = () => (db.prepare('SELECT id, name, role, status, created, last_login FROM users ORDER BY id').all() as { id: number }[]).map(u => ({ ...u, bytes: userDbBytes(u.id) }));
+const maskEmail = (e: string | null) => e ? e.replace(/^(.).*?(@.*)$/, '$1***$2') : null;
+export const listUsers = () => (db.prepare('SELECT id, name, role, status, created, last_login, has_pw FROM users ORDER BY id').all() as { id: number }[]).map(u => ({
+  ...u, bytes: userDbBytes(u.id),
+  identities: (db.prepare('SELECT provider, email, relay FROM identities WHERE user_id = ? ORDER BY provider').all(u.id) as { provider: string; email: string | null; relay: number }[]).map(i => ({ provider: i.provider, email: i.relay ? 'hidden (Apple)' : maskEmail(i.email) })),
+}));
+
+// ---------- OAuth: state, one-time codes, signup tickets, identities ----------
+export interface Ident { provider: string; subject: string; email?: string; relay: boolean }
+export const OAUTH_STATE_MS = 600_000, OAUTH_CODE_MS = 60_000, STEPUP_MS = 600_000;
+const token = () => randomBytes(32).toString('base64url');
+const nul = (v: unknown) => (v === undefined ? null : v as null | string | number);
+export interface OState { provider: string; nonce: string; p_verifier: string; c_challenge: string; intent: 'login' | 'link' | 'reauth'; user_id: number | null; ret: string; port: number | null; device: string | null }
+export function oauthStateNew(o: { provider: string; nonce: string; pVerifier: string; challenge: string; intent: OState['intent']; userId: number | null; ret: string; port: number | null; device: string | null }): string {
+  const state = token(), now = Date.now();
+  db.prepare('INSERT INTO oauth_state (state_hash, provider, nonce, p_verifier, c_challenge, intent, user_id, ret, port, device, created, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(sha(state), o.provider, o.nonce, o.pVerifier, o.challenge, o.intent, nul(o.userId), o.ret, nul(o.port), nul(o.device), now, now + OAUTH_STATE_MS);
+  return state;
+}
+/** Single use: two parallel callbacks with the same state cannot both win. */
+export const oauthStateTake = (state: string) => (db.prepare('DELETE FROM oauth_state WHERE state_hash = ? AND expires > ? RETURNING *').get(sha(state), Date.now()) as OState | undefined) ?? null;
+export interface OCode { kind: 'login' | 'link' | 'reauth'; user_id: number | null; provider: string; subject: string; email: string | null; relay: number; c_challenge: string; device: string | null }
+export function oauthCodeNew(o: { kind: OCode['kind']; userId: number | null; id: Ident; challenge: string; device: string | null }): string {
+  const code = token();
+  db.prepare('INSERT INTO oauth_code (code_hash, kind, user_id, provider, subject, email, relay, c_challenge, device, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(sha(code), o.kind, nul(o.userId), o.id.provider, o.id.subject, nul(o.id.email), o.id.relay ? 1 : 0, o.challenge, nul(o.device), Date.now() + OAUTH_CODE_MS);
+  return code;
+}
+export const oauthCodeTake = (code: string) => (db.prepare('DELETE FROM oauth_code WHERE code_hash = ? AND expires > ? RETURNING *').get(sha(code), Date.now()) as OCode | undefined) ?? null;
+export interface OTicket { provider: string; subject: string; email: string | null; relay: number; c_challenge: string; device: string | null }
+export function oauthTicketNew(id: Ident, challenge: string, device: string | null): string {
+  const t = token();
+  db.prepare('INSERT INTO oauth_signup (ticket_hash, provider, subject, email, relay, c_challenge, device, expires) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(sha(t), id.provider, id.subject, nul(id.email), id.relay ? 1 : 0, challenge, nul(device), Date.now() + OAUTH_STATE_MS);
+  return t;
+}
+export const oauthTicketPeek = (t: string) => (db.prepare('SELECT provider, subject, email, relay, c_challenge, device FROM oauth_signup WHERE ticket_hash = ? AND expires > ?').get(sha(t), Date.now()) as OTicket | undefined) ?? null;
+export const oauthTicketBurn = (t: string) => { db.prepare('DELETE FROM oauth_signup WHERE ticket_hash = ?').run(sha(t)) };
+
+export interface IdentRow { provider: string; subject: string; user_id: number; email: string | null; relay: number; created: number; last_login: number | null }
+export const identityGet = (provider: string, subject: string) => db.prepare('SELECT * FROM identities WHERE provider = ? AND subject = ?').get(provider, subject) as IdentRow | undefined;
+export const identityOf = (userId: number, provider: string) => db.prepare('SELECT * FROM identities WHERE user_id = ? AND provider = ?').get(userId, provider) as IdentRow | undefined;
+export const identitiesOf = (userId: number) => (db.prepare('SELECT provider, email, relay, created, last_login FROM identities WHERE user_id = ? ORDER BY provider').all(userId) as { provider: string; email: string | null; relay: number; created: number; last_login: number | null }[])
+  .map(i => ({ provider: i.provider, email: i.email, relay: !!i.relay, created: i.created, lastLogin: i.last_login }));
+export const accountHasPassword = (userId: number) => !!byId(userId)?.has_pw;
+/** The account behind an identity; `ok` = it can sign in (active). */
+export function identityUser(provider: string, subject: string): { user: User; ok: boolean } | null {
+  const i = identityGet(provider, subject), row = i && byId(i.user_id);
+  return row ? { user: toUser(row), ok: row.status === 'active' } : null;
+}
+export function identitySeen(provider: string, subject: string, email: string | null | undefined, relay: boolean) {
+  const now = Date.now();
+  db.prepare('UPDATE identities SET last_login = ?, email = COALESCE(?, email), relay = ? WHERE provider = ? AND subject = ?').run(now, nul(email), relay ? 1 : 0, provider, subject);
+  db.prepare('UPDATE users SET last_login = ? WHERE id = (SELECT user_id FROM identities WHERE provider = ? AND subject = ?)').run(now, provider, subject);
+}
+/** Link from a logged-in session only. 'taken' = belongs to another account, 'have' = this account already has one for that provider. */
+export function identityLink(userId: number, id: Ident): 'ok' | 'taken' | 'have' {
+  const ex = identityGet(id.provider, id.subject);
+  if (ex) return ex.user_id === userId ? 'ok' : 'taken';
+  if (identityOf(userId, id.provider)) return 'have';
+  try { db.prepare('INSERT INTO identities (provider, subject, user_id, email, relay, created, last_login) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id.provider, id.subject, userId, nul(id.email), id.relay ? 1 : 0, Date.now(), Date.now()) }
+  catch (e) { if (/UNIQUE/i.test((e as Error).message)) return identityGet(id.provider, id.subject)?.user_id === userId ? 'ok' : 'taken'; throw e }
+  return 'ok';
+}
+/** Refuses to remove the last way to sign in (password + identities must stay >= 1). */
+export function identityUnlink(userId: number, provider: string): 'ok' | 'none' | 'last' {
+  if (!identityOf(userId, provider)) return 'none';
+  const n = (db.prepare('SELECT COUNT(*) AS n FROM identities WHERE user_id = ?').get(userId) as { n: number }).n;
+  if ((accountHasPassword(userId) ? 1 : 0) + n < 2) return 'last';
+  db.prepare('DELETE FROM identities WHERE user_id = ? AND provider = ?').run(userId, provider);
+  return 'ok';
+}
+/** "I just proved I control this account's sign-in method": set by an OAuth login or re-auth, good for 10 minutes. */
+export const stepupMark = (userId: number) => { db.prepare('INSERT INTO oauth_stepup (user_id, at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET at = excluded.at').run(userId, Date.now()) };
+export const stepupFresh = (userId: number) => { const r = db.prepare('SELECT at FROM oauth_stepup WHERE user_id = ?').get(userId) as { at: number } | undefined; return !!r && Date.now() - r.at < STEPUP_MS };
+
+/**
+ * Create the account for a signup ticket (the "choose a username" step). Policy is register()'s: closed -> 403, invite -> a code
+ * spent in the same transaction, open -> the sign-up limits. The ticket is spent in that transaction too, so it works once.
+ */
+export function createOAuthUser(ticket: string, b: { name?: unknown; invite?: unknown }, req: IncomingMessage): { user: User; recoveryCodes: string[] } {
+  if (REGISTRATION === 'closed') throw new HttpError(403, 'Registration is closed on this server');
+  const t = oauthTicketPeek(ticket); if (!t) throw bad('This sign-in expired. Start again');
+  const ip = ipKey(clientIp(req)), name = checkName(b.name), invite = typeof b.invite === 'string' ? b.invite.slice(0, 64) : '';
+  if (!allow('reg:' + ip, Number(process.env.CT_REG_PER_HOUR) || (REGISTRATION === 'open' ? 3 : 10), 3600_000)) throw new HttpError(429, 'Too many sign-ups from this address. Try again later');
+  if (REGISTRATION === 'open' && !allow('reg:day', Number(process.env.CT_OPEN_REG_PER_DAY) || 50, 86400_000)) throw new HttpError(429, 'Sign-ups are paused for today');
+  if (REGISTRATION === 'invite' && !(invite && inviteOk(invite))) throw new HttpError(403, 'Invalid or expired invite code');
+  nameFree(name);
+  db.exec('BEGIN IMMEDIATE');
+  let id = 0;
+  try {
+    if (db.prepare('DELETE FROM oauth_signup WHERE ticket_hash = ? AND expires > ?').run(sha(ticket), Date.now()).changes !== 1) throw bad('This sign-in expired. Start again');
+    if (REGISTRATION === 'invite' && !takeInvite(invite)) throw new HttpError(403, 'Invalid or expired invite code');
+    id = nextUserId();
+    db.prepare("INSERT INTO users (id, name, pw, role, created, invited_by, has_pw) VALUES (?, ?, 'oauth$', 'user', ?, (SELECT created_by FROM invites WHERE code_hash = ?), 0)").run(id, name, Date.now(), sha(invite));
+    createUserDb(id);
+    db.prepare('INSERT INTO identities (provider, subject, user_id, email, relay, created, last_login) VALUES (?, ?, ?, ?, ?, ?, ?)').run(t.provider, t.subject, id, t.email, t.relay, Date.now(), Date.now());
+    const recoveryCodes = newRecoveryCodes(id);
+    db.exec('COMMIT');
+    stepupMark(id);
+    audit(id, ip, `oauth signup ${t.provider}`);
+    return { user: { id, name, role: 'user' }, recoveryCodes };
+  } catch (e) {
+    db.exec('ROLLBACK');
+    if (id) deleteUserDb(id);
+    if (/UNIQUE/i.test((e as Error).message)) throw new HttpError(409, /identities/i.test((e as Error).message) ? 'This sign-in is already linked to an account. Sign in instead' : 'That username is taken');
+    throw e;
+  }
+}
 
 // ---------- central index (public share links) ----------
 export const indexShare = (id: string, uid: number) => { db.prepare('INSERT INTO share_index (id, user_id) VALUES (?, ?)').run(id, uid) };
@@ -359,5 +489,6 @@ setInterval(() => {
   const now = Date.now();
   db.prepare('DELETE FROM sessions WHERE expires < ? OR last_seen < ?').run(now, now - IDLE_MS);
   db.prepare('DELETE FROM invites WHERE expires < ? OR uses_left <= 0').run(now - 86400_000);
+  for (const t of ['oauth_state', 'oauth_code', 'oauth_signup']) db.prepare(`DELETE FROM ${t} WHERE expires < ?`).run(now);
   db.prepare("DELETE FROM login_attempts WHERE until < ? AND ((key LIKE 'reg:%' AND at < ?) OR (key NOT LIKE 'reg:%' AND at < ?))").run(now, now - 86400_000, now - 3600_000);
 }, 600_000).unref();

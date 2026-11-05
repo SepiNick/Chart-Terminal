@@ -3,7 +3,7 @@
 // the HTTP routes at the bottom serve the browser (docs/phase5-contracts.md §3); media blobs live in media.ts.
 // Rows live in the owner's own database file; `uid` defaults to the single user of a private server.
 import { soleUser, userDb, userMigration } from './core/userdb.ts';
-import { HttpError, bad, broadcastTo, onWs, onWsClose, route, type Ctx, type WsClient } from './core/http.ts';
+import { HttpError, bad, broadcastTo, obj, onWs, onWsClose, route, type Ctx, type WsClient } from './core/http.ts';
 import { bytes, limits, tooBig, tooMany } from './core/quota.ts';
 import { isPublic } from './core/mode.ts';
 import './media.ts';
@@ -49,6 +49,37 @@ export function stateDel(key: string, origin?: WsClient, uid = origin?.userId ??
   userDb(uid).prepare('DELETE FROM state WHERE key = ?').run(key);
   broadcastTo(uid, { type: 'state', key, rev: 0, value: null, updated: Date.now() }, origin);
 }
+export interface BatchWrite { key: string; value: unknown; baseRev?: number }   // value === null deletes the key
+/**
+ * All-or-nothing multi-key write (docs/research/oauth-sync-design.md 4.5). Every `baseRev` is checked first; any mismatch aborts the
+ * whole batch with a 409 listing the current { key, rev, value } of EVERY conflicting key. Quotas are checked on the final totals.
+ * Returns the new revision per key (0 = deleted). One broadcast per key, after the commit.
+ */
+export function stateBatch(uid: number, writes: BatchWrite[], origin?: WsClient): Record<string, number> {
+  const d = userDb(uid), seen = new Set<string>();
+  for (const w of writes) { if (!KEY_RE.test(w.key) || seen.has(w.key)) throw bad('Bad or repeated state key'); seen.add(w.key) }
+  const L = limits(uid), out: Record<string, number> = {}, sent: { key: string; rev: number; value: unknown; updated: number }[] = [], updated = Date.now();
+  d.exec('BEGIN IMMEDIATE');
+  try {
+    const cur = (k: string) => d.prepare('SELECT value, rev, updated FROM state WHERE key = ?').get(k) as { value: string; rev: number; updated: number } | undefined;
+    const conflicts = writes.filter(w => w.baseRev !== undefined && (cur(w.key)?.rev ?? 0) !== w.baseRev)
+      .map(w => { const c = cur(w.key); return { key: w.key, rev: c?.rev ?? 0, updated: c?.updated ?? 0, value: c ? JSON.parse(c.value) : null } });
+    if (conflicts.length) throw new HttpError(409, 'This was changed somewhere else', { conflicts });
+    for (const w of writes) {
+      if (w.value === null) { d.prepare('DELETE FROM state WHERE key = ?').run(w.key); out[w.key] = 0; sent.push({ key: w.key, rev: 0, value: null, updated }); continue }
+      const json = JSON.stringify(w.value), cap = w.key === 'journal' ? L.journalKeyMb : L.stateKeyMb;
+      if (Buffer.byteLength(json) > bytes(cap)) throw tooBig(`"${w.key}"`, cap);
+      out[w.key] = (d.prepare('INSERT INTO state (key, value, rev, updated) VALUES (?, ?, 1, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, rev = state.rev + 1, updated = excluded.updated RETURNING rev').get(w.key, json, updated) as { rev: number }).rev;
+      sent.push({ key: w.key, rev: out[w.key], value: w.value, updated });
+    }
+    const u = d.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(length(CAST(value AS BLOB))), 0) AS b FROM state').get() as { n: number; b: number };
+    if (u.n > L.stateKeys) throw tooMany('synced documents', L.stateKeys);
+    if (u.b > bytes(L.stateMb)) throw new HttpError(413, `Your synced data would exceed ${L.stateMb} MB`);
+    d.exec('COMMIT');
+  } catch (e) { try { d.exec('ROLLBACK') } catch {} throw e }
+  for (const m of sent) broadcastTo(uid, { type: 'state', ...m }, origin);
+  return out;
+}
 export function stateAll(uid = soleUser()): Record<string, StateRow> {
   const out: Record<string, StateRow> = {};
   for (const r of userDb(uid).prepare('SELECT key, value, rev, updated FROM state').all() as { key: string; value: string; rev: number; updated: number }[]) out[r.key] = { value: JSON.parse(r.value), rev: r.rev, updated: r.updated };
@@ -83,4 +114,16 @@ route('PUT', '/api/state/:key', c => {
   if (raw !== undefined && !(Number.isInteger(raw) && (raw as number) >= 0)) throw bad('baseRev must be a revision number');
   return { rev: stateSet(key, b.value, originOf(c), c.user.id, raw as number | undefined) };
 }, { limit: u => (!isPublic ? 8 * 1024 * 1024 : u.pathname.endsWith('/journal') ? bytes(limits(0).journalKeyMb) + 4096 : bytes(limits(0).stateKeyMb) + 4096) });
+/** POST /api/state/batch { writes: [{ key, value | null, baseRev? }] } -> { ok, revs: { key: rev } }; 409 { error, conflicts: [{ key, rev, value, updated }] }; value null deletes. */
+route('POST', '/api/state/batch', c => {
+  const b = c.body as { writes?: unknown } | null | undefined;
+  if (!b || !Array.isArray(b.writes) || b.writes.length < 1 || b.writes.length > 200) throw bad('Body must be { writes: [1..200 items] }');
+  const writes = b.writes.map((w: unknown) => {
+    const x = obj(w, 'write'), im = x.baseRev;
+    if (typeof x.key !== 'string' || x.value === undefined) throw bad('Each write needs key and value (null deletes)');
+    if (im !== undefined && !(Number.isInteger(im) && (im as number) >= 0)) throw bad('baseRev must be a revision number');
+    return { key: x.key, value: x.value, baseRev: im as number | undefined };
+  });
+  return { ok: true, revs: stateBatch(c.user.id, writes, originOf(c)) };
+}, { limit: () => (isPublic ? bytes(limits(0).stateMb) + 65536 : 32 * 1024 * 1024) });
 route('DELETE', '/api/state/:key', c => { stateDel(keyOf(c), originOf(c), c.user.id) });
