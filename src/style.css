@@ -166,10 +166,40 @@ kbd{font:11px ui-monospace,Consolas,monospace;background:var(--bg);border:1px so
 #jdBody fieldset{border:1px solid var(--line);border-radius:6px;display:flex;flex-direction:column;gap:8px}#jdBody legend{color:var(--muted)}#jdBody label{display:flex;flex-direction:column;gap:3px;color:var(--muted)}
 #jdBody .row label{flex:1}.jd-head{font-size:13px}.jd-shot{max-width:100%;border:1px solid var(--line);border-radius:4px}
 .chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}.chips button{padding:2px 8px;border-radius:12px;font-size:11px}
-#domStats{flex-wrap:wrap;gap:4px 8px;font-size:11px}#domStats .imb{flex-basis:100%;height:4px;background:var(--down);border-radius:2px;overflow:hidden}#domStats .imb i{display:block;height:100%;background:var(--up)}
-#domLadder,#domTape{font:11px ui-monospace,Consolas,monospace}#domLadder td,#domLadder th,#domTape td{padding:1px 4px;text-align:right}#domLadder td.px{text-align:center;color:var(--text)}
-#domLadder td[data-side]{cursor:pointer}#domLadder td[data-side]:hover{outline:1px solid var(--accent);outline-offset:-1px}#domLadder tr.bb td.px{background:color-mix(in srgb,var(--up) 30%,transparent)}#domLadder tr.ba td.px{background:color-mix(in srgb,var(--down) 30%,transparent)}
-#domLadder tr.ask td[data-side=buy],#domLadder tr.bid td[data-side=sell]{color:var(--muted)}#domTape tr.big td{font-weight:700;background:var(--panel)}.dom-hint{font-size:10px}
+/* DOM / Level 2: numbers are monospace, tabular and always LTR (also inside the Persian UI); bar colours follow --up/--down so both themes work */
+#s-dom{container-type:inline-size;gap:6px}
+#s-dom .dom-head{flex-wrap:wrap;gap:4px 6px;text-transform:none}#s-dom .dom-ex{font-size:10px;font-weight:400}
+.dom-conn{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:400;color:var(--muted);white-space:nowrap}.dom-conn i{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.dom-conn[data-s=live] i{background:var(--up)}.dom-conn[data-s=stale] i{background:var(--warn)}.dom-conn[data-s=offline] i{background:var(--down)}.dom-conn[data-s=live]{color:var(--text)}
+.dom-conn .num{min-width:8ch}
+#s-dom .num,#s-dom .dom-t{font-family:ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums;direction:ltr}
+#domStats{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:2px 8px;font-size:11px}
+#domStats .k{display:flex;flex-direction:column;color:var(--muted);font-size:10px;font-family:inherit}#domStats .k b{font-size:12px;font-weight:600;color:var(--text);min-height:1.4em;white-space:nowrap}#domStats .k b.up{color:var(--up)}#domStats .k b.dn{color:var(--down)}
+#domStats .imb{grid-column:1/-1;display:flex;align-items:center;gap:6px;font-size:10px}#domStats .imb em{font-style:normal;min-width:4ch}#domStats .imb em:last-child{text-align:right}
+#domImb{--w:50%;flex:1;height:5px;background:var(--down);border-radius:3px;overflow:hidden}#domImb i{display:block;width:var(--w);height:100%;background:var(--up)}
+.dom-opt{font-size:11px;display:flex;gap:4px;align-items:center}.dom-msg{padding:14px 4px;text-align:center;font-size:11px}.dom-msg[data-k=error]{color:var(--warn)}
+.dom-t{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11px;line-height:16px}
+#s-dom table.dom-t th,#s-dom table.dom-t td{padding:0 4px;height:16px;overflow:hidden;white-space:nowrap}#s-dom table.dom-t .n{text-align:right}
+.dom-t thead th{position:sticky;top:0;z-index:1;background:var(--bg);color:var(--muted);font-weight:500;font-size:10px;text-transform:uppercase}
+#domLadder th:nth-child(1),#domLadder th:nth-child(3){width:27%}#domLadder th:nth-child(2){width:28%}#domLadder th:nth-child(4){width:18%}#domLadder .cum{display:none}
+#s-dom.cum-on #domLadder .cum{display:table-cell}#s-dom.cum-on #domLadder th:nth-child(1),#s-dom.cum-on #domLadder th:nth-child(3){width:22%}#s-dom.cum-on #domLadder th:nth-child(2){width:23%}#s-dom.cum-on #domLadder th:nth-child(4){width:16%}
+#domLadder tbody tr{border-bottom:1px solid color-mix(in srgb,var(--line) 45%,transparent)}
+#s-dom #domLadder td.px{text-align:center;color:var(--text);background:var(--panel);border-inline:1px solid var(--line)}
+#domLadder td[data-side=buy]{--w:0%;background:linear-gradient(to left,color-mix(in srgb,var(--up) 32%,transparent) var(--w),transparent var(--w))}
+#domLadder td[data-side=sell]{--w:0%;background:linear-gradient(to right,color-mix(in srgb,var(--down) 32%,transparent) var(--w),transparent var(--w))}
+#domLadder td.trd{--w:0%;--tb:0%;background:linear-gradient(to right,color-mix(in srgb,var(--up) 45%,transparent) var(--tb),color-mix(in srgb,var(--down) 45%,transparent) var(--tb) var(--w),transparent var(--w))}
+#domLadder td.cum{--w:0%;background:linear-gradient(to left,color-mix(in srgb,var(--down) 22%,transparent) var(--w),transparent var(--w))}#domLadder td.cum[data-s=b]{background:linear-gradient(to left,color-mix(in srgb,var(--up) 22%,transparent) var(--w),transparent var(--w))}
+#domLadder td[data-side]{cursor:pointer}#domLadder td[data-side]:hover{outline:1px solid var(--accent);outline-offset:-1px}
+#domLadder tr.bb td.px{background:color-mix(in srgb,var(--up) 30%,var(--panel));font-weight:700}#domLadder tr.ba td.px{background:color-mix(in srgb,var(--down) 30%,var(--panel));font-weight:700}
+#domLadder tr.ask td[data-side=buy],#domLadder tr.bid td[data-side=sell]{color:var(--muted)}#domLadder tr.spread td.px{color:var(--muted)}
+#domLadder td.mine{position:relative;box-shadow:inset 3px 0 var(--accent);font-weight:700}#domLadder td.mine::before{content:'●';position:absolute;left:6px;color:var(--accent);font-size:8px;line-height:16px}
+#domLadder tr.cur{outline:1px dashed var(--accent);outline-offset:-1px}#domLadder:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#s-dom.stale #domLadder{opacity:.5}
+#domTape th:nth-child(1){width:26%}#domTape th:nth-child(2){width:28%}#domTape th:nth-child(3){width:22%}#domTape th:nth-child(4){width:24%}
+#domTape tr.up{color:var(--up)}#domTape tr.dn{color:var(--down)}#domTape td:first-child{color:var(--muted)}
+#domTape tr.big.up{background:color-mix(in srgb,var(--up) 16%,transparent)}#domTape tr.big.dn{background:color-mix(in srgb,var(--down) 16%,transparent)}#domTape tr.big td{font-weight:700}
+.dom-hint{font-size:10px}
+@container (max-width:230px){#domLadder .trd,#domTape th:nth-child(4),#domTape td:nth-child(4){display:none}}
 @media (max-width:900px){
   body{overflow:auto}
   #body,#body.no-panel{grid-template-columns:1fr;grid-template-rows:auto 70vh auto auto}

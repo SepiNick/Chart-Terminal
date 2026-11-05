@@ -45,6 +45,14 @@ export const FA: Record<string, string> = {
   '% of available': 'درصد از موجودی', '% equity risked to SL': 'درصد سرمایه در ریسک تا حد ضرر', '% of price': 'درصد قیمت', 'price units': 'واحد قیمت',
   // DOM
   'Time & Sales': 'ریز معاملات', 'merge': 'ادغام',
+  'Bid': 'خرید', 'Ask': 'فروش', 'Mid': 'میانه', 'Spread': 'اسپرد', 'Cum.': 'تجمعی', 'Cumulative depth': 'عمق تجمعی', 'Traded': 'معامله‌شده', 'Time': 'زمان',
+  'Live': 'زنده', 'Stale': 'کهنه', 'Reconnecting…': 'اتصال مجدد…', 'Loading…': 'در حال بارگذاری…', 'No Level 2': 'بدون سطح ۲', 'Last update': 'آخرین به‌روزرسانی', 'your order': 'سفارش شما',
+  'Level 2 is available for crypto symbols.': 'سطح ۲ فقط برای نمادهای رمزارز موجود است.', 'Loading order book…': 'در حال بارگذاری دفتر سفارش‌ها…', 'Order book unavailable, retrying…': 'دفتر سفارش‌ها در دسترس نیست، تلاش مجدد…',
+  'Waiting for trades…': 'در انتظار معاملات…', 'No trades above the minimum value': 'معامله‌ای بالاتر از حداقل مقدار نیست',
+  'Traded at this price since the panel opened': 'حجم معامله‌شده در این قیمت از زمان باز شدن پنل', 'Cumulative resting size from the touch outward': 'حجم تجمعی سفارش‌های باقی‌مانده از بهترین قیمت به بیرون',
+  'Bid share of resting size in the 20 rows around the touch': 'سهم خریداران از حجم سفارش‌ها در ۲۰ ردیف نزدیک بازار', 'Re-centre on the market': 'برگرداندن به مرکز بازار', 'Minimum trade value': 'حداقل ارزش معامله',
+  'Spread and book imbalance': 'اسپرد و عدم‌توازن دفتر سفارش', 'Time and sales': 'ریز معاملات',
+  'Order book ladder. Arrow keys move the cursor, B buys and S sells at the cursor row, Home re-centres.': 'نردبان دفتر سفارش‌ها. کلیدهای جهت‌دار مکان‌نما را جابه‌جا می‌کنند، B خرید و S فروش در ردیف مکان‌نما، Home بازگشت به مرکز.',
   // journal
   '⤢ Open': '⤢ باز کردن', 'Trades': 'معاملات', 'Stats': 'آمار', 'Calendar': 'تقویم', 'Setups': 'ستاپ‌ها', '📓 Journal': '📓 ژورنال', '＋ New entry': '＋ ثبت جدید',
   'Journal sections': 'بخش‌های ژورنال', 'Close (Esc)': 'بستن (Esc)', 'Show on chart': 'نمایش روی نمودار', 'Delete': 'حذف', 'Skip': 'رد شدن', 'Skip all': 'رد شدن از همه',

@@ -149,14 +149,21 @@
     <div class="side" id="s-screener">
     </div>
     <div class="side" id="s-dom">
-      <h3>DOM · <span id="domSym">—</span><span class="grow"></span>
-        <select id="domMult" title="Group price levels"><option value="1">×1</option><option value="2">×2</option><option value="5">×5</option><option value="10">×10</option><option value="25">×25</option><option value="100">×100</option></select>
-        <button id="domCenter" class="x" title="Re-centre on the market (scroll the ladder to move it)">⌖</button></h3>
-      <div class="row" id="domStats"></div>
-      <table id="domLadder"></table>
+      <h3 class="dom-head"><span id="domSym">—</span><span id="domEx" class="muted dom-ex"></span>
+        <span id="domConn" class="dom-conn" data-s="loading" role="status"><i aria-hidden="true"></i><span id="domConnT">Loading…</span><span id="domUpd" class="num"></span></span><span class="grow"></span>
+        <select id="domMult" title="Group price levels" aria-label="Group price levels"><option value="1">×1</option></select>
+        <button id="domCenter" class="x" title="Re-centre on the market (scroll the ladder to move it)" aria-label="Re-centre on the market">⌖</button></h3>
+      <div id="domStats" class="num" aria-label="Spread and book imbalance">
+        <span class="k">Bid<b id="domBest" class="up"></b></span><span class="k">Mid<b id="domMid"></b></span><span class="k">Ask<b id="domAsk" class="dn"></b></span><span class="k">Spread<b id="domSpread"></b></span>
+        <div class="imb" title="Bid share of resting size in the 20 rows around the touch"><em id="domBidPct" class="up"></em><span id="domImb"><i></i></span><em id="domAskPct" class="dn"></em></div>
+      </div>
+      <label class="muted dom-opt"><input type="checkbox" id="domCum"> Cumulative depth</label>
+      <div id="domMsg" class="dom-msg muted" role="status" hidden></div>
+      <table id="domLadder" class="dom-t" tabindex="0" aria-label="Order book ladder. Arrow keys move the cursor, B buys and S sells at the cursor row, Home re-centres."></table>
       <div class="muted dom-hint">Click a bid to buy, an ask to sell on <b id="domAcct">paper</b> (limit on the passive side, stop beyond the market). Quantity comes from the order ticket.</div><!-- accounts -->
-      <h3>Time &amp; Sales <span class="grow"></span><label class="muted"><input type="checkbox" id="domAgg"> merge</label><input id="domMin" type="number" min="0" placeholder="min value" title="Hide trades below this value (quote currency)" style="width:80px"></h3>
-      <table id="domTape"></table>
+      <h3>Time &amp; Sales <span class="grow"></span><label class="muted"><input type="checkbox" id="domAgg"> merge</label><input id="domMin" type="number" min="0" placeholder="min value" title="Hide trades below this value (quote currency)" aria-label="Minimum trade value" style="width:80px"></h3>
+      <div id="domTapeMsg" class="muted dom-msg" role="status">Waiting for trades…</div>
+      <table id="domTape" class="dom-t" aria-label="Time and sales"></table>
     </div>
     <div class="side" id="s-liqs"></div><!-- derivs: filled by src/derivs/liqpanel.ts -->
     <div class="side" id="s-accts"></div><!-- accounts: filled by src/broker/ui.ts -->
