@@ -1,3 +1,4 @@
+﻿import { migrate } from './watchlists.ts';
 // Merge of this device's synced data with an account's data (docs/research/oauth-sync-design.md §4). Pure: no DOM, no
 // storage, no network, so node tests cover it. Rules per key come from SCHEMA; unknown keys fall back to a generic rule.
 // Guarantees: nothing is dropped unless it carries a tombstone newer than its last edit; merging twice gives the same
@@ -48,12 +49,15 @@ export const SCHEMA: Record<string, Node> = {
   drawings: { k: 'rec', each: { k: 'ids', idOf: byId, dupKey: noId, reid: true } },
   scripts: { k: 'rec', each: 'script' },
   indTemplates: { k: 'rec', each: 'rename' }, chartTemplates: { k: 'rec', each: 'rename' }, drawTemplates: { k: 'rec', each: 'rename' },
-  watch: set(), favTfs: set(), customTfs: set(), favTools: set(), recentSymbols: set(12),
+  watch: set(),
+  // multiple watchlists (src/watchlists.ts): lists unioned by id with tombstones; symbols per list unioned with tombstones; flags LWW per symbol
+  watchLists: { k: 'rec', each: obj({ syms: set(), flags: { k: 'rec', each: { k: 'doc' } } }) },
+  favTfs: set(), customTfs: set(), favTools: set(), recentSymbols: set(12),
   alerts: { k: 'ids', idOf: byId, dupKey: noId, reid: true },
   acct: { k: 'ledger' },
 };
 /** Keys that hold user content (counted in the dialog; a device with none of them is "empty"). */
-const CONTENT = ['journal', 'watch', 'layouts', 'scripts', 'drawings', 'indTemplates', 'chartTemplates', 'drawTemplates', 'alerts'];
+const CONTENT = ['journal', 'watch', 'watchLists', 'layouts', 'scripts', 'drawings', 'indTemplates', 'chartTemplates', 'drawTemplates', 'alerts'];
 /** Keys that must never leave the device or be merged (secrets, per-device bindings). Merge refuses them even if passed in. */
 export const NEVER = new Set(['ctsrv', 'ctoauth', 'ctown', 'aiUrl', 'brokerActive']);
 
@@ -195,6 +199,11 @@ export interface MergeResult { values: Record<string, unknown>; meta: Meta; note
 export function mergeAll(account: Record<string, unknown>, device: Record<string, unknown>, o: MergeOpts = {}): MergeResult {
   const c: Ctx = { a: o.accMeta ?? emptyMeta(), d: o.devMeta ?? emptyMeta(), notes: [], acct: o.acct ?? 'account' };
   const values: Record<string, unknown> = {};
+  // A side that still has only the old single watchlist is upgraded first (stable id 'default'), so two devices merge instead of one list being lost.
+  if (account.watchLists !== undefined || device.watchLists !== undefined) {
+    const up = (s: Record<string, unknown>) => (s.watchLists === undefined && Array.isArray(s.watch) ? { ...s, watchLists: migrate(undefined, s.watch, s.watchFlags) } : s);
+    account = up(account); device = up(device);
+  }
   for (const k of new Set([...Object.keys(account), ...Object.keys(device)])) {
     if (k === 'syncmeta' || NEVER.has(k)) continue;
     const a = clone(account[k]), d = clone(device[k]);
@@ -215,7 +224,7 @@ const len = (x: unknown) => (Array.isArray(x) ? x.length : isObj(x) ? Object.key
 export function summarize(s: Record<string, unknown>): Summary {
   const j = s.journal as Any, sum = (r: unknown) => (isObj(r) ? Object.values(r).reduce((n: number, v) => n + len(v), 0) : 0);
   const out = {
-    trades: len(j?.trades), watch: len(s.watch), layouts: len(s.layouts), scripts: len(s.scripts), drawings: sum(s.drawings),
+    trades: len(j?.trades), watch: isObj(s.watchLists) ? Object.values(s.watchLists).reduce((n: number, l: Any) => n + (Array.isArray(l?.syms) ? l.syms.filter((x: Any) => !String(x).startsWith('###')).length : 0), 0) : len(s.watch), layouts: len(s.layouts), scripts: len(s.scripts), drawings: sum(s.drawings),
     templates: len(s.indTemplates) + len(s.chartTemplates) + len(s.drawTemplates), alerts: len(s.alerts), total: 0,
     cash: typeof (s.acct as Any)?.cash === 'number' ? (s.acct as Any).cash : undefined, fills: len((s.acct as Any)?.fills),
   };

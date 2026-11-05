@@ -283,3 +283,14 @@ html.fa :is(#panel, dialog, #jw) :is(td, th) { text-align: start }
 html.fa .sl { direction: rtl }
 html.fa .sl > b { direction: ltr; unicode-bidi: plaintext }
 #s-ai:not(.on){display:none}   /* the id rule above beat .side, so the AI panel showed under every other panel */
+
+/* multiple watchlists */
+.wltabs{display:flex;gap:4px;overflow-x:auto;padding:4px 6px;scrollbar-width:thin}
+.wltab{flex:none;display:inline-flex;align-items:center;gap:5px;padding:3px 9px;min-height:28px;max-width:150px;border:1px solid var(--line);border-radius:14px;background:transparent;color:inherit;cursor:pointer;font-size:12px}
+.wltab span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wltab.on{border-color:var(--accent);background:rgba(127,127,127,.14)}
+.wltab.drop{outline:2px dashed var(--accent)}
+.wldot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.wldots{display:inline-flex;gap:2px;margin-inline-end:5px;vertical-align:middle}.wldots i{width:7px;height:7px;border-radius:50%;display:inline-block}
+#toast button{margin-inline-start:6px}
+@media (max-width:900px){.wltab{min-height:36px;padding:4px 12px}}

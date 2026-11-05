@@ -111,7 +111,8 @@
   </section>
   <aside id="panel">
     <div class="side on" id="s-watch">
-      <h3>Watchlist <button id="watchAdd" class="x" title="Add current symbol (Alt+W)">＋</button><label class="x btn" title="Import a TradingView watchlist (Export list → .txt)">⤓<input type="file" id="watchImport" accept=".txt,.csv" hidden></label><button id="watchMenu" class="x" title="Sections, columns, flags">⋯</button></h3>
+      <h3>Watchlist <button id="watchAdd" class="x" title="Add current symbol (Alt+W)">＋</button><label class="x btn" title="Import symbols into this list (plain text, one per line, or a TradingView export)">⤓<input type="file" id="watchImport" accept=".txt,.csv" hidden></label><button id="watchMenu" class="x" title="Sections, columns, flags, list options">⋯</button></h3>
+      <div id="wlTabs" class="wltabs" role="tablist" aria-label="Watchlists"></div>
       <table id="watchT"></table>
       <div id="watchDet" class="wdet" hidden></div>
     </div>
