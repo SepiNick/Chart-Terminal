@@ -3,6 +3,7 @@ import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from 
 import { TFS, anyTf, streamTickers, fetchBars, fetchSymbols, serverJson, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type RemoteMarket } from './data.ts';
 import { openIndicatorPicker } from './indpicker.ts';
 import { latinKey } from './keymap.ts';
+import { openScreenerPro, initScreenerPro } from './screenerpro.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { TOOL_MAP } from './tools/index.ts';
 import type { Drawing } from './tools/types.ts';
@@ -20,7 +21,7 @@ import { PaperBroker, fromOrder, toOrder } from './broker/paper.ts';
 import { registerBroker, activeBroker, allBrokers, setActiveBroker, onBrokers } from './broker/registry.ts';
 import type { Broker, OrderReq } from './broker/types.ts';
 import { sizeQty, quoteBalance, type SizeMode } from './sizing.ts';
-import { store, $, $$, esc, toast, calcPrec } from './store.ts';
+import { store, $, $$, esc, toast, calcPrec, setOnStored } from './store.ts';
 import { initTesterUI } from './testerui.ts';
 import { defaultOF, type OFCfg } from './orderflow/layer.ts';
 import { hasOrderFlow } from './orderflow/feed.ts';
@@ -32,7 +33,7 @@ import { initJournal, journal, journalBrokers, journalMark, journalSource, journ
 import { journalReplayOrder } from './journal/replay.ts';
 import { initPineUI, openNewScript, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
 import { initPyUI } from './pyui.ts';
-import { serverMode, onServer, api } from './sync.ts';
+import { serverMode, onServer, api, isSynced } from './sync.ts';
 import { isStandalone } from './servers.ts';
 import { bundledOrigin } from './standalone.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
@@ -110,6 +111,15 @@ onServer('state', m => {
   if (m.key !== 'acct' || !m.value) return;
   st.acct = m.value as Account;
   journalSync(st.acct); paper.emit();
+});
+// Every change is written to the device (and sent to the server when there is one) as it happens; this shows it.
+let savedTimer = 0;
+setOnStored((key, ok) => {
+  if (!isSynced(key)) return;   // device-only UI state (panel sizes, last tool) is not a chart change
+  const b = $('#layoutsBtn'), t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  b.title = ok ? `Save / load layouts. Every change is saved automatically (last ${t})` : 'Device storage is full: the last change may not survive a restart';
+  b.classList.toggle('saved', ok); b.classList.toggle('unsaved', !ok);
+  clearTimeout(savedTimer); savedTimer = window.setTimeout(() => b.classList.remove('saved'), 1500);
 });
 const saveLayout = () => {
   st.layout.panes = panes.map((p, i) => ({ ...p.cfg, link: st.layout.panes[i]?.link }));
@@ -1398,6 +1408,11 @@ document.addEventListener('keydown', e => {
   if (/^\p{L}$/u.test(e.key)) return act(() => openSearch(e.key));   // a Persian letter starts a search too (Tehran bourse tickers are Persian)
 });
 
+initScreenerPro({
+  openSymbol: s => setSymbol(s),
+  watchlists: () => Object.entries(lists).map(([id, l]) => ({ id, name: l.name, syms: l.syms.filter(x => !isSection(x)) })),
+  openClassic: () => $('#rail [data-side="screener"]')?.click(),
+});
 initPineUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
 initPyUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
 initTesterUI({ paper: (p, side, qty) => { const px = pxOf(p.cfg.symbol); if (px) { journalSource('Forward test'); submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p, paper); journalSource('') } }, watchlist: () => watchSyms() });
@@ -1486,6 +1501,7 @@ $('#menuBtn').onclick = e => {
     { label: 'Settings', icon: '⚙', action: click('#settingsBtn') },
     { label: 'New tab', icon: '＋', action: click('#tabAdd') },
     { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
+    { label: 'Screener Pro…', icon: '📊', action: openScreenerPro },
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
     { sep: true },
     { head: 'Theme' },

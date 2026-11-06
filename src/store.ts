@@ -19,6 +19,9 @@ function stamp(key: string, value: unknown) {
 /** A pop-out window keeps its own layout, side panel and sizes: these keys are redirected to `po.<id>.<key>` (device-local, never synced). */
 const alias = new Map<string, string>();
 export const aliasKeys = (id: string, keys: string[]) => keys.forEach(k => alias.set(k, `po.${id}.${k}`));
+/** Called after every write (key and whether this browser's storage accepted it): the "saved" indicator listens here. */
+export let onStored: (key: string, ok: boolean) => void = () => {};
+export const setOnStored = (f: typeof onStored) => { onStored = f };
 export const store = {
   get<T>(key: string, fallback: T): T {
     key = alias.get(key) ?? key;
@@ -34,6 +37,7 @@ export const store = {
     try { localStorage.setItem('ct.' + key, JSON.stringify(value)); memo.delete(key) }
     catch { ok = false; if (isStandalone() && !full) { full = true; setTimeout(() => toast('Device storage is full: recent changes may be lost on restart. Delete old scripts or journal pictures.', 8000), 0) } const j = JSON.stringify(value); if (j !== undefined) memo.set(key, j) }
     queueState(key, value);
+    onStored(key, ok);
     return ok;
   },
 };

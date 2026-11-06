@@ -7,6 +7,7 @@ import { STANDALONE_WHY, isStandalone } from '../servers.ts';
 import { movers, seasonals, squarify, technicalRating, type Rating } from './analysis.ts';
 import { describe, matches, needsBars, parseQuery, test1, type Query, type Row as QRow } from './query.ts';
 import { ema, rsi, sma } from '../indicators.ts';
+import { openScreenerPro } from '../screenerpro.ts';
 
 export interface MarketHost { setSymbol(s: string): void; addWatch(s: string): void; symbol(): string; refreshCharts(): void }
 let host: MarketHost;
@@ -97,13 +98,14 @@ async function screener(v: HTMLElement) {
     <input id="scrQuote" value="${esc(scr.quote)}" placeholder="Quote" title="Quote currency (empty = all)" style="width:60px">
     <input id="scrMin" type="number" value="${esc(scr.minVol)}" title="Minimum 24h volume (quote)" style="width:90px">
     <input id="scrQ" value="${esc(scr.q)}" placeholder="Search" style="width:80px">
-    <button id="scrRate" title="Technical rating (daily) of the first 25 rows">Rate</button></div>
+    <button id="scrRate" title="Technical rating (daily) of the first 25 rows">Rate</button><button id="scrPro" title="Full-screen screener with filters, tabs and saved presets">Screener Pro ↗</button></div>
     <div class="row"><input id="scrCond" class="grow" dir="auto" value="${esc(scr.cond)}" placeholder="شرط: RSI زیر ۳۰ و حجم بالای ۱ میلیون · price above sma 50 and change > 3%"><button id="scrCondGo">Filter</button></div>
     <div id="scrCondOut" class="muted"></div><div id="scrOut" class="muted">Loading…</div>`;
   const read = () => { Object.assign(scr, { ex: $<HTMLSelectElement>('#scrEx').value, quote: $<HTMLInputElement>('#scrQuote').value.trim().toUpperCase(), minVol: +$<HTMLInputElement>('#scrMin').value || 0, q: $<HTMLInputElement>('#scrQ').value.trim().toUpperCase() }); store.set('mktScr', scr); draw() };
   v.querySelector('.row')!.addEventListener('change', read);
   $('#scrQ').oninput = read;
   $('#scrRate').onclick = () => void rateRows();
+  $('#scrPro').onclick = () => openScreenerPro();
   // Conditions in plain words (src/market/query.ts): parsed here, shown back, applied in draw().
   let query: Query | null = null;
   const parseCond = () => {

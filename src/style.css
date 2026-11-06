@@ -385,3 +385,28 @@ dialog.ip h3{display:flex;justify-content:space-between;align-items:center}
 .ip-row{display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid var(--line)}
 .ip-n{flex:1;display:flex;flex-direction:column;min-width:0}.ip-in{display:flex;gap:6px;flex-wrap:wrap}
 .ip-in label{display:flex;flex-direction:column;font-size:11px;color:var(--muted)}.ip-in input{width:64px;padding:2px 4px}
+
+/* "saved" flash on the layout button */
+#layoutsBtn::after{content:"";margin-left:4px;transition:opacity .4s;opacity:0}
+#layoutsBtn.saved::after{content:"✓";color:var(--up);opacity:1}
+#layoutsBtn.unsaved::after{content:"!";color:var(--down);opacity:1}
+
+/* Screener Pro */
+#sp{position:fixed;inset:0;z-index:90;background:var(--bg);display:flex;flex-direction:column;padding:12px 18px;gap:10px;overflow:hidden}#sp[hidden]{display:none}
+.sp-top,.sp-head,.sp-tabs{display:flex;align-items:center;gap:8px}.sp-top .x{font-size:22px}
+.sp-type{border:0;background:none;font-size:14px;padding:4px 6px}
+.sp-title{font-size:20px}.sp-save{border:0;background:none;color:var(--accent);font-size:14px}
+.sp-chips{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.sp-chip{border-radius:20px;padding:6px 12px;font-size:13px;background:var(--bg);white-space:nowrap}.sp-chip.on{display:inline-flex;align-items:center;padding:0;background:var(--panel);border:1px solid var(--line)}
+.sp-chip.on button{border:0;background:none;padding:6px 8px 6px 12px;border-radius:20px;font-weight:600}.sp-chip.on button.x{padding:6px 10px 6px 4px;font-size:16px;line-height:1}
+.sp-plus{font-size:16px;padding:4px 10px}
+.sp-tabs button{border:0;background:none;padding:6px 12px;border-radius:6px;font-size:14px;color:var(--muted)}.sp-tabs button.on{background:var(--panel);color:var(--text);font-weight:600}
+.sp-table{flex:1;overflow:auto;border-top:1px solid var(--line)}.sp-table table{width:100%;border-collapse:collapse}
+.sp-table th{position:sticky;top:0;background:var(--bg);text-align:right;font-weight:400;color:var(--muted);padding:8px 14px;cursor:pointer;white-space:nowrap;border-bottom:1px solid var(--line)}.sp-table th div{font-size:11px}
+.sp-table td{text-align:right;padding:9px 14px;border-bottom:1px solid var(--line);white-space:nowrap}.sp-table .sp-l{text-align:left}
+.sp-table tbody tr{cursor:pointer}.sp-table tbody tr:hover{background:var(--panel)}.sp-sym{background:var(--panel);padding:3px 8px;border-radius:5px}
+.sp-empty{text-align:center!important;padding:40px!important}.sp-add{width:40px;cursor:default!important}.sp-add button{border:0;background:none;font-size:18px}
+.sp-pop{position:fixed;z-index:95;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;min-width:220px;max-width:320px;box-shadow:0 8px 24px #0006}
+.sp-opts{max-height:300px;overflow:auto;display:flex;flex-direction:column}.sp-opt{display:flex;gap:8px;align-items:center;padding:4px 2px;cursor:pointer}
+.sp-mi{border:0;background:none;text-align:left;padding:7px 8px;border-radius:5px}.sp-mi:hover{background:var(--bg)}
+.sp-pop input[type=number]{width:100px}
