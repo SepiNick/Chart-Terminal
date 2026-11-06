@@ -283,3 +283,24 @@ html.fa :is(#panel, dialog, #jw) :is(td, th) { text-align: start }
 html.fa .sl { direction: rtl }
 html.fa .sl > b { direction: ltr; unicode-bidi: plaintext }
 #s-ai:not(.on){display:none}   /* the id rule above beat .side, so the AI panel showed under every other panel */
+
+/* ---- multi-monitor: pop-out windows (src/popout.ts) ---- */
+.po-ph{display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;color:var(--muted);flex:1}
+.po-ph.on{display:flex}.po-ph.on ~ *{display:none!important}
+.cell .cell-ph{position:absolute;inset:0;z-index:20;background:var(--bg)}.cell.popped .cell-ph{display:flex}
+.cell .popbtn{position:absolute;right:44px;top:4px;z-index:5;width:18px;height:18px;padding:0;line-height:1;font-size:11px;opacity:.55;border:0;background:none;color:var(--text)}.cell .popbtn:hover{opacity:1}
+.po-btn{margin-inline-start:auto}.side h3 .po-btn{margin-inline-start:0}
+#poBar{display:flex;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+#poBar .grow{flex:1}#poMsg button{margin-inline-start:4px}
+html.po .po-btn,html.po .popbtn,html.po #monBtn,html.po #rail{display:none}
+html.po-chart :is(#layoutBtn,#syncBtn,#layoutsBtn,#srvBtn){display:none}
+html.po-chart #panel,html.po-chart #bottom{display:none}html.po-chart #body{grid-template-columns:44px minmax(0,1fr)}
+html.po:not(.po-chart) :is(#top,#replayBar,#tools,#favBar,#bottomBar){display:none}
+html.po:not(.po-chart) #body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+/* The hidden chart pane that feeds a panel keeps a real size, just off screen. */
+html.po:is(.po-watch,.po-dom,.po-alerts) #center,html.po:is(.po-pine,.po-tester,.po-positions) #grid{position:fixed;left:-10000px;top:0;width:1000px;height:700px;visibility:hidden;pointer-events:none}
+html.po:is(.po-watch,.po-dom,.po-alerts) #panel{display:flex}
+html.po:is(.po-pine,.po-tester,.po-positions) #panel{display:none}
+html.po:is(.po-pine,.po-tester,.po-positions) #bottom{height:auto;flex:1;border-top:0}
+html.po:is(.po-pine,.po-tester,.po-positions) :is(#bResize,#bToggle){display:none}
+html.po-pine #bTabs [data-tab]:not([data-tab=pine]),html.po-tester #bTabs [data-tab]:not([data-tab=tester]),html.po-positions #bTabs :is([data-tab=pine],[data-tab=tester]){display:none}

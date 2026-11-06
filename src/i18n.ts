@@ -103,6 +103,22 @@ export const FA: Record<string, string> = {
   'When a chart stays empty or something breaks: collect a report with your browser, the server, a quick check of every data source and the latest errors. Keys, tokens, passwords, e-mail and IP addresses are removed. Nothing is sent anywhere; copy the text to where you ask for help.': 'وقتی نمودار خالی می‌ماند یا چیزی خراب می‌شود: گزارشی از مرورگر، سرور، بررسی سریع هر منبع داده و آخرین خطاها جمع کنید. کلید، توکن، رمز، ایمیل و آدرس IP حذف می‌شوند. چیزی جایی فرستاده نمی‌شود؛ متن را هر جا کمک می‌خواهید کپی کنید.',
   'A stop and a ladder of targets that manage themselves: sl 98 or sl 2% · tp 1R 50%, 3R 50% (price, R multiple or %, then its share) · be 1 (stop to breakeven after target 1) · trail 1% 2 (trail after target 2). Paper account only.': 'یک حد ضرر و نردبان اهداف که خودشان مدیریت می‌شوند: sl 98 یا sl 2% · tp 1R 50%, 3R 50% (قیمت، مضرب R یا درصد، بعد سهم آن) · be 1 (حد ضرر بعد از هدف ۱ به سر‌به‌سر) · trail 1% 2 (تریل بعد از هدف ۲). فقط حساب تمرینی.',
 
+  // multi-monitor: pop-out windows
+  'Monitors: pop out to other screens, move windows': 'مانیتورها: خارج کردن پنل به صفحه‌ی دیگر و جابه‌جایی پنجره‌ها',
+  'Pop out to its own window (another monitor)': 'خارج کردن در پنجره‌ی جدا (مانیتور دیگر)',
+  'Pop out this panel to its own window (another monitor)': 'خارج کردن این پنل در پنجره‌ی جدا (مانیتور دیگر)',
+  'Pop out to its own window': 'خارج کردن در پنجره‌ی جدا',
+  'Popped out to its own window': 'در پنجره‌ی جدا باز است',
+  'Bring back': 'بازگرداندن', '↩ Bring back': '↩ بازگرداندن', 'Bring back to this window': 'بازگرداندن به این پنجره', 'Bring all back': 'بازگرداندن همه',
+  'Close this window and show the panel in the main window again': 'بستن این پنجره و نمایش دوباره‌ی پنل در پنجره‌ی اصلی',
+  'Move this window to another screen': 'انتقال این پنجره به صفحه‌ی دیگر', '🖥 Screen ▾': '🖥 صفحه ▾',
+  'Pop out to a new window': 'خارج کردن در پنجره‌ی جدید', 'Choose a screen… (asks permission)': 'انتخاب صفحه… (اجازه می‌خواهد)', 'Move to a screen…': 'انتقال به صفحه‌ی دیگر…',
+  'Detect screens… (asks permission)': 'شناسایی صفحه‌ها… (اجازه می‌خواهد)', 'Move this window to…': 'انتقال این پنجره به…', 'Fullscreen this window on…': 'تمام‌صفحه کردن این پنجره روی…',
+  'Pop out to screen…': 'خارج کردن به صفحه‌ی…', 'Open pop-outs': 'پنجره‌های جدا', 'Restore all windows': 'بازیابی همه‌ی پنجره‌ها',
+  'This browser cannot list screens: pop-outs open where it puts them': 'این مرورگر نمی‌تواند صفحه‌ها را فهرست کند؛ پنجره‌ها هر جا مرورگر بگذارد باز می‌شوند',
+  'Pop-up blocked. Allow pop-ups for this site (icon at the right of the address bar), then try again.': 'پنجره‌ی بازشو مسدود شد. بازشو را برای این سایت مجاز کنید (آیکون سمت راست نوار آدرس) و دوباره امتحان کنید.',
+  'Main window closed.': 'پنجره‌ی اصلی بسته شد.', 'Keep open': 'باز بماند', 'Close this window': 'بستن این پنجره', 'Running on its own': 'مستقل کار می‌کند',
+  'Chart': 'نمودار', 'DOM / Time & Sales': 'DOM / ریز معاملات', 'Positions & orders': 'پوزیشن‌ها و سفارش‌ها', 'Pine / Python editor': 'ویرایشگر Pine / Python',
 };
 
 const SKIP = 'canvas, #grid, #pnEditor, #pnConsole, textarea, code, pre, script, style, .cm-editor, [data-i18n="off"]';
