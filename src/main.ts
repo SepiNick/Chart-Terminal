@@ -34,7 +34,7 @@ import { bundledOrigin } from './standalone.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
 import './tooltip.ts';
-import { parseTvWatchlist } from './tvimport.ts';
+import { MSG, COLORS, addSymbol, checkBytes, combinedRows, createList, deleteList, duplicateList, exportText, importAsList, importEntries, isSection, migrate, moveBefore, moveSymbol, parseImport, removeSymbol, renameList, reorder, resolveActive, restoreList, setColor, setIcon, sortedIds, symCount } from './watchlists.ts';
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 import { chartEvents, initMarket, renderDetails, renderMarket } from './market/ui.ts';
 import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
@@ -74,7 +74,6 @@ const st = {
   drawings: store.get<Record<string, Drawing[]>>('drawings', {}),
   alerts: store.get<Alert[]>('alerts', []),
   acct: store.get<Account>('acct', newAccount()),
-  watch: store.get<string[]>('watch', ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT']),
   side: store.get<string>('side', 'watch'),
   favTfs: store.get<string[]>('favTfs', ['1m', '5m', '15m', '1h', '4h', '1d', '1w']),
   customTfs: store.get<string[]>('customTfs', []),
@@ -826,65 +825,194 @@ function showSide(name: string) {
 $('#rail').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) showSide(s) };
 $('#keysBtn').onclick = () => openKeys();
 
-$<HTMLInputElement>('#watchImport').onchange = async e => {
-  const inp = e.target as HTMLInputElement, f = inp.files?.[0]; inp.value = ''; if (!f) return;
-  const add = parseTvWatchlist(await f.text()).filter(s => s.startsWith('###') ? !st.watch.includes(s) : !st.watch.includes(s) && !isExpr(s));
-  if (!add.some(s => !s.startsWith('###'))) return toast('No new symbols in that file');
-  st.watch.push(...add); saveWatch(); toast(`${add.filter(s => !s.startsWith('###')).length} symbols imported from TradingView`);
-};
-// Watchlist: symbols plus '###Name' section rows (TradingView's export format), colour flags, optional columns, details.
-const watchSyms = () => st.watch.filter(s => !s.startsWith('###'));
+// ---------- watchlists ----------
+// Many named lists (src/watchlists.ts holds the pure logic). Synced key `watchLists`; the active list and the combined view
+// are device-local (`watchActive`, `watchView`). A list holds symbols plus '###Name' section rows (TradingView's export
+// format) and its own colour flags. The old single list (`watch`, `watchFlags`) becomes the list 'Default' at start-up.
+let lists = migrate(store.get<unknown>('watchLists', undefined), store.get<unknown>('watch', undefined), store.get<unknown>('watchFlags', undefined));
+let watchActive = resolveActive(lists, store.get<string | null>('watchActive', null));
+const watchView = store.get<{ multi: boolean; ids: string[] }>('watchView', { multi: false, ids: [] });
 const FLAGS = ['#f23645', '#ff9800', '#ffeb3b', '#4caf50', '#2196f3', '#9c27b0', '#00bcd4'], FLAG_NAMES = ['Red', 'Orange', 'Yellow', 'Green', 'Blue', 'Purple', 'Cyan'];
-const watchFlags = store.get<Record<string, string>>('watchFlags', {});
 const watchCols = store.get('watchCols', { chg: false, flag: true });
 let watchDetail = store.get<string | null>('watchDetail', null);
-function saveWatch() { store.set('watch', st.watch); connectTickers(); renderWatch() }
-function addWatch(s: string) { if (!st.watch.includes(s) && !isExpr(s)) { st.watch.push(s); saveWatch(); toast(`${s} added to watchlist`) } }
+let importAsNew = false;
+const curList = () => lists[watchActive];
+const multiIds = () => (watchView.multi ? (watchView.ids.filter(i => lists[i]).length ? watchView.ids.filter(i => lists[i]) : sortedIds(lists)) : []);
+interface WItem { s: string; lists: string[]; i: number }
+const watchItems = (): WItem[] => (watchView.multi ? combinedRows(lists, multiIds()).map((r, i) => ({ s: r.sym, lists: r.lists, i })) : curList().syms.map((s, i) => ({ s, lists: [watchActive], i })));
+const watchSyms = () => [...new Set(watchItems().filter(x => !isSection(x.s)).map(x => x.s))];
+function saveLists() {
+  if (!checkBytes(lists).ok) toast(MSG.big, 5000);
+  store.set('watchLists', lists); connectTickers(); renderWatch();
+}
+function selectList(id: string) {
+  if (!lists[id]) return;
+  watchActive = id; watchView.multi = false; store.set('watchActive', id); store.set('watchView', watchView); renderWatch();
+}
+/** Shows a toast with an Undo button. */
+function undoToast(msg: string, undo: () => void) {
+  const d = document.createElement('div'), b = document.createElement('button');
+  d.textContent = msg + ' '; b.textContent = 'Undo'; b.onclick = () => { undo(); d.remove() };
+  d.append(b); $('#toast').append(d); setTimeout(() => d.remove(), 8000);
+}
+const dot = (c: string) => `<span class="wldot" style="background:${esc(c)}"></span>`;
+function addWatch(s: string, id = watchActive) {
+  if (isExpr(s)) return;
+  const r = addSymbol(lists, id, s);
+  if (!r.ok) return void toast(r.msg);
+  saveLists(); toast(`${s} added to ${lists[id].name}`);
+}
+function newList(name?: string | null, entries: string[] = []) {
+  const n = name ?? prompt('Watchlist name')?.trim(); if (!n) return;
+  const r = importAsList(lists, n, entries, isExpr);
+  if (!r.ok) return void toast(r.msg);
+  selectList(r.id!); saveLists();
+  if (r.skipped) toast(`${r.added} symbols imported, ${r.skipped} skipped: ${r.msg}`, 6000);
+}
+function download(name: string, text: string) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function listMenu(id: string): MenuItem[] {
+  const l = lists[id], ids = sortedIds(lists), at = ids.indexOf(id);
+  return [
+    { label: 'Rename list…', action: () => { const n = prompt('Watchlist name', l.name)?.trim(); if (n) { const r = renameList(lists, id, n); r.ok ? saveLists() : toast(r.msg) } } },
+    { label: 'List colour', sub: COLORS.map(c => ({ label: c, iconHtml: dot(c), checked: l.color === c, action: () => { setColor(lists, id, c); saveLists() } })) },
+    { label: 'List icon', sub: [...['⭐', '🔥', '💎', '📈', '📉', '🪙', '🏦', '🌍', '🧪', '💤'].map(e => ({ label: e, checked: l.icon === e, action: () => { setIcon(lists, id, e); saveLists() } })),
+      { label: 'Custom…', action: () => { const e = prompt('Emoji or short symbol', l.icon ?? ''); if (e !== null) { setIcon(lists, id, e); saveLists() } } }, { label: 'No icon', action: () => { setIcon(lists, id, ''); saveLists() } }] },
+    { label: 'Duplicate list', action: () => { const r = duplicateList(lists, id, '(copy)'); if (r.ok) { selectList(r.id!); saveLists() } else toast(r.msg) } },
+    { label: 'Move left', disabled: at <= 0, action: () => { moveBefore(lists, id, ids[at - 1]); saveLists() } },
+    { label: 'Move right', disabled: at >= ids.length - 1, action: () => { moveBefore(lists, id, ids[at + 2]); saveLists() } },
+    { label: 'Export as text file', action: () => download(`${l.name.replace(/[^\w\- ]+/g, '_')}.txt`, exportText(l)) },
+    { label: 'Delete list…', action: () => {
+      if (symCount(l) > 0 && !confirm(`Delete the watchlist "${l.name}" with ${symCount(l)} symbols?`)) return;
+      const r = deleteList(lists, id); if (!r.ok) return void toast(r.msg);
+      const keep = r.removed!, order = ids;
+      if (watchActive === id) selectList(resolveActive(lists)); saveLists();
+      undoToast(`Deleted "${keep.name}".`, () => { restoreList(lists, id, keep); reorder(lists, order); saveLists() });
+    } },
+  ];
+}
+/** Symbol menu: move / copy to another list, remove. `from` = the lists that hold the symbol in the current view. */
+function symMenu(x: number, y: number, sym: string, from: string[]) {
+  const src = from[0], others = sortedIds(lists).filter(i => i !== src);
+  const target = (copy: boolean): MenuItem[] => [...others.map(i => ({ label: lists[i].name, iconHtml: dot(lists[i].color), action: () => { const r = moveSymbol(lists, src, i, sym, copy); r.ok ? (saveLists(), toast(`${sym} ${copy ? 'copied' : 'moved'} to ${lists[i].name}`)) : toast(r.msg) } })),
+    { label: 'New list…', action: () => { const n = prompt('Watchlist name')?.trim(); if (!n) return; const c = createList(lists, n); if (!c.ok) return void toast(c.msg); moveSymbol(lists, src, c.id!, sym, copy); saveLists() } }];
+  showMenu(x, y, [{ head: sym }, { label: 'Move to list', sub: target(false) }, { label: 'Copy to list', sub: target(true) }, { sep: true },
+    ...from.map(i => ({ label: from.length > 1 ? `Remove from ${lists[i].name}` : 'Remove', action: () => { removeSymbol(lists, i, sym); saveLists() } }))]);
+}
+function renderTabs() {
+  const ids = sortedIds(lists), multi = watchView.multi;
+  $('#wlTabs').innerHTML = ids.map(id => {
+    const l = lists[id], on = !multi && id === watchActive;
+    return `<button role="tab" class="wltab${on ? ' on' : ''}" aria-selected="${on}" tabindex="${on ? 0 : -1}" draggable="true" data-wl="${esc(id)}" title="${esc(l.name)} · ${symCount(l)}">${dot(l.color)}${l.icon ? esc(l.icon) : ''}<span>${esc(l.name)}</span></button>`;
+  }).join('') + `<button role="tab" class="wltab${multi ? ' on' : ''}" aria-selected="${multi}" tabindex="-1" data-wlall title="Show several lists at once">⊞</button><button class="wltab" data-wlnew title="New watchlist" aria-label="New watchlist">＋</button>`;
+}
 function renderWatch() {
-  const cols = 3 + (watchCols.chg ? 1 : 0);
-  $('#watchT').innerHTML = `<tr><th>Symbol</th><th>Last</th>${watchCols.chg ? '<th>Chg</th>' : ''}<th>Chg%</th><th></th></tr>` + st.watch.map((s, i) => {
-    if (s.startsWith('###')) return `<tr class="wsec" data-i="${i}"><td colspan="${cols}"><b>${esc(s.slice(3))}</b></td><td><button class="x" data-ren="${i}" title="Rename section">✎</button><button class="x" data-rm="${esc(s)}" title="Remove section (symbols stay)">×</button></td></tr>`;
+  renderTabs();
+  const items = watchItems(), multi = watchView.multi, cols = 3 + (watchCols.chg ? 1 : 0);
+  $('#watchT').innerHTML = `<tr><th>Symbol</th><th>Last</th>${watchCols.chg ? '<th>Chg</th>' : ''}<th>Chg%</th><th></th></tr>` + items.map(({ s, lists: own, i }) => {
+    if (isSection(s)) return `<tr class="wsec" data-i="${i}"><td colspan="${cols}"><b>${esc(s.slice(3))}</b></td><td><button class="x" data-ren="${i}" title="Rename section">✎</button><button class="x" data-rm="${esc(s)}" title="Remove section (symbols stay)">×</button></td></tr>`;
     const t = tick24[s] ?? (lastPx[s] ? { c: lastPx[s], o: NaN } : undefined), ch = t && Number.isFinite(t.o) ? ((t.c - t.o) / t.o) * 100 : null;
-    const [ex, name] = s.includes(':') ? s.split(':') : ['', s], flag = watchFlags[s];
-    return `<tr class="click${s === active()?.cfg.symbol ? ' sel' : ''}" data-sym="${esc(s)}"><td>${watchCols.flag ? `<span class="wflag" data-flag="${esc(s)}" title="Flag colour" style="${flag ? `background:${esc(flag)}` : ''}"></span>` : ''}<b>${esc(name.replace(/_?USDT(\.P)?$/, '$1').replace(/_/g, '/'))}</b><span class="muted">${/_?USDT/.test(name) ? 'USDT' : ''}${ex ? ' · ' + esc(ex) : ''}</span></td>
+    const [ex, name] = s.includes(':') ? s.split(':') : ['', s], flag = lists[own[0]]?.flags[s];
+    const dots = multi ? `<span class="wldots" title="${esc(own.map(o => lists[o].name).join(', '))}">${own.map(o => `<i style="background:${esc(lists[o].color)}"></i>`).join('')}</span>` : '';
+    return `<tr class="click${s === active()?.cfg.symbol ? ' sel' : ''}" draggable="true" data-sym="${esc(s)}" data-from="${esc(own[0])}"><td>${dots}${watchCols.flag ? `<span class="wflag" data-flag="${esc(s)}" title="Flag colour" style="${flag ? `background:${esc(flag)}` : ''}"></span>` : ''}<b>${esc(name.replace(/_?USDT(\.P)?$/, '$1').replace(/_/g, '/'))}</b><span class="muted">${/_?USDT/.test(name) ? 'USDT' : ''}${ex ? ' · ' + esc(ex) : ''}</span></td>
       <td>${t ? t.c.toFixed(calcPrec(t.c)) : '–'}</td>${watchCols.chg ? `<td class="${(ch ?? 0) >= 0 ? 'up' : 'dn'}">${t && ch != null ? (t.c - t.o).toFixed(calcPrec(t.c)) : '–'}</td>` : ''}<td class="${(ch ?? 0) >= 0 ? 'up' : 'dn'}">${ch == null ? '–' : ch.toFixed(2) + '%'}</td>
-      <td><button class="x" data-det="${esc(s)}" title="Details: technical rating, seasonals, news">ⓘ</button><button class="x" data-rm="${esc(s)}" title="Remove">×</button></td></tr>`;
+      <td><button class="x" data-det="${esc(s)}" title="Details: technical rating, seasonals, news">ⓘ</button><button class="x" data-mv="${esc(s)}" title="Move, copy or remove" aria-label="Move, copy or remove ${esc(s)}">⇄</button>${multi ? '' : `<button class="x" data-rm="${esc(s)}" title="Remove">×</button>`}</td></tr>`;
   }).join('');
   const d = $('#watchDet');
-  if (!watchDetail || !st.watch.includes(watchDetail)) { d.hidden = true; d.dataset.sym = ''; return }
+  if (!watchDetail || !items.some(x => x.s === watchDetail)) { d.hidden = true; d.dataset.sym = ''; return }
   d.hidden = false;
   if (d.dataset.sym !== watchDetail) { d.dataset.sym = watchDetail; void renderDetails(d, watchDetail) }
 }
+$<HTMLInputElement>('#watchImport').onchange = async e => {
+  const inp = e.target as HTMLInputElement, f = inp.files?.[0]; inp.value = ''; if (!f) return;
+  const entries = parseImport(await f.text()), asNew = importAsNew; importAsNew = false;
+  if (!entries.some(s => !isSection(s))) return toast('No symbols found in that file');
+  if (asNew) return newList(f.name.replace(/\.[^.]+$/, '') || 'Imported', entries);
+  const r = importEntries(lists, watchActive, entries, isExpr);
+  if (!r.added) return toast(r.msg ?? 'No new symbols in that file');
+  saveLists(); toast(`${r.added} symbols imported${r.skipped ? `, ${r.skipped} skipped: ${r.msg}` : ''}`, r.skipped ? 6000 : 3000);
+};
 $('#watchAdd').onclick = () => addWatch(active().cfg.symbol);
 $('#watchMenu').onclick = e => {
   const r = (e.target as HTMLElement).getBoundingClientRect();
   showMenu(r.left, r.bottom, [
-    { label: 'Add section…', action: () => { const n = prompt('Section name')?.trim(); if (n) { st.watch.push('###' + n); saveWatch() } } },
+    { label: 'Add section…', action: () => { const n = prompt('Section name')?.trim(); if (n) { curList().syms.push('###' + n); saveLists() } } },
     { label: 'Change column', checked: watchCols.chg, action: () => { watchCols.chg = !watchCols.chg; store.set('watchCols', watchCols); renderWatch() } },
     { label: 'Flag column', checked: watchCols.flag, action: () => { watchCols.flag = !watchCols.flag; store.set('watchCols', watchCols); renderWatch() } },
-    { label: 'Sort by flag colour', action: () => { st.watch = sortByFlag(st.watch); saveWatch() } },
+    { label: 'Sort by flag colour', action: () => { const l = curList(); l.syms = sortByFlag(l.syms, l.flags); saveLists() } },
+    { sep: true }, { head: curList().name }, ...listMenu(watchActive),
+    { sep: true }, { label: 'New list…', action: () => newList() }, { label: 'Import as new list…', action: () => { importAsNew = true; $<HTMLInputElement>('#watchImport').click() } },
   ]);
 };
 /** Sorts symbols by flag inside each section; sections keep their place. */
-function sortByFlag(list: string[]) {
-  const out: string[] = [], rank = (s: string) => (watchFlags[s] ? FLAGS.indexOf(watchFlags[s]) : FLAGS.length);
+function sortByFlag(list: string[], flags: Record<string, string>) {
+  const out: string[] = [], rank = (s: string) => (flags[s] ? FLAGS.indexOf(flags[s]) : FLAGS.length);
   let run: string[] = [];
   const flush = () => { out.push(...run.sort((a, b) => rank(a) - rank(b))); run = [] };
-  for (const s of list) { if (s.startsWith('###')) { flush(); out.push(s) } else run.push(s) }
+  for (const s of list) { if (isSection(s)) { flush(); out.push(s) } else run.push(s) }
   flush();
   return out;
 }
 $('#watchT').onclick = e => {
   const el = e.target as HTMLElement, rm = el.dataset.rm;
-  if (rm) { st.watch = st.watch.filter(s => s !== rm); saveWatch(); return }
-  if (el.dataset.ren) { const i = +el.dataset.ren, n = prompt('Section name', st.watch[i].slice(3))?.trim(); if (n) { st.watch[i] = '###' + n; saveWatch() } return }
+  if (rm) { const l = curList(); l.syms = l.syms.filter(s => s !== rm); delete l.flags[rm]; saveLists(); return }
+  if (el.dataset.ren) { const l = curList(), i = +el.dataset.ren, n = prompt('Section name', l.syms[i].slice(3))?.trim(); if (n) { l.syms[i] = '###' + n; saveLists() } return }
   if (el.dataset.det) { watchDetail = watchDetail === el.dataset.det ? null : el.dataset.det; store.set('watchDetail', watchDetail); renderWatch(); return }
+  const row = el.closest<HTMLElement>('[data-sym]');
+  if (el.dataset.mv && row) { const r = el.getBoundingClientRect(), it = watchItems().find(x => x.s === row.dataset.sym); symMenu(r.left, r.bottom, el.dataset.mv, it?.lists ?? [watchActive]); return }
   if (el.dataset.flag) {
-    const s = el.dataset.flag, r = el.getBoundingClientRect();
-    showMenu(r.left, r.bottom, [...FLAGS.map((c, k) => ({ label: FLAG_NAMES[k], iconHtml: `<span class="wflag" style="background:${c}"></span>`, checked: watchFlags[s] === c, action: () => { watchFlags[s] = c; store.set('watchFlags', watchFlags); renderWatch() } })), { label: 'No flag', action: () => { delete watchFlags[s]; store.set('watchFlags', watchFlags); renderWatch() } }]);
+    const s = el.dataset.flag, r = el.getBoundingClientRect(), l = lists[row?.dataset.from ?? watchActive];
+    showMenu(r.left, r.bottom, [...FLAGS.map((c, k) => ({ label: FLAG_NAMES[k], iconHtml: `<span class="wflag" style="background:${c}"></span>`, checked: l.flags[s] === c, action: () => { l.flags[s] = c; saveLists() } })), { label: 'No flag', action: () => { delete l.flags[s]; saveLists() } }]);
     return;
   }
-  const s = el.closest<HTMLElement>('[data-sym]')?.dataset.sym; if (s) setSymbol(s);
+  if (row?.dataset.sym) setSymbol(row.dataset.sym);
+};
+$('#watchT').oncontextmenu = e => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('[data-sym]'); if (!row || isSection(row.dataset.sym!)) return;
+  e.preventDefault(); symMenu(e.clientX, e.clientY, row.dataset.sym!, watchItems().find(x => x.s === row.dataset.sym)?.lists ?? [watchActive]);
+};
+// tabs: select, create, combined view, rename on double-click, context menu, drag to reorder, keyboard
+$('#wlTabs').onclick = e => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('.wltab'); if (!el) return;
+  if (el.dataset.wl) return selectList(el.dataset.wl);
+  if (el.dataset.wlnew !== undefined) return newList();
+  const r = el.getBoundingClientRect(), all = sortedIds(lists), cur = multiIds();
+  const set = (ids: string[]) => { watchView.multi = ids.length > 0; watchView.ids = ids; store.set('watchView', watchView); renderWatch(); connectTickers() };
+  showMenu(r.left, r.bottom, [{ label: 'All lists', checked: watchView.multi && cur.length === all.length, action: () => set(all) },
+    ...all.map(id => ({ label: lists[id].name, iconHtml: dot(lists[id].color), checked: watchView.multi && cur.includes(id), action: () => { const n = watchView.multi ? (cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]) : [id]; set(n) } })),
+    { sep: true }, { label: 'Single list', disabled: !watchView.multi, action: () => set([]) }]);
+};
+$('#wlTabs').ondblclick = e => { const id = (e.target as HTMLElement).closest<HTMLElement>('[data-wl]')?.dataset.wl; if (id) { const n = prompt('Watchlist name', lists[id].name)?.trim(); if (n) { const r = renameList(lists, id, n); r.ok ? saveLists() : toast(r.msg) } } };
+$('#wlTabs').oncontextmenu = e => { const id = (e.target as HTMLElement).closest<HTMLElement>('[data-wl]')?.dataset.wl; if (id) { e.preventDefault(); showMenu(e.clientX, e.clientY, listMenu(id)) } };
+$('#wlTabs').onkeydown = e => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const tabs = $$<HTMLElement>('.wltab[role=tab]', $('#wlTabs')), i = tabs.indexOf(document.activeElement as HTMLElement); if (i < 0) return;
+  const rtl = getComputedStyle($('#wlTabs')).direction === 'rtl', n = tabs[(i + ((e.key === 'ArrowRight') !== rtl ? 1 : -1) + tabs.length) % tabs.length];
+  e.preventDefault(); n.focus();
+};
+// drag: a tab onto a tab reorders lists; a symbol row onto a tab moves it (Ctrl/Alt: copy)
+$('#watchT').ondragstart = e => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('[data-sym]'); if (!row || !e.dataTransfer) return;
+  e.dataTransfer.setData('application/x-wsym', JSON.stringify({ sym: row.dataset.sym, from: row.dataset.from })); e.dataTransfer.setData('text/plain', row.dataset.sym!); e.dataTransfer.effectAllowed = 'copyMove';
+};
+$('#wlTabs').ondragstart = e => { const id = (e.target as HTMLElement).closest<HTMLElement>('[data-wl]')?.dataset.wl; if (id && e.dataTransfer) { e.dataTransfer.setData('application/x-wlist', id); e.dataTransfer.effectAllowed = 'move' } };
+$('#wlTabs').ondragover = e => {
+  const t = e.dataTransfer?.types ?? [], el = (e.target as HTMLElement).closest<HTMLElement>('.wltab'); $$('.wltab.drop').forEach(x => x.classList.remove('drop'));
+  if (!el || !(t.includes('application/x-wlist') || (t.includes('application/x-wsym') && el.dataset.wl))) return;
+  e.preventDefault(); el.classList.add('drop');
+};
+$('#wlTabs').ondragleave = () => $$('.wltab.drop').forEach(x => x.classList.remove('drop'));
+$('#wlTabs').ondrop = e => {
+  const el = (e.target as HTMLElement).closest<HTMLElement>('.wltab'); $$('.wltab.drop').forEach(x => x.classList.remove('drop')); if (!el || !e.dataTransfer) return;
+  e.preventDefault();
+  const id = e.dataTransfer.getData('application/x-wlist'), sy = e.dataTransfer.getData('application/x-wsym');
+  if (id && lists[id]) { moveBefore(lists, id, el.dataset.wl && el.dataset.wl !== id ? el.dataset.wl : undefined); saveLists() }
+  else if (sy && el.dataset.wl) {
+    const { sym, from } = JSON.parse(sy) as { sym: string; from: string }, copy = e.ctrlKey || e.altKey, r = moveSymbol(lists, from, el.dataset.wl, sym, copy);
+    r.ok ? (saveLists(), toast(`${sym} ${copy ? 'copied' : 'moved'} to ${lists[el.dataset.wl].name}`)) : toast(r.msg);
+  }
 };
 
 function renderAlerts() {

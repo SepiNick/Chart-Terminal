@@ -39,7 +39,7 @@ export const apiTrade: typeof api = (path, init) => api(path, { ...init, role: '
 /** Keys the running app applies live when another device or the server changes them (the server writes `acct` for forward-test fills). */
 const HOT_KEYS = new Set(['acct']);
 /** Per-device UI state: never sent to the server. */
-const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx', 'aiUrl', 'brokerActive']);   // aiUrl may hold credentials / a LAN address; brokerActive names a broker that exists on one server only
+const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx', 'aiUrl', 'brokerActive', 'watchActive', 'watchView']);   // aiUrl may hold credentials / a LAN address; brokerActive names a broker that exists on one server only
 const KEY_RE = /^[A-Za-z0-9_.-]{1,64}$/;   // same as server/state.ts
 export const isSynced = (key: string) => KEY_RE.test(key) && !LOCAL_KEYS.has(key);
 
