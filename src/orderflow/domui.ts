@@ -62,6 +62,8 @@ function buildLadder() {
 export function initDom(h: DomHost) {
   host = h;
   cfg.cum ??= false;
+  // The side panel can become visible after the first domSync (a restored session opens on it): follow its class instead of guessing the order.
+  new MutationObserver(() => domSync()).observe($('#s-dom'), { attributes: true, attributeFilter: ['class'] });
   buildLadder();
   const acct = () => { $('#domAcct').textContent = activeBroker()?.account.label ?? 'paper' };
   onBrokers(acct); acct();

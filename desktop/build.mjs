@@ -12,6 +12,7 @@ rmSync(app, { recursive: true, force: true });
 
 execSync('npm run build', { cwd: root, stdio: 'inherit' });   // tsc --noEmit + vite build → ../dist
 cpSync(join(root, 'dist'), join(app, 'dist'), { recursive: true });
+cpSync(join(root, 'ml'), join(app, 'ml'), { recursive: true, filter: f => !/__pycache__|test_/.test(f) });   // the Python tools (engine.py, pyrun.py): the server bundle finds them at ../ml
 
 const r = await build({
   entryPoints: { index: join(here, 'server-entry.ts'), engineworker: join(root, 'server', 'engineworker.ts') },
