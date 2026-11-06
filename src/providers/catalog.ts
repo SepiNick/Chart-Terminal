@@ -86,7 +86,7 @@ export const CATALOG: Provider[] = [
     site: 'https://alpaca.markets/data', about: 'US stocks and ETFs, real-time over WebSocket.',
   },
   {
-    id: 'polygon', name: 'Polygon.io (US stocks, options, forex, crypto)', category: 'stocks', live: false, free: true,
+    id: 'polygon', name: 'Polygon.io (US stocks, options, forex, crypto)', category: 'stocks', live: true, free: true,
     keys: [{ name: 'apiKey', label: 'API key', secret: true }],
     test: { url: 'https://api.polygon.io/v2/aggs/ticker/AAPL/prev?apiKey={apiKey}' },
     plans: [{ name: 'Basic', price: 'Free', note: 'Delayed, limited calls per minute' }, { name: 'Paid tiers', price: 'See pricing', note: 'Real-time and tick data' }],
@@ -100,7 +100,7 @@ export const CATALOG: Provider[] = [
     site: 'https://finnhub.io/pricing', about: 'Global stock quotes, forex and crypto with a free tier.',
   },
   {
-    id: 'twelvedata', name: 'Twelve Data (stocks, forex, crypto, indices)', category: 'stocks', live: false, free: true,
+    id: 'twelvedata', name: 'Twelve Data (stocks, forex, crypto, indices)', category: 'stocks', live: true, free: true,
     keys: [{ name: 'apiKey', label: 'API key', secret: true }],
     test: { url: 'https://api.twelvedata.com/price?symbol=AAPL&apikey={apiKey}', badBody: '"status":"error"' },
     plans: [{ name: 'Basic', price: 'Free', note: 'Limited credits per day' }, { name: 'Paid', price: 'See pricing', note: 'WebSocket streaming' }],

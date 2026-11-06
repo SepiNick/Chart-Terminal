@@ -2,5 +2,7 @@
 import type { IranSource } from '../iran/index.ts';
 import { OANDA } from './oanda.ts';
 import { ALPACA } from './alpaca.ts';
+import { POLYGON } from './polygon.ts';
+import { TWELVEDATA } from './twelvedata.ts';
 
-export const LIVE: Record<string, IranSource> = Object.fromEntries([OANDA, ALPACA].map(s => [s.id, s]));
+export const LIVE: Record<string, IranSource> = Object.fromEntries([OANDA, ALPACA, POLYGON, TWELVEDATA].map(s => [s.id, s]));

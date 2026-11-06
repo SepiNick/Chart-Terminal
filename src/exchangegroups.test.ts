@@ -18,3 +18,7 @@ test('options are grouped, deduplicated and escaped', () => {
   assert.match(html, /Bit&#60;stamp&#62;/);
   assert.doesNotMatch(html, /Crypto spot/);   // empty groups are left out
 });
+test('exchanges that serve no candles are left out of the picker', () => {
+  const html = exchangeOptions([{ id: 'zaif', name: 'zaif' }, { id: 'bitstamp', name: 'bitstamp' }]);
+  assert.doesNotMatch(html, /zaif/); assert.match(html, /bitstamp/);
+});

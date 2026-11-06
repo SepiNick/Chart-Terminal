@@ -688,7 +688,7 @@ const styleOf = (type: string, color: string) => styleFor(TOOL_MAP.get(type)!, c
 let allSymbols: string[] = [];
 fetchSymbols().then(s => (allSymbols = s.sort())).catch(() => {});
 // Search tabs of the Iranian sources: Tehran bourse instrument kinds, tgju groups, Nobitex quote currencies.
-const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'], cryptocap: ['all', 'share', 'cap'], oanda: ['all', 'forex', 'metal', 'cfd'], alpaca: ['all', 'stock'] };
+const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'], cryptocap: ['all', 'share', 'cap'], oanda: ['all', 'forex', 'metal', 'cfd'], alpaca: ['all', 'stock'], polygon: ['all', 'stock', 'etf'], twelvedata: ['all', 'forex', 'stock'] };
 let searchMode: 'symbol' | 'compare' = 'symbol', searchQuote = 'USDT', searchEx = store.get<string>('searchEx', 'binance');
 const marketCache = new Map<string, RemoteMarket[]>();
 let exchangesLoaded = false;
