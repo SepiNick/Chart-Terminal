@@ -163,13 +163,16 @@ let reloadShown = false, signedOutShown = false;
 function applyRemote(key: string, value: unknown, rev: number) {
   if (!isSynced(key)) return;
   if (rev) revs.set(key, rev); else revs.delete(key);
+  // Another window of this same browser (a pop-out) already stored this value: nothing is new here.
+  let same = false;
+  try { same = !!rev && localStorage.getItem('ct.' + key) === JSON.stringify(value) } catch {}
   // A local write waiting to go out wins (it will overwrite the server anyway).
   if (!pending.has(key) && !busy.has(key)) try {
     if (!rev) localStorage.removeItem('ct.' + key); else localStorage.setItem('ct.' + key, JSON.stringify(value));
     memo.delete(key);
   } catch { memo.set(key, JSON.stringify(value)) }
   // The app reads its state at start-up, so a reload is the honest way to show the change.
-  if (HOT_KEYS.has(key)) return;   // the app applies these live (main.ts), no reload needed
+  if (same || HOT_KEYS.has(key)) return;   // the app applies these live (main.ts), no reload needed
   if (!reloadShown) { reloadShown = true; note('Updated on another device', { label: 'Reload', run: () => location.reload() }) }
 }
 function signedOut() {
