@@ -6,6 +6,7 @@ import {
 import { fetchBars, streamBars, tfSeconds, type Bar } from './data.ts';
 import { type Series } from './indicators.ts';
 import { indicatorDef } from './indlib.ts';
+import { createLoader, type Loader } from './loadingskeleton.ts';
 import { DrawingLayer, type Drawing } from './drawings.ts';
 import { createMainSeries, toSeriesData, transformBars, isPriceBased, typeDefaults, CHART_TYPES, type ChartType, type TypeOpts } from './charttypes.ts';
 import { isExpr, parse, symbols, combine } from './symmath.ts';
@@ -145,11 +146,14 @@ export class ChartPane {
   private pbEl: HTMLElement;
   readonly cell: HTMLElement;
   private hooks: Hooks;
+  private loader: Loader;
+  private dead = false;
 
   constructor(cell: HTMLElement, cfg: PaneCfg, hooks: Hooks) {
     this.cell = cell; this.hooks = hooks;
     this.cfg = { compare: [], scripts: [], ...cfg, ind: [...cfg.ind] };
     cell.innerHTML = '<div class="chart"></div><div class="legend"></div><div class="quick"></div><button class="rt" title="Scroll to the most recent bar">»</button><div class="ofstatus"></div><div class="pbtns" hidden></div><div class="olines"></div>';
+    this.loader = createLoader(cell);
     this.olEl = $('.olines', cell);
     this.chartEl = $('.chart', cell); this.legendEl = $('.legend', cell); this.quickEl = $('.quick', cell); this.rtBtn = $('.rt', cell); this.ofEl = $('.ofstatus', cell); this.pbEl = $('.pbtns', cell);
     this.chartEl.addEventListener('mousemove', e => this.paneButtons(e));
@@ -199,6 +203,7 @@ export class ChartPane {
   // ---------- data ----------
   async load() {
     const tok = ++this.loadTok;
+    this.loader.show(this.cfg.symbol);
     this.unsub(); this.exitReplay(false); this.of?.reset(); this.secBars.clear(); this.dropSec(); this.pyRuns.clear();
     this.bars = []; this.noMore = false;
     try {
@@ -206,7 +211,8 @@ export class ChartPane {
       if (tok !== this.loadTok) return;
       this.bars = b;
     } catch (e) { if (tok === this.loadTok) toast(`${this.cfg.symbol}: ${(e as Error).message}`, 6000) }
-    if (tok !== this.loadTok) return;
+    if (tok !== this.loadTok) return;   // a newer load took over and keeps the skeleton up
+    this.loader.hide();
     this.build();
     if (this.bars.length) this.subscribe();
   }
@@ -245,7 +251,8 @@ export class ChartPane {
     if (reload) this.load(); else this.build();
   }
   private dropSec() { this.secSubs.forEach(u => u()); this.secSubs = [] }
-  destroy() { this.dropSec(); cancelAnimationFrame(this.olLoop); clearTimeout(this.scriptTimer); this.unsub(); this.of?.reset(); this.cmp.forEach(c => c.unsub()); this.loadTok++; this.exitReplay(false); clearInterval(this.countdownTimer); this.chart?.remove() }
+  /** Safe to call twice: a chart removed a second time throws "Object is disposed". */
+  destroy() { if (this.dead) return; this.dead = true; this.dropSec(); cancelAnimationFrame(this.olLoop); clearTimeout(this.scriptTimer); this.unsub(); this.of?.reset(); this.cmp.forEach(c => c.unsub()); this.loadTok++; this.loader.hide(); this.exitReplay(false); clearInterval(this.countdownTimer); try { this.chart?.remove() } catch { /* already gone */ } }
 
   // ---------- build ----------
   build() {
@@ -257,6 +264,7 @@ export class ChartPane {
     const prevLayer = this.layer;
     this.cmp.forEach(c => c.unsub()); this.cmp = [];
     clearInterval(this.countdownTimer);
+    cancelAnimationFrame(this.olLoop); this.olLoop = 0;   // the handle loop reads the chart: it must not run between remove() and the new chart
     this.chart?.remove();
     const s = this.hooks.settings(), css = getComputedStyle(document.documentElement), c = (n: string) => css.getPropertyValue(n).trim();
     const tf = timeFormatters(s), bg = s.bgColor || c('--bg');
@@ -689,12 +697,14 @@ export class ChartPane {
   private placeHandles = () => {
     cancelAnimationFrame(this.olLoop); this.olLoop = 0;
     if (!this.olItems.length || !this.main) return;
-    const h = this.chart.paneSize(0).height, right = `${this.chart.priceScale('right').width() + 110}px`;
-    for (const it of this.olItems) {
-      const y = this.main.priceToCoordinate(it.price);
-      it.el.hidden = y == null || y < 0 || y > h;
-      if (y != null) { it.el.style.top = `${y}px`; it.el.style.right = right }
-    }
+    try {
+      const h = this.chart.paneSize(0).height, right = `${this.chart.priceScale('right').width() + 110}px`;
+      for (const it of this.olItems) {
+        const y = this.main.priceToCoordinate(it.price);
+        it.el.hidden = y == null || y < 0 || y > h;
+        if (y != null) { it.el.style.top = `${y}px`; it.el.style.right = right }
+      }
+    } catch { return }   // the chart was removed under us ("Object is disposed"): stop the loop, the next build restarts it
     this.olLoop = requestAnimationFrame(this.placeHandles);
   };
   /** Live P&L on the position line, from this chart's own last price. */

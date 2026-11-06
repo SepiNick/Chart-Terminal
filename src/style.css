@@ -410,3 +410,24 @@ dialog.ip h3{display:flex;justify-content:space-between;align-items:center}
 .sp-opts{max-height:300px;overflow:auto;display:flex;flex-direction:column}.sp-opt{display:flex;gap:8px;align-items:center;padding:4px 2px;cursor:pointer}
 .sp-mi{border:0;background:none;text-align:left;padding:7px 8px;border-radius:5px}.sp-mi:hover{background:var(--bg)}
 .sp-pop input[type=number]{width:100px}
+
+/* chart loading skeleton with a dancing meme coin */
+.cell{position:relative}
+.ld{position:absolute;inset:0;z-index:7;background:color-mix(in srgb,var(--bg) 94%,transparent);display:flex;align-items:center;justify-content:center;pointer-events:none;overflow:hidden}.ld[hidden]{display:none}
+.ld-sk{position:absolute;inset:8% 4%;width:92%;height:84%;opacity:.28;stroke:var(--muted);fill:var(--muted);stroke-width:.35;animation:ld-pulse 1.6s ease-in-out infinite}
+.ld-mid{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px}
+.ld-txt{font-size:13px;color:var(--text);opacity:.85;min-height:1.4em;text-align:center;max-width:80vw}
+.ld-coin{overflow:visible;transform-origin:60px 144px}
+.ld-body{transform-origin:60px 108px;animation:ld-dance .8s ease-in-out infinite}
+.ld-legs{transform-origin:60px 108px;animation:ld-hop .8s ease-in-out infinite}
+.ld-limb{stroke:#b9820a;stroke-width:6;stroke-linecap:round;fill:none}
+.ld-arml{transform-origin:22px 70px;animation:ld-wave .4s ease-in-out infinite alternate}.ld-armr{transform-origin:98px 70px;animation:ld-wave .4s ease-in-out infinite alternate-reverse}
+.ld-legl{stroke:#3b2a12;transform-origin:50px 108px;animation:ld-step .8s ease-in-out infinite}.ld-legr{stroke:#3b2a12;transform-origin:70px 108px;animation:ld-step .8s ease-in-out infinite reverse}
+.ld-shadow{fill:#000;opacity:.25;transform-origin:60px 144px;animation:ld-shadow .8s ease-in-out infinite}
+@keyframes ld-dance{0%,100%{transform:translateY(0) rotate(-9deg)}25%{transform:translateY(-16px) rotate(0)}50%{transform:translateY(0) rotate(9deg)}75%{transform:translateY(-16px) rotate(0)}}
+@keyframes ld-hop{0%,100%{transform:translateY(0)}25%,75%{transform:translateY(-8px)}}
+@keyframes ld-wave{from{transform:rotate(-28deg)}to{transform:rotate(28deg)}}
+@keyframes ld-step{0%,100%{transform:rotate(14deg)}50%{transform:rotate(-14deg)}}
+@keyframes ld-shadow{0%,100%{transform:scaleX(1);opacity:.25}25%,75%{transform:scaleX(.8);opacity:.15}}
+@keyframes ld-pulse{0%,100%{opacity:.18}50%{opacity:.34}}
+@media (prefers-reduced-motion:reduce){.ld-body,.ld-legs,.ld-arml,.ld-armr,.ld-legl,.ld-legr,.ld-shadow,.ld-sk{animation:none}}

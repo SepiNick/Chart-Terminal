@@ -203,6 +203,45 @@ export const LIB: LibDef[] = [
   { id: 'hv', name: 'Historical Volatility', group: 'Volatility', pane: true, inputs: N(10), calc: (b, n) => { const r = mapS(div(C(b), lag(C(b), 1)), Math.log); return { HV: mapS(stdev(r, n), x => 100 * x * Math.sqrt(252)) } } },
   { id: 'bbpb', name: 'Bollinger %B', group: 'Volatility', pane: true, levels: [1, 0], inputs: [I('Length', 20), I('Multiplier', 2, 0.1, 0.1)], calc: (b, n, k) => { const x = bb(C(b), n, k); return { '%B': div(sub(C(b), x.Lower), sub(x.Upper, x.Lower)) } } },
   { id: 'bbw', name: 'Bollinger Bandwidth', group: 'Volatility', pane: true, inputs: [I('Length', 20), I('Multiplier', 2, 0.1, 0.1)], calc: (b, n, k) => { const x = bb(C(b), n, k); return { Bandwidth: div(sub(x.Upper, x.Lower), x.Basis) } } },
+  // ----- popular community-style studies, written from their published formulas -----
+  { id: 'squeeze', name: 'Squeeze Momentum', group: 'Momentum', pane: true, inputs: [I('Length', 20), I('BB multiplier', 2, 0.1, 0.1), I('KC multiplier', 1.5, 0.1, 0.1)], calc: (b, n, bm, km) => {
+    const c = C(b), basis = sma(c, n), dev = mapS(stdev(c, n), x => bm * x), range = sma(trueRange(b), n);
+    const on = b.map((_, i) => (basis[i] == null || dev[i] == null || range[i] == null ? null : basis[i]! + dev[i]! < basis[i]! + km * range[i]! && basis[i]! - dev[i]! > basis[i]! - km * range[i]!));
+    const mid = op(op(hh(H(b), n), ll(L(b), n), (x, y) => (x + y) / 2), basis, (x, y) => (x + y) / 2);
+    return { Hist: linreg(sub(c, mid), n).value, 'Squeeze on': on.map(x => (x ? 0 : null)) };
+  } },
+  { id: 'wavetrend', name: 'WaveTrend Oscillator', group: 'Momentum', pane: true, levels: [60, -60, 0], inputs: [I('Channel', 10), I('Average', 21), I('Signal', 4)], calc: (b, n, a, g) => {
+    const ap = tp(b), esa = ema(ap, n), d = ema(mapS(sub(ap, esa), Math.abs), n), ci = op(sub(ap, esa), d, (x, y) => (y === 0 ? 0 : x / (0.015 * y))), wt1 = ema(ci, a);
+    return { WT1: wt1, WT2: sma(wt1, g) };
+  } },
+  { id: 'stc', name: 'Schaff Trend Cycle', group: 'Momentum', pane: true, levels: [75, 25], inputs: [I('Cycle', 10), I('Fast', 23), I('Slow', 50)], calc: (b, n, f, sl) => {
+    const m = sub(ema(C(b), f), ema(C(b), sl));
+    const smooth = (v: S): S => { let prev: number | null = null; return v.map(x => { if (x == null) return null; prev = prev == null ? x : prev + 0.5 * (x - prev); return prev }) };
+    const st = (v: S): S => { const lo = ll(v, n), hi = hh(v, n); return v.map((x, i) => (x == null || lo[i] == null || hi[i] == null ? null : hi[i] === lo[i] ? 50 : (100 * (x - lo[i]!)) / (hi[i]! - lo[i]!))) };
+    return { STC: smooth(st(smooth(st(m)))).map(x => (x == null ? null : Math.max(0, Math.min(100, x)))) };
+  } },
+  { id: 'rvi', name: 'Relative Vigor Index', group: 'Momentum', pane: true, inputs: N(10), calc: (b, n) => {
+    const sw = (v: S): S => v.map((x, i) => (i < 3 || x == null || v[i - 1] == null || v[i - 2] == null || v[i - 3] == null ? null : (x + 2 * v[i - 1]! + 2 * v[i - 2]! + v[i - 3]!) / 6));
+    const r = div(sma(sw(b.map(x => x.close - x.open)), n), sma(sw(b.map(x => x.high - x.low)), n));
+    return { RVI: r, Signal: sw(r) };
+  } },
+  { id: 'smi', name: 'Stochastic Momentum Index', group: 'Momentum', pane: true, levels: [40, -40], inputs: [I('Length', 10), I('Smoothing', 3)], calc: (b, n, k) => {
+    const hi = hh(H(b), n), lo = ll(L(b), n), mid = op(hi, lo, (x, y) => (x + y) / 2), d = sub(C(b), mid), r = op(hi, lo, (x, y) => x - y);
+    const smi = mapS(div(ema(ema(d, k), k), mapS(ema(ema(r, k), k), x => x / 2)), x => 100 * x);
+    return { SMI: smi, Signal: ema(smi, k) };
+  } },
+  ma('t3', 'Tillson T3', 5, (b, n) => { const v = 0.7, e1 = ema(C(b), n), e2 = ema(e1, n), e3 = ema(e2, n), e4 = ema(e3, n), e5 = ema(e4, n), e6 = ema(e5, n);
+    return e6.map((x, i) => (x == null || e5[i] == null || e4[i] == null || e3[i] == null ? null : -(v ** 3) * x + (3 * v ** 2 + 3 * v ** 3) * e5[i]! + (-6 * v ** 2 - 3 * v - 3 * v ** 3) * e4[i]! + (1 + 3 * v + v ** 3 + 3 * v ** 2) * e3[i]!)) }),
+  ma('vidya', 'VIDYA', 14, (b, n) => {
+    const c = C(b), d = sub(c, lag(c, 1)), up = sumN(mapS(d, x => Math.max(x, 0)), 9), dn = sumN(mapS(d, x => Math.max(-x, 0)), 9), al = 2 / (n + 1);
+    let prev: number | null = null;
+    return c.map((x, i) => { const u = up[i], w = dn[i]; if (x == null || u == null || w == null) return null; const k = u + w === 0 ? 0 : Math.abs((u - w) / (u + w)); prev = prev == null ? x : al * k * x + (1 - al * k) * prev; return prev });
+  }),
+  { id: 'chandekroll', name: 'Chande Kroll Stop', group: 'Volatility', inputs: [I('ATR length', 10), I('Multiplier', 1, 0.1, 0.1), I('Stop length', 9)], calc: (b, p, x, q) => {
+    const a = mapS(atr(b, p), v => x * v), hs = sub(hh(H(b), p), a), ls = add(ll(L(b), p), a);
+    return { 'Stop short': hh(hs, q), 'Stop long': ll(ls, q) };
+  } },
+  { id: 'lrchannel', name: 'Linear Regression Channel', group: 'Volatility', inputs: [I('Length', 100), I('Deviations', 2, 0.1, 0.1)], calc: (b, n, k) => { const m = linreg(C(b), n).value, sd = mapS(stdev(C(b), n), x => k * x); return { Upper: add(m, sd), Basis: m, Lower: sub(m, sd) } } },
   // ----- volume -----
   { id: 'vwap', name: 'VWAP', group: 'Volume', inputs: [], calc: b => ({ VWAP: vwap(b) }) },
   { id: 'obv', name: 'On Balance Volume', group: 'Volume', pane: true, inputs: [], calc: b => { let o = 0; return { OBV: b.map((x, i) => (o += i ? Math.sign(x.close - b[i - 1].close) * x.volume : 0)) } } },
