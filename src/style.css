@@ -115,7 +115,10 @@ dialog h3{margin:0 0 12px;font-size:16px}
 .ttip{position:fixed;z-index:100;display:none;padding:5px 8px;border-radius:4px;background:#131722;color:#fff;font-size:12px;line-height:1.3;white-space:nowrap;pointer-events:none;box-shadow:0 2px 8px #0005}
 :root[data-theme=dark] .ttip{background:#434651}
 .ttip kbd{margin-left:8px;font:inherit;color:#b2b5be}
-#favBar{display:none;gap:2px;padding:2px 6px;border-bottom:1px solid var(--line)}#favBar button{display:grid;place-items:center;border:0;background:none;padding:1px;border-radius:4px;color:var(--text)}#favBar button.on{background:var(--accent);color:#fff}
+#favBar{display:none;position:fixed;z-index:15;flex-wrap:wrap;align-items:center;gap:2px;padding:3px;background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 4px 14px #0003;overflow:auto}#favBar.v{flex-direction:column;flex-wrap:nowrap}#favBar.drag{opacity:.85}
+#favBar button{display:grid;place-items:center;border:0;background:none;padding:1px;border-radius:4px;color:var(--text);min-width:24px;min-height:24px}#favBar button.on{background:var(--accent);color:#fff}
+#favBar .fctl{color:var(--muted)}#favBar [data-fav=grip]{cursor:grab;touch-action:none}#favBar.drag [data-fav=grip]{cursor:grabbing}#favBar :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#favGuide{display:none;position:fixed;z-index:14;border:2px dashed var(--accent);border-radius:6px;background:color-mix(in srgb,var(--accent) 15%,transparent);pointer-events:none}
 /* floating drawing toolbar */
 .ftb{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:6;display:none;gap:2px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px;box-shadow:0 4px 14px #0003}
 .ftb button{border:0;background:none;padding:3px 7px}.ftb select{padding:2px 4px}

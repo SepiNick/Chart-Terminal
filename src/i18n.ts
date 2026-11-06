@@ -103,6 +103,8 @@ export const FA: Record<string, string> = {
   'When a chart stays empty or something breaks: collect a report with your browser, the server, a quick check of every data source and the latest errors. Keys, tokens, passwords, e-mail and IP addresses are removed. Nothing is sent anywhere; copy the text to where you ask for help.': 'وقتی نمودار خالی می‌ماند یا چیزی خراب می‌شود: گزارشی از مرورگر، سرور، بررسی سریع هر منبع داده و آخرین خطاها جمع کنید. کلید، توکن، رمز، ایمیل و آدرس IP حذف می‌شوند. چیزی جایی فرستاده نمی‌شود؛ متن را هر جا کمک می‌خواهید کپی کنید.',
   'A stop and a ladder of targets that manage themselves: sl 98 or sl 2% · tp 1R 50%, 3R 50% (price, R multiple or %, then its share) · be 1 (stop to breakeven after target 1) · trail 1% 2 (trail after target 2). Paper account only.': 'یک حد ضرر و نردبان اهداف که خودشان مدیریت می‌شوند: sl 98 یا sl 2% · tp 1R 50%, 3R 50% (قیمت، مضرب R یا درصد، بعد سهم آن) · be 1 (حد ضرر بعد از هدف ۱ به سر‌به‌سر) · trail 1% 2 (تریل بعد از هدف ۲). فقط حساب تمرینی.',
 
+  'Drag to move the toolbar (arrow keys move it, Enter snaps, double-click resets)': 'برای جابه‌جایی نوار بکشید (کلیدهای جهت‌دار حرکتش می‌دهند، Enter می‌چسباند، دوبار کلیک بازنشانی می‌کند)',
+  'Switch between horizontal and vertical': 'تغییر بین حالت افقی و عمودی', 'Expand the toolbar': 'باز کردن نوار', 'Collapse the toolbar': 'جمع کردن نوار',
 };
 
 const SKIP = 'canvas, #grid, #pnEditor, #pnConsole, textarea, code, pre, script, style, .cm-editor, [data-i18n="off"]';

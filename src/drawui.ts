@@ -6,6 +6,7 @@ import { styleFor, type DrawingLayer, type Magnet } from './drawings.ts';
 import { showMenu, type MenuItem } from './menu.ts';
 import { store, $, $$, esc, toast } from './store.ts';
 import { TFS, tfSeconds } from './data.ts';
+import { DEFAULT_POS, anchorXY, clampBox, nearestAnchor, orientFor, place, sanitize, snapAnchor, type FavPos, type Rect } from './favbarpos.ts';
 
 export interface DrawUIHost {
   layer(): DrawingLayer;
@@ -94,15 +95,97 @@ export function setTool(host: DrawUIHost, id: string) {
 }
 function setCursor(host: DrawUIHost, c: CursorMode) { host.layers().forEach(l => l.setCursor(c)); renderLeftToolbar(host) }
 
+// ---- floating favorites toolbar: drag by the grip, snaps to corners / edge midpoints of the chart area ----
+let favPos = sanitize(store.get('favBarPos', DEFAULT_POS));
+let favDrag: { dx: number; dy: number; start: FavPos; id: number } | null = null;
+let hostRef: DrawUIHost | null = null;
+const saveFavPos = () => store.set('favBarPos', favPos);
+const favRects = () => {
+  const g = $('#grid').getBoundingClientRect();
+  // dock area: the chart area minus the legend row, the price scale (right) and the time scale (bottom)
+  const dock: Rect = { x: g.left, y: g.top + 32, w: Math.max(0, g.width - 72), h: Math.max(0, g.height - 32 - 34) };
+  const free: Rect = { x: g.left, y: 0, w: Math.max(0, innerWidth - g.left), h: Math.max(0, innerHeight) };
+  return { dock, free };
+};
+function layoutFavBar() {
+  const bar = $('#favBar');
+  if (bar.style.display === 'none') return;
+  const { dock, free } = favRects(), o = orientFor(favPos.anchor, favPos.orient);
+  bar.classList.toggle('v', o === 'v'); bar.classList.toggle('collapsed', favPos.collapsed);
+  bar.style.maxWidth = Math.max(40, free.w - 16) + 'px'; bar.style.maxHeight = Math.max(40, free.h - 16) + 'px';
+  const p = place(favPos, bar.offsetWidth, bar.offsetHeight, dock, free);
+  bar.style.left = p.x + 'px'; bar.style.top = p.y + 'px';
+}
 function renderFavBar(host: DrawUIHost) {
   if (!host.layer()) return;
   const bar = $('#favBar'), on = store.get('favBar', false) && fav.size > 0;
   bar.style.display = on ? 'flex' : 'none';
-  bar.innerHTML = [...fav].map(id => TOOL_MAP.get(id)).filter(Boolean).map(t =>
-    `<button data-tool="${t!.id}" class="${host.layer().tool === t!.id ? 'on' : ''}" ${tip(t!.name, t!.key)} aria-label="${esc(t!.name)}">${iconSvg(t!.id, t!.icon)}</button>`).join('');
+  if (!on) $('#favGuide').style.display = 'none';
+  const side = favPos.anchor === null || favPos.anchor === 'l' || favPos.anchor === 'r', c = favPos.collapsed;
+  const b = (k: string, label: string, ico: string, extra = '') => `<button data-fav="${k}" class="fctl" title="${esc(label)}" aria-label="${esc(label)}" ${extra}>${ico}</button>`;
+  bar.innerHTML =
+    b('grip', 'Drag to move the toolbar (arrow keys move it, Enter snaps, double-click resets)', '⠿', 'tabindex="0" aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Escape"') +
+    (c ? '' : [...fav].map(id => TOOL_MAP.get(id)).filter(Boolean).map(t =>
+      `<button data-tool="${t!.id}" class="${host.layer().tool === t!.id ? 'on' : ''}" ${tip(t!.name, t!.key)} aria-label="${esc(t!.name)}">${iconSvg(t!.id, t!.icon)}</button>`).join('')) +
+    (!c && side ? b('orient', 'Switch between horizontal and vertical', '⇄') : '') +
+    b('collapse', c ? 'Expand the toolbar' : 'Collapse the toolbar', c ? '▸' : '◂', `aria-expanded="${!c}"`);
+  layoutFavBar();
+}
+function wireFavBar() {
+  const bar = $('#favBar'), guide = $('#favGuide');
+  const end = (keep: boolean) => {
+    if (!favDrag) return;
+    if (!keep) favPos = favDrag.start;
+    favDrag = null; guide.style.display = 'none'; bar.classList.remove('drag'); layoutFavBar(); if (keep) saveFavPos();
+  };
+  bar.addEventListener('pointerdown', e => {
+    const g = (e.target as HTMLElement).closest<HTMLElement>('[data-fav=grip]');
+    if (!g || e.button > 0) return;
+    const r = bar.getBoundingClientRect();
+    favDrag = { dx: e.clientX - r.left, dy: e.clientY - r.top, start: favPos, id: e.pointerId };
+    g.setPointerCapture(e.pointerId); bar.classList.add('drag'); e.preventDefault(); g.focus();
+  });
+  bar.addEventListener('pointermove', e => {
+    if (!favDrag) return;
+    const { dock, free } = favRects(), w = bar.offsetWidth, h = bar.offsetHeight;
+    const c = clampBox(e.clientX - favDrag.dx, e.clientY - favDrag.dy, w, h, free);
+    const a = snapAnchor(c.x, c.y, w, h, dock);
+    favPos = { ...favPos, anchor: a, x: c.x, y: c.y };
+    const s = a ? anchorXY(a, w, h, dock) : c;
+    bar.style.left = c.x + 'px'; bar.style.top = c.y + 'px';
+    guide.style.cssText = `display:${a ? 'block' : 'none'};left:${s.x}px;top:${s.y}px;width:${w}px;height:${h}px`;   // snap preview
+  });
+  bar.addEventListener('pointerup', e => { if (favDrag?.id === e.pointerId) end(true) });
+  bar.addEventListener('pointercancel', () => end(false));
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && favDrag) { e.stopPropagation(); end(false) } }, true);
+  bar.addEventListener('dblclick', e => {
+    if (!(e.target as HTMLElement).closest('[data-fav=grip]')) return;
+    favPos = { ...DEFAULT_POS }; saveFavPos(); layoutFavBar();
+  });
+  bar.addEventListener('keydown', e => {
+    if (!(e.target as HTMLElement).matches('[data-fav=grip]')) return;
+    const { dock, free } = favRects(), w = bar.offsetWidth, h = bar.offsetHeight, r = bar.getBoundingClientRect();
+    if (e.key === 'Enter') { favPos = { ...favPos, anchor: nearestAnchor(r.left, r.top, w, h, dock) }; saveFavPos(); layoutFavBar(); e.preventDefault(); return }
+    const step = e.shiftKey ? 64 : 16, d = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, number[]>)[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const c = clampBox(r.left + d[0], r.top + d[1], w, h, free);
+    favPos = { ...favPos, anchor: null, x: c.x, y: c.y }; saveFavPos(); layoutFavBar();
+  });
+  bar.addEventListener('click', e => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-fav]'); if (!b) return;
+    if (b.dataset.fav === 'collapse') favPos = { ...favPos, collapsed: !favPos.collapsed };
+    else if (b.dataset.fav === 'orient') favPos = { ...favPos, orient: orientFor(favPos.anchor, favPos.orient) === 'v' ? 'h' : 'v' };
+    else return;
+    saveFavPos(); renderFavBar(hostRef!);
+    $(`#favBar [data-fav=${b.dataset.fav}]`)?.focus();
+  });
+  addEventListener('resize', layoutFavBar);
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(layoutFavBar).observe($('#grid'));
 }
 
 export function wireLeftToolbar(host: DrawUIHost) {
+  hostRef = host; wireFavBar();
   const click = (e: MouseEvent) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('button'); if (!b) return;
     if (b.dataset.group) return flyout(host, b.dataset.group, b);
