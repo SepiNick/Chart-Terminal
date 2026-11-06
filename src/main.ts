@@ -37,13 +37,15 @@ import './tooltip.ts';
 import { MSG, COLORS, addSymbol, checkBytes, combinedRows, createList, deleteList, duplicateList, exportText, importAsList, importEntries, isSection, migrate, moveBefore, moveSymbol, parseImport, removeSymbol, renameList, reorder, resolveActive, restoreList, setColor, setIcon, sortedIds, symCount } from './watchlists.ts';
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 import { chartEvents, initMarket, renderDetails, renderMarket } from './market/ui.ts';
+import './market/domhook.ts';
+import { APPROX_NOTE, DOM_SYMS, asDomSym, isDomSym, isShare } from './market/dominance.ts';
 import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
 import { initSkills, renderSkills } from './skills/ui.ts';
 import { initAi, refreshAi } from './ai/panel.ts';
 import { SHOW_AI } from './flags.ts';
 import { registerServiceWorker } from './push.ts';
 import { rMultiple } from './journal.ts';
-import { initI18n } from './i18n.ts';
+import { initI18n, t as tr } from './i18n.ts';
 import { OF_PRESETS } from './orderflow/presets.ts';
 import { describePlan, parseExitPlan, resolvePlan, type ExitPlan } from './exits.ts';
 import { collectReport, installErrorLog } from './diagnostics.ts';
@@ -425,10 +427,11 @@ wireLeftToolbar(drawHost);
 
 // ---------- top bar ----------
 function setSymbol(raw: string) {
-  const s = raw.trim().toUpperCase().replace(/\s+/g, '');
+  const s = asDomSym(raw) ?? raw.trim().toUpperCase().replace(/\s+/g, '');   // BTC.D → CRYPTOCAP:BTC.D
   try { if (isExpr(s)) parse(s); else if (!/^([A-Z0-9]+:)?[A-Z0-9_.\u0600-\u06FF]{2,40}$/.test(s)) throw Error('Invalid symbol') } catch (e) { return toast((e as Error).message) }
   st.recent = [s, ...st.recent.filter(x => x !== s)].slice(0, 12); store.set('recentSymbols', st.recent);
-  targets('symbol').forEach(p => applyCfg(p, { symbol: s }, 'symbol change'));
+  // Dominance is a ratio: a line is the natural first view (candles stay available from the chart type menu).
+  targets('symbol').forEach(p => applyCfg(p, { symbol: s, ...(isDomSym(s) && isShare(s) && p.cfg.type === 'candles' ? { type: 'line' as const } : {}) }, 'symbol change'));
   const link = st.layout.panes[st.layout.active]?.link;
   if (link && !st.layout.sync.symbol) linkChannel?.postMessage({ link, symbol: s });
 }
@@ -672,7 +675,7 @@ const styleOf = (type: string, color: string) => styleFor(TOOL_MAP.get(type)!, c
 let allSymbols: string[] = [];
 fetchSymbols().then(s => (allSymbols = s.sort())).catch(() => {});
 // Search tabs of the Iranian sources: Tehran bourse instrument kinds, tgju groups, Nobitex quote currencies.
-const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'] };
+const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'], cryptocap: ['all', 'share', 'cap'] };
 let searchMode: 'symbol' | 'compare' = 'symbol', searchQuote = 'USDT', searchEx = store.get<string>('searchEx', 'binance');
 const marketCache = new Map<string, RemoteMarket[]>();
 let exchangesLoaded = false;
@@ -716,7 +719,8 @@ async function renderSearch() {
     const tseExtra = searchEx === 'tse' && qq && /^[\u0600-\u06FFA-Z0-9_.]{1,40}$/.test(qq) && !list.some(m => m.sym === qq) ? row(`TSE:${qq}`, 'Ticker as listed on TSETMC', list.length ? 1 : 0) : '';
     // Nobitex: the Tether premium over the free-market dollar is a symbol expression (daily bars).
     const premium = searchEx === 'nobitex' && (!q || 'PREMIUM'.includes(q) || 'TETHER'.includes(q) || 'USDT'.includes(q)) ? row('NOBITEX:USDTIRT/TGJU:USD-1', 'Tether premium over the free-market dollar · expression · use 1D', list.length ? 1 : 0) : '';
-    $('#searchList').innerHTML = (list.map((m, i) => row(`${EX}:${m.sym}`, `${m.name ?? `${m.base} / ${m.quote}`} · ${m.type} · ${searchEx}`, i)).join('') + extra + tseExtra + premium) || '<div class="muted sl-h">No matches</div>';
+    const desc = (m: RemoteMarket) => (searchEx === 'cryptocap' ? domDesc(m.sym) : `${m.name ?? `${m.base} / ${m.quote}`} · ${m.type} · ${searchEx}`);
+    $('#searchList').innerHTML = (list.map((m, i) => row(`${EX}:${m.sym}`, desc(m), i)).join('') + extra + tseExtra + premium) || '<div class="muted sl-h">No matches</div>';
     return;
   }
   const quotes = ['USDT', 'USDC', 'FDUSD', 'BTC', 'ETH', 'TRY', 'EUR'];
@@ -732,8 +736,13 @@ async function renderSearch() {
     const qu = quotes.find(x => s.endsWith(x)) ?? '';
     return `${s.slice(0, s.length - qu.length)} / ${qu} · Binance · spot`;
   };
-  $('#searchList').innerHTML = (!q && st.recent.length ? '<div class="muted sl-h">Recent</div>' : '') + list.map((s, i) => row(s, desc(s), i)).join('');
+  // Dominance and total market cap are searchable from here too (also in standalone mode, which has no market list).
+  const dom = q && !q.includes(':') && !isExpr(q) ? DOM_SYMS.filter(d => d.sym.includes(q) || d.name.toUpperCase().includes(q)) : [];
+  const domHtml = dom.length ? `<div class="muted sl-h">${esc(tr('Crypto market'))}</div>` + dom.map((d, i) => row(`CRYPTOCAP:${d.sym}`, domDesc(d.sym), i)).join('') : '';
+  $('#searchList').innerHTML = (!q && st.recent.length ? '<div class="muted sl-h">Recent</div>' : '') + domHtml + list.map((s, i) => row(s, desc(s), i + dom.length)).join('');
 }
+/** "Bitcoin dominance · approximation from price × current supply" in the interface language. */
+const domDesc = (sym: string) => `${tr(DOM_SYMS.find(d => d.sym === sym)?.name ?? sym)} · ${tr(APPROX_NOTE)}`;
 function pickSymbol(s: string) {
   $<HTMLDialogElement>('#searchDlg').close();
   if (searchMode === 'compare') { const p = active(); if (!isExpr(s)) applyCfg(p, { compare: [...new Set([...(p.cfg.compare ?? []), s])] }, 'compare') }

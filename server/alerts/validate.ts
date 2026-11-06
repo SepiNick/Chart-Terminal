@@ -2,9 +2,9 @@
 import type { AlertInput, AlertSource, Channel, LineRef, ScriptSource } from '../../src/alerttypes.ts';
 import { validTf } from '../../src/data.ts';
 import { bad, obj } from '../core/http.ts';
-import { EX_RE, SYM_RE } from '../market.ts';
-import { IRAN } from '../iran/index.ts';
+import { EX_RE, SRC, SYM_RE } from '../market.ts';
 import { isExchange } from '../ccxt.ts';
+import { DOM_EX, domOf } from '../../src/market/dominance.ts';
 import { CONDITIONS, FREQUENCIES, isChannel, isMoving } from './evaluate.ts';
 import { isPublic } from '../core/mode.ts';
 
@@ -26,7 +26,8 @@ export function validSym(sym: unknown): string {
   if (!m || !SYM_RE.test(m[2])) throw bad('Bad symbol');
   if (m[1] && m[1] !== 'BINANCE') {
     const ex = m[1].toLowerCase();
-    if (!EX_RE.test(ex) || (ex !== 'fx' && !IRAN[ex] && !isExchange(ex))) throw bad('Unknown exchange');
+    if (!EX_RE.test(ex) || (ex !== 'fx' && !SRC[ex] && !isExchange(ex))) throw bad('Unknown exchange');
+    if (ex === DOM_EX && !domOf(m[2])) throw bad('Unknown crypto market symbol');
   }
   return sym as string;
 }

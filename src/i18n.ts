@@ -110,6 +110,11 @@ export const FA: Record<string, string> = {
   'Execution quality': 'کیفیت اجرا', 'Professional': 'حرفه‌ای', 'Analyses': 'تحلیل‌ها', 'Tools': 'ابزارها', 'Prop challenges': 'چالش‌های پراپ', 'Economic calendar': 'تقویم اقتصادی', 'Forex sessions clock': 'ساعت سشن‌های فارکس',
   'Trading resume': 'رزومه‌ی معاملاتی', 'Compare accounts': 'مقایسه‌ی حساب‌ها', 'Portfolio risk': 'ریسک پورتفو', '✎ Notes': '✎ یادداشت‌ها', '⚙ Accounts & settings': '⚙ حساب‌ها و تنظیمات',
   'Risk & sizing': 'ریسک و حجم پوزیشن', 'Journal & review': 'ژورنال و مرور', 'Market regime': 'رژیم بازار', 'Screeners': 'اسکنرها', 'Fundamentals': 'بنیادی', 'Options & futures': 'آپشن و آتی', 'Iran market': 'بازار ایران',
+  // crypto market series (CRYPTOCAP:BTC.D, TOTAL, ...)
+  'Crypto market': 'بازار کریپتو', 'Bitcoin dominance': 'دامیننس بیت‌کوین', 'Ethereum dominance': 'دامیننس اتریوم', 'Tether dominance': 'دامیننس تتر', 'USDC dominance': 'دامیننس USDC',
+  'Others dominance (without the top 10)': 'دامیننس سایر ارزها (بدون ۱۰ ارز برتر)', 'Stablecoin share': 'سهم استیبل‌کوین‌ها', 'Total crypto market cap': 'ارزش کل بازار کریپتو',
+  'Total market cap without BTC': 'ارزش کل بازار بدون بیت‌کوین', 'Total market cap without BTC and ETH': 'ارزش کل بازار بدون بیت‌کوین و اتریوم',
+  'approximation from price × current supply': 'تخمین از قیمت × عرضه‌ی فعلی', 'share': 'سهم', 'cap': 'ارزش بازار',
   // alert dialog, server panel and the rest of the markup
   'Order ·': 'سفارش ·', 'Other leg (same side and size; one fill cancels the other)': 'پای دیگر (هم‌جهت و هم‌حجم؛ پر شدن یکی دیگری را لغو می‌کند)', '📷 Snapshot': '📷 عکس',
   'Ask why when a trade opens': 'هنگام باز شدن معامله دلیلش را بپرس', 'Ask how it went when a trade closes': 'هنگام بسته شدن معامله بپرس چطور بود', 'Upper bound': 'کران بالا', 'Within bars': 'در طول چند کندل',

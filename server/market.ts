@@ -15,6 +15,8 @@ import { fxMarkets, yahooBars, yahooDividends, yahooTicker } from './yahoo.ts';
 import { isPublic } from './core/mode.ts';
 import { limits } from './core/quota.ts';
 import { IRAN } from './iran/index.ts';
+import { DOMINANCE, dom } from './dominance/index.ts';
+import { DOM_EX, domOf } from '../src/market/dominance.ts';
 import { probeIran, timed } from './iran/probe.ts';
 
 // The MetaTrader bridge client is a private-server feature: a public server never loads it, and 'mt5' is just an unknown exchange there.
@@ -24,7 +26,9 @@ import { HttpError, bad, clients, onWs, onWsClose, route, type WsClient } from '
 // SYM_RE also admits Persian letters and digits: Tehran Stock Exchange tickers.
 export const SYM_RE = /^[A-Z0-9_.\u0600-\u06FF]{1,40}$/, EX_RE = /^[a-z0-9]{2,30}$/;
 /** Sources served here rather than through CCXT: Yahoo ('fx') and the local MetaTrader 5 bridge ('mt5'). */
-const LOCAL = new Set([...(MT5 ? ['fx', 'mt5'] : ['fx']), ...Object.keys(IRAN)]);
+/** Local sources of the Iranian source shape: the Iranian ones (private servers, or CT_IRAN_PUBLIC) plus the crypto market series (always: fixed hosts). */
+export const SRC = { ...IRAN, ...DOMINANCE };
+const LOCAL = new Set([...(MT5 ? ['fx', 'mt5'] : ['fx']), ...Object.keys(SRC)]);
 
 
 function params(u: URL) {
@@ -35,7 +39,7 @@ function params(u: URL) {
 const checkSymTf = (symbol: string, tf: string) => { if (!SYM_RE.test(symbol)) throw bad('Bad symbol'); if (!validTf(tf)) throw bad('Bad timeframe') };
 
 export async function bars(exchange: string, symbol: string, tf: string, until?: number, limit = 1000): Promise<{ bars: Bar[]; base: string }> {
-  const ir = IRAN[exchange];
+  const ir = SRC[exchange];
   const r = ir ? await ir.bars(symbol, tf, until, limit) : exchange === 'fx' ? await yahooBars(symbol, tf, until, limit) : exchange === 'mt5' ? await MT5!.mt5Ohlcv(symbol, tf, until, limit) : await cx.ohlcv(exchange, symbol, tf, until, limit);
   if (r.base === tf) return r;
   const agg = aggregate(r.bars, tfSeconds(tf), ir?.weekAnchor);
@@ -47,12 +51,12 @@ let exchangesCache: { id: string; name: string; ws: boolean }[] | null = null;
 async function marketRoute(u: URL): Promise<unknown> {
   switch (u.pathname) {
     case '/api/exchanges':
-      return (exchangesCache ??= [{ id: 'fx', name: 'Forex, metals, indices & stocks', ws: false }, ...(MT5 ? [{ id: 'mt5', name: 'MetaTrader 5 (local bridge, demo)', ws: false }] : []), ...Object.values(IRAN).map(x => ({ id: x.id, name: x.name, ws: false })), ...cx.exchangeIds().map(id => ({ id, name: id, ws: false }))]);
+      return (exchangesCache ??= [{ id: 'fx', name: 'Forex, metals, indices & stocks', ws: false }, ...(MT5 ? [{ id: 'mt5', name: 'MetaTrader 5 (local bridge, demo)', ws: false }] : []), ...Object.values(SRC).map(x => ({ id: x.id, name: x.name, ws: false })), ...cx.exchangeIds().map(id => ({ id, name: id, ws: false }))]);
     case '/api/markets': {
       const { exchange } = params(u);
       if (exchange === 'fx') return fxMarkets().map(m => ({ sym: m.sym, base: m.sym, quote: '', type: m.type, name: m.name }));
       if (MT5 && exchange === 'mt5') return MT5.mt5Markets();
-      if (IRAN[exchange]) return IRAN[exchange].markets();
+      if (SRC[exchange]) return SRC[exchange].markets();
       return (await cx.markets(exchange)).list.filter(m => m.active).map(({ sym, base, quote, type }) => ({ sym, base, quote, type }));
     }
     case '/api/bars': {
@@ -78,7 +82,7 @@ async function marketRoute(u: URL): Promise<unknown> {
     }
     case '/api/tickers': {
       const { exchange } = params(u);
-      return IRAN[exchange] ? (IRAN[exchange].tickers?.() ?? []) : LOCAL.has(exchange) ? [] : cx.tickers(exchange);
+      return SRC[exchange] ? (SRC[exchange].tickers?.() ?? []) : LOCAL.has(exchange) ? [] : cx.tickers(exchange);
     }
   }
   throw new HttpError(404, 'Not found');
@@ -98,7 +102,7 @@ export function startFeed(exchange: string, symbol: string, tf: string, send: (b
   let cur = -1, parts = new Map<number, Bar>();
   // Aggregate base-timeframe candles into the requested timeframe (weeks anchored to Monday, like data.ts).
   const emitAgg = (b: Bar) => {
-    const anchor = sec % 604800 === 0 ? (IRAN[exchange]?.weekAnchor ?? 345600) : 0, t = Math.floor((b.time - anchor) / sec) * sec + anchor;
+    const anchor = sec % 604800 === 0 ? (SRC[exchange]?.weekAnchor ?? 345600) : 0, t = Math.floor((b.time - anchor) / sec) * sec + anchor;
     if (t !== cur) { cur = t; parts = new Map() }
     parts.set(b.time, b);
     const ps = [...parts.values()].sort((x, y) => x.time - y.time);
@@ -107,7 +111,7 @@ export function startFeed(exchange: string, symbol: string, tf: string, send: (b
   if (LOCAL.has(exchange)) {
     // Neither Yahoo nor MT5 pushes prices here: poll (the local MT5 bridge often, Yahoo gently).
     let alive = true, first = true;
-    const ir = IRAN[exchange], get = ir ? ir.bars : exchange === 'fx' ? yahooBars : MT5!.mt5Ohlcv, every = ir ? ir.every : exchange === 'fx' ? 15000 : 2000;
+    const ir = SRC[exchange], get = ir ? ir.bars : exchange === 'fx' ? yahooBars : MT5!.mt5Ohlcv, every = ir ? ir.every : exchange === 'fx' ? 15000 : 2000;
     (async () => {
       while (alive) {
         try { const r = await get(symbol, tf === '1M' ? '1M' : tf, undefined, 3); if (alive) r.base === tf ? r.bars.slice(-2).forEach(send) : r.bars.slice(-Math.ceil(sec / tfSeconds(r.base)) - 1).forEach(emitAgg); first = false } catch { if (first && ir) { alive = false; onFail?.(); return } }
@@ -168,6 +172,7 @@ function onMarket(c: WsClient, m: Record<string, unknown>, checked = false) {
   }
   if (!EX_RE.test(exchange) || (!LOCAL.has(exchange) && !cx.isExchange(exchange)) || !SYM_RE.test(symbol) || !validTf(tf)) return;
   if (exchange === 'fx' && !yahooTicker(symbol)) return;
+  if (exchange === DOM_EX && !domOf(symbol)) return;   // only the built-in table may start an upstream feed
   const k = keyOf(exchange, symbol, tf);
   if (m.op === 'unsub') return drop(c, k);
   if (mine.has(k) || !capOk(c, mine)) return;
@@ -188,7 +193,7 @@ onWsClose(c => [...mineOf(c)].forEach(k => drop(c, k)));
 
 // Diagnostics: one small request per local data source (Yahoo, the Iranian sources, MetaTrader), with timing.
 route('GET', '/api/diag/sources', async () => {
-  const extra = [timed('fx (Yahoo)', async () => { const r = await yahooBars('EURUSD', '1d', undefined, 3); return `${r.bars.length} bars` }), ...(MT5 ? [timed('mt5 bridge', async () => `${(await MT5.mt5Markets()).length} symbols`)] : [])];
+  const extra = [timed('cryptocap (CoinGecko + Binance)', async () => { const r = await dom.bars('BTC.D', '1d', undefined, 3, null); return `${r.bars.length} bars, last ${r.bars.at(-1)?.close.toFixed(2)}%${r.stale ? ' (stale copy)' : ''}` }), timed('fx (Yahoo)', async () => { const r = await yahooBars('EURUSD', '1d', undefined, 3); return `${r.bars.length} bars` }), ...(MT5 ? [timed('mt5 bridge', async () => `${(await MT5.mt5Markets()).length} symbols`)] : [])];
   return { at: Date.now(), sources: await probeIran(Object.keys(IRAN), extra) };
 });
 route('GET', '/api/health', () => ({ ok: true, exchanges: cx.exchangeIds().length }), { public: true });

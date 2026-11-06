@@ -12,7 +12,7 @@ await import('./state.ts');
 await import('./restore.ts');
 await import('./notify/index.ts');
 await import('./alerts/index.ts');
-if (!isPublic) { await import('./forward.ts'); await import('./recorder.ts') }
+if (!isPublic) { await import('./forward.ts'); await import('./recorder.ts'); await import('./dominance/record.ts') }
 await import('./share.ts');
 await import('./derivs.ts');
 if (!isPublic) await import('./brokers/index.ts');
