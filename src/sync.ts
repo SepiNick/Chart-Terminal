@@ -39,9 +39,9 @@ export const apiTrade: typeof api = (path, init) => api(path, { ...init, role: '
 /** Keys the running app applies live when another device or the server changes them (the server writes `acct` for forward-test fills). */
 const HOT_KEYS = new Set(['acct']);
 /** Per-device UI state: never sent to the server. */
-const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx', 'aiUrl', 'brokerActive', 'watchActive', 'watchView']);   // aiUrl may hold credentials / a LAN address; brokerActive names a broker that exists on one server only
+const LOCAL_KEYS = new Set(['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx', 'aiUrl', 'brokerActive', 'watchActive', 'watchView', 'winArr']);   // aiUrl may hold credentials / a LAN address; brokerActive names a broker that exists on one server only
 const KEY_RE = /^[A-Za-z0-9_.-]{1,64}$/;   // same as server/state.ts
-export const isSynced = (key: string) => KEY_RE.test(key) && !LOCAL_KEYS.has(key);
+export const isSynced = (key: string) => KEY_RE.test(key) && !LOCAL_KEYS.has(key) && !key.startsWith('po.');   // po.*: a pop-out window's own layout
 
 type Kv = Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'key' | 'length'>;
 export type ServerState = Record<string, { value: unknown; rev: number; updated: number }>;
@@ -163,13 +163,16 @@ let reloadShown = false, signedOutShown = false;
 function applyRemote(key: string, value: unknown, rev: number) {
   if (!isSynced(key)) return;
   if (rev) revs.set(key, rev); else revs.delete(key);
+  // Another window of this same browser (a pop-out) already stored this value: nothing is new here.
+  let same = false;
+  try { same = !!rev && localStorage.getItem('ct.' + key) === JSON.stringify(value) } catch {}
   // A local write waiting to go out wins (it will overwrite the server anyway).
   if (!pending.has(key) && !busy.has(key)) try {
     if (!rev) localStorage.removeItem('ct.' + key); else localStorage.setItem('ct.' + key, JSON.stringify(value));
     memo.delete(key);
   } catch { memo.set(key, JSON.stringify(value)) }
   // The app reads its state at start-up, so a reload is the honest way to show the change.
-  if (HOT_KEYS.has(key)) return;   // the app applies these live (main.ts), no reload needed
+  if (same || HOT_KEYS.has(key)) return;   // the app applies these live (main.ts), no reload needed
   if (!reloadShown) { reloadShown = true; note('Updated on another device', { label: 'Reload', run: () => location.reload() }) }
 }
 function signedOut() {

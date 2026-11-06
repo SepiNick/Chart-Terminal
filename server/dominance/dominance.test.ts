@@ -22,7 +22,7 @@ io.candles = async (pair, tf) => { const p = pair === 'BTCUSDT' ? 100 : pair ===
 
 test('exchange list, markets with the approximation flag, bars through /api/bars logic', async () => {
   assert.ok(M.SRC['cryptocap'] && Object.keys(M.SRC).includes('cryptocap'));
-  const ms = (await M.SRC['cryptocap'].markets()) as { sym: string; approxUntil: number | null; note: string; type: string }[];
+  const ms = (await M.SRC['cryptocap'].markets()) as unknown as { sym: string; approxUntil: number | null; note: string; type: string }[];
   assert.deepEqual(ms.map(m => m.sym), ['BTC.D', 'ETH.D', 'USDT.D', 'USDC.D', 'OTHERS.D', 'STABLE.D', 'TOTAL', 'TOTAL2', 'TOTAL3']);
   assert.ok(ms.every(m => m.approxUntil === null && /approximation from price × current supply/.test(m.note)));
   const r = await M.bars('cryptocap', 'BTC.D', '1h', undefined, 1000);
@@ -46,7 +46,7 @@ test('recorder: bounded table, merge into the series with a flag on recorded bar
   assert.equal(R.first()!.t, t0);
   assert.equal(R.read(0, 1e12).length, 2);
   assert.equal(R.read(t0 + 1, 1e12).length, 1);
-  const ms = (await M.SRC['cryptocap'].markets()) as { approxUntil: number | null }[];
+  const ms = (await M.SRC['cryptocap'].markets()) as unknown as { approxUntil: number | null }[];
   assert.equal(ms[0].approxUntil, t0);
   const r = await M.bars('cryptocap', 'BTC.D', '1h', undefined, 1000);
   assert.deepEqual(r.bars.map(b => (b as { approx?: boolean }).approx), [true, false, true]);

@@ -23,5 +23,8 @@ const r = await build({
 const ext = new Set(Object.values(r.metafile.outputs).flatMap(o => o.imports.filter(i => i.external && !i.path.startsWith('node:')).map(i => i.path)));
 console.log('server bundle: external packages', [...ext].join(', '));
 
+// Window placement maths shared with the web client (src/winplace.ts), for the pop-out windows in main.cjs.
+await build({ entryPoints: [join(root, 'src', 'winplace.ts')], outfile: join(app, 'placement.cjs'), bundle: true, platform: 'node', format: 'cjs', target: 'node24', logLevel: 'warning' });
+
 mkdirSync(join(here, 'build'), { recursive: true });
 cpSync(join(root, 'public', 'icon-512.png'), join(here, 'build', 'icon.png'));

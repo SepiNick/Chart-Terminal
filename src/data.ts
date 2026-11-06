@@ -1,6 +1,7 @@
 // Market data: Binance public mirror (no key, CORS-enabled). Exchange accounts come later via the local server.
 import { STANDALONE_WHY, isStandalone, serverFetch, serverSocket } from './servers.ts';
 import { ofTfLabel, ofTfName, parseOfTf } from './orderflow/tfbars.ts';
+import { hubBar, hubTickers, setStarters } from './livehub.ts';
 export interface Bar { time: number; open: number; high: number; low: number; close: number; volume: number }
 
 /**
@@ -116,6 +117,10 @@ export async function fetchBars(symbol: string, tf: string, endTime?: number): P
 /** Live kline stream with auto-reconnect. Returns an unsubscribe function. */
 export function streamBars(symbol: string, tf: string, onBar: (b: Bar) => void): () => void {
   for (const h of barHooks) { const r = h.stream(symbol, tf, onBar); if (r) return r }
+  // All windows of the app (main + pop-outs) share one connection per symbol/interval (livehub.ts).
+  return hubBar(symbol, tf, onBar, () => rawBars(symbol, tf, onBar));
+}
+function rawBars(symbol: string, tf: string, onBar: (b: Bar) => void): () => void {
   if (isRemote(symbol)) return streamRemote(symbol, tf, onBar);
   if (symbol.startsWith('BINANCE:')) symbol = symbol.slice(8);
   const { base, n } = baseOf(tf), sec = tfSeconds(tf);
@@ -143,6 +148,9 @@ export function streamBars(symbol: string, tf: string, onBar: (b: Bar) => void):
 export interface Ticker { c: number; o: number }
 /** 24h mini-ticker for many symbols on one socket. Call again with a new list to resubscribe. */
 export function streamTickers(symbols: string[], onTick: (sym: string, t: Ticker) => void): () => void {
+  return hubTickers(symbols, onTick, () => rawTickers(symbols, onTick));
+}
+function rawTickers(symbols: string[], onTick: (sym: string, t: Ticker) => void): () => void {
   let sock: WebSocket | null = null, alive = true;
   const connect = () => {
     if (!symbols.length) return;
@@ -153,6 +161,8 @@ export function streamTickers(symbols: string[], onTick: (sym: string, t: Ticker
   connect();
   return () => { alive = false; sock?.close() };
 }
+
+setStarters({ bar: rawBars, tickers: rawTickers });
 
 export interface Ticker24 { s: string; c: number; ch: number; qv: number }
 export async function fetch24h(): Promise<Ticker24[]> {

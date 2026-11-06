@@ -1,3 +1,4 @@
+import { initWindows, pushCfg, redirectSelect, decorateCells, isPopout, monitorsMenu } from './popout.ts';   // first: a pop-out redirects its storage keys before anything reads them
 import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from './chart.ts';
 import { TFS, anyTf, streamTickers, fetchBars, fetchSymbols, serverJson, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type RemoteMarket } from './data.ts';
 import { INDICATORS } from './indicators.ts';
@@ -104,6 +105,7 @@ onServer('state', m => {
 const saveLayout = () => {
   st.layout.panes = panes.map((p, i) => ({ ...p.cfg, link: st.layout.panes[i]?.link }));
   store.set('layout', st.layout);
+  pushCfg();
   if (st.autosave && st.layoutName !== 'Unnamed') { st.layouts[st.layoutName] = structuredClone(st.layout); store.set('layouts', st.layouts) }
 };
 const pending = new Set<() => void>();
@@ -219,7 +221,7 @@ function buildLayout() {
     return p;
   });
   st.layout.active = Math.min(st.layout.active, A.n - 1);
-  renderSplitters(); saveLayout(); syncUI(); connectTickers();
+  renderSplitters(); saveLayout(); syncUI(); connectTickers(); decorateCells();
 }
 function applyGridTemplate() {
   const A = ARR[st.layout.mode] ?? ARR['1'], grid = $('#grid');
@@ -282,6 +284,7 @@ function handlePrice(sym: string, px: number, ts: number) {
   const prev = lastPx[sym];
   lastPx[sym] = px;
   journalMark(sym, px);
+  if (isPopout) { later(renderTrading); return }   // the main window runs alerts and paper fills; pop-outs only show
   if (prev != null && !serverMode) for (const a of st.alerts) {
     if (!a.on || a.sym !== sym) continue;
     const level = a.drawingId != null ? drawingPrice(a) : a.price;
@@ -429,6 +432,7 @@ wireLeftToolbar(drawHost);
 function setSymbol(raw: string) {
   const s = asDomSym(raw) ?? raw.trim().toUpperCase().replace(/\s+/g, '');   // BTC.D → CRYPTOCAP:BTC.D
   try { if (isExpr(s)) parse(s); else if (!/^([A-Z0-9]+:)?[A-Z0-9_.\u0600-\u06FF]{2,40}$/.test(s)) throw Error('Invalid symbol') } catch (e) { return toast((e as Error).message) }
+  if (redirectSelect(s)) return;   // a panel pop-out: the main window changes the symbol
   st.recent = [s, ...st.recent.filter(x => x !== s)].slice(0, 12); store.set('recentSymbols', st.recent);
   // Dominance is a ratio: a line is the natural first view (candles stay available from the chart type menu).
   targets('symbol').forEach(p => applyCfg(p, { symbol: s, ...(isDomSym(s) && isShare(s) && p.cfg.type === 'candles' ? { type: 'line' as const } : {}) }, 'symbol change'));
@@ -1389,7 +1393,7 @@ const side = st.side; st.side = ''; if (side) showSide(side); else $('#body').cl
 buildLayout();
 initSettingsUI();
 if (serverMode) {
-  initServerAlerts({ ctx: alertCtx, changed: () => panes.forEach(p => p.tradeOverlay()), beep, toastMs: () => (st.settings.autoHideToasts ? 20000 : 120000) });
+  initServerAlerts({ ctx: alertCtx, changed: () => panes.forEach(p => p.tradeOverlay()), beep: isPopout ? () => {} : beep, toastMs: () => (st.settings.autoHideToasts ? 20000 : 120000) });
   // One-time move of the old browser alerts to the server; whatever failed stays for the next start.
   if (st.alerts.length) migrateToServer(st.alerts as OldAlert[], st.drawings, active()?.cfg.tf ?? '1h').then(left => { st.alerts = left as Alert[]; store.set('alerts', st.alerts) });
 }
@@ -1401,6 +1405,29 @@ if (serverMode && sharedLayout) {
   window.history.replaceState(null, '', location.pathname);
   api<Parameters<typeof importLayout>[0]>(`/api/share/layout/${encodeURIComponent(sharedLayout)}`).then(j => { importLayout(j, 'shared'); toast('Shared layout opened') }, e => toast((e as Error).message));
 }
+
+// ---------- several windows ----------
+// Pop-outs (and a second tab) share this browser's storage: what another window saved shows up here at once.
+addEventListener('storage', e => {
+  if (!e.key?.startsWith('ct.')) return;
+  switch (e.key.slice(3)) {
+    case 'drawings':
+      st.drawings = store.get('drawings', {});
+      panes.forEach(p => { p.layer.drawings = (st.drawings[p.cfg.symbol] ??= []); p.layer.select([]); p.layer.update() });
+      renderTree(); break;
+    case 'watchLists': lists = migrate(store.get<unknown>('watchLists', undefined), undefined, undefined); watchActive = resolveActive(lists, watchActive); saveWatchLocal(); break;
+    case 'acct': st.acct = store.get('acct', st.acct); journalSync(st.acct); paper.emit(); renderTrading(); break;
+    case 'alerts': if (!serverMode) { st.alerts = store.get('alerts', st.alerts); panes.forEach(p => p.tradeOverlay()); connectTickers(); renderAlerts() } break;
+    case 'settings': st.settings = loadSettings(); document.documentElement.dataset.theme = st.settings.theme; panes.forEach(p => p.build()); syncUI(); break;
+  }
+});
+function saveWatchLocal() { connectTickers(); renderWatch() }   // like saveWatch, without writing it back
+$('#monBtn').onclick = e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); void monitorsMenu(r.left, r.bottom + 2) };
+initWindows({
+  panes: () => panes, active: () => st.layout.active,
+  applyCfg: (i, cfg) => panes[i]?.set(cfg as Partial<PaneCfg>),
+  select: setSymbol, showBottom,
+});
 
 if (import.meta.env.DEV) Object.assign(window, { __ct: { panes: () => panes, st, history } }); // debugging handle, dev server only
 if (!bundledOrigin()) void registerServiceWorker().catch(() => {});   // at startup, so Chrome on Android offers 'Install app' without push being enabled first

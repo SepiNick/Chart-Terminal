@@ -131,6 +131,22 @@ export const FA: Record<string, string> = {
 
   'Drag to move the toolbar (arrow keys move it, Enter snaps, double-click resets)': 'برای جابه‌جایی نوار بکشید (کلیدهای جهت‌دار حرکتش می‌دهند، Enter می‌چسباند، دوبار کلیک بازنشانی می‌کند)',
   'Switch between horizontal and vertical': 'تغییر بین حالت افقی و عمودی', 'Expand the toolbar': 'باز کردن نوار', 'Collapse the toolbar': 'جمع کردن نوار',
+  // multi-monitor: pop-out windows
+  'Monitors: pop out to other screens, move windows': 'مانیتورها: خارج کردن پنل به صفحه‌ی دیگر و جابه‌جایی پنجره‌ها',
+  'Pop out to its own window (another monitor)': 'خارج کردن در پنجره‌ی جدا (مانیتور دیگر)',
+  'Pop out this panel to its own window (another monitor)': 'خارج کردن این پنل در پنجره‌ی جدا (مانیتور دیگر)',
+  'Pop out to its own window': 'خارج کردن در پنجره‌ی جدا',
+  'Popped out to its own window': 'در پنجره‌ی جدا باز است',
+  'Bring back': 'بازگرداندن', '↩ Bring back': '↩ بازگرداندن', 'Bring back to this window': 'بازگرداندن به این پنجره', 'Bring all back': 'بازگرداندن همه',
+  'Close this window and show the panel in the main window again': 'بستن این پنجره و نمایش دوباره‌ی پنل در پنجره‌ی اصلی',
+  'Move this window to another screen': 'انتقال این پنجره به صفحه‌ی دیگر', '🖥 Screen ▾': '🖥 صفحه ▾',
+  'Pop out to a new window': 'خارج کردن در پنجره‌ی جدید', 'Choose a screen… (asks permission)': 'انتخاب صفحه… (اجازه می‌خواهد)', 'Move to a screen…': 'انتقال به صفحه‌ی دیگر…',
+  'Detect screens… (asks permission)': 'شناسایی صفحه‌ها… (اجازه می‌خواهد)', 'Move this window to…': 'انتقال این پنجره به…', 'Fullscreen this window on…': 'تمام‌صفحه کردن این پنجره روی…',
+  'Pop out to screen…': 'خارج کردن به صفحه‌ی…', 'Open pop-outs': 'پنجره‌های جدا', 'Restore all windows': 'بازیابی همه‌ی پنجره‌ها',
+  'This browser cannot list screens: pop-outs open where it puts them': 'این مرورگر نمی‌تواند صفحه‌ها را فهرست کند؛ پنجره‌ها هر جا مرورگر بگذارد باز می‌شوند',
+  'Pop-up blocked. Allow pop-ups for this site (icon at the right of the address bar), then try again.': 'پنجره‌ی بازشو مسدود شد. بازشو را برای این سایت مجاز کنید (آیکون سمت راست نوار آدرس) و دوباره امتحان کنید.',
+  'Main window closed.': 'پنجره‌ی اصلی بسته شد.', 'Keep open': 'باز بماند', 'Close this window': 'بستن این پنجره', 'Running on its own': 'مستقل کار می‌کند',
+  'Chart': 'نمودار', 'DOM / Time & Sales': 'DOM / ریز معاملات', 'Positions & orders': 'پوزیشن‌ها و سفارش‌ها', 'Pine / Python editor': 'ویرایشگر Pine / Python',
 };
 
 const SKIP = 'canvas, #grid, #pnEditor, #pnConsole, textarea, code, pre, script, style, .cm-editor, [data-i18n="off"]';

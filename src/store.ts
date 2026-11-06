@@ -16,14 +16,19 @@ function stamp(key: string, value: unknown) {
     store.set('syncmeta', pruneMeta(m, Date.now()));
   } catch {}
 }
+/** A pop-out window keeps its own layout, side panel and sizes: these keys are redirected to `po.<id>.<key>` (device-local, never synced). */
+const alias = new Map<string, string>();
+export const aliasKeys = (id: string, keys: string[]) => keys.forEach(k => alias.set(k, `po.${id}.${k}`));
 export const store = {
   get<T>(key: string, fallback: T): T {
+    key = alias.get(key) ?? key;
     let v: string | null | undefined = memo.get(key);   // newer than localStorage when present
     try { v ??= localStorage.getItem('ct.' + key) } catch {}
     try { return v ? (JSON.parse(v) as T) : fallback } catch { return fallback }
   },
   /** Returns false when this browser's storage refused the value (it is still kept for this session and sent to the server). */
   set(key: string, value: unknown): boolean {
+    key = alias.get(key) ?? key;
     let ok = true;
     stamp(key, value);
     try { localStorage.setItem('ct.' + key, JSON.stringify(value)); memo.delete(key) }

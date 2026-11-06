@@ -18,7 +18,7 @@ function fakeStorage(init: Record<string, string>, full: string[] = []) {
 test('device-local and malformed keys never sync', () => {
   assert.equal(isSynced('layout'), true);
   assert.equal(isSynced('journal'), true);
-  for (const k of ['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx', 'bad key', '']) assert.equal(isSynced(k), false, k);
+  for (const k of ['bottomH', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx', 'winArr', 'po.abcd1234.layout', 'bad key', '']) assert.equal(isSynced(k), false, k);
 });
 
 test('local snapshot lists only synced ct.* keys', () => {

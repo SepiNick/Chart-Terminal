@@ -1,6 +1,6 @@
 // Chart Terminal desktop shell: starts the bundled server on a free 127.0.0.1 port with the data in the user's app-data
 // folder, then shows the app in a window from that server (same origin, so login cookies, /api and /ws work as usual).
-const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, shell, utilityProcess, session } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, screen, shell, utilityProcess, session } = require('electron');
 const { createServer } = require('node:net');
 const { readFileSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
@@ -52,9 +52,9 @@ async function startServer() {
   throw new Error(`The server did not start.\n\n${log.join('').slice(-1500)}`);
 }
 
-function createWindow(main = true) {
+function createWindow(main = true, o = {}) {
   const w = new BrowserWindow({
-    width: 1440, height: 900, minWidth: 900, minHeight: 600, show: false, backgroundColor: '#131722',
+    width: 1440, height: 900, ...(o.bounds ?? {}), minWidth: o.bounds ? 360 : 900, minHeight: o.bounds ? 260 : 600, show: false, backgroundColor: '#131722',
     title: 'Chart Terminal', icon: join(__dirname, 'build', 'icon.png'),
     // The page only talks HTTP to its own server; the preload only adds window.prompt(). It keeps running when the
     // window is hidden in the tray (live prices, alert notifications), so it is not throttled in the background.
@@ -64,11 +64,27 @@ function createWindow(main = true) {
     win = w;
     // Closing the main window hides it in the tray: the server keeps running (alerts, forward tests, recording).
     w.on('close', e => {
-      if (quitting || !settings().tray || !tray) return;
+      if (quitting) return;
+      // Pop-out windows are open: keep them, bring them back into this window, or close them (or cancel).
+      if (popWins.size && !popAsked) {
+        e.preventDefault(); popAsked = true;
+        dialog.showMessageBox(w, { type: 'question', buttons: ['Keep them open', 'Bring them back', 'Close them', 'Cancel'], defaultId: 0, cancelId: 3, title: 'Chart Terminal',
+          message: `${popWins.size} pop-out window${popWins.size > 1 ? 's are' : ' is'} still open.`, detail: 'Keep them open: they stay on their screens. Bring them back: their panels return to the main window. Close them: they are closed (Monitors > Restore all windows opens them again).' })
+          .then(async ({ response }) => {
+            if (response === 3) { popAsked = false; return }
+            if (response === 1) { await w.webContents.executeJavaScript('window.__ctDock && window.__ctDock()').catch(() => {}); await new Promise(r => setTimeout(r, 400)) }
+            if (response === 2) for (const p of [...popWins.values()]) p.close();
+            if (!w.isDestroyed()) w.close();
+          }, () => { popAsked = false });
+        return;
+      }
+      popAsked = false;
+      if (!settings().tray || !tray) return;
       e.preventDefault(); w.hide();
       if (!settings().trayTold) { saveSettings({ ...settings(), trayTold: true }); notify('Chart Terminal is still running', 'Alerts and forward tests keep working. Quit from the tray icon.') }
     });
     w.on('closed', () => { if (win === w) win = null });
+    trackDisplay(w, 'main');
     // Windows shutdown / sign-out: really close (no hiding), and let before-quit stop the server cleanly.
     w.on('query-session-end', () => { quitting = true });
     w.on('session-end', () => { quitting = true; app.quit() });
@@ -81,7 +97,7 @@ function createWindow(main = true) {
     openOutside(url);
     return { action: 'deny' };
   });
-  w.loadURL(origin);
+  w.loadURL(origin + (o.path ?? ''));
   return w;
 }
 const showMain = () => { if (!win) createWindow(); else { if (win.isMinimized()) win.restore(); win.show(); win.focus() } };
@@ -119,6 +135,89 @@ const openOutside = url => { if (/^https?:\/\//i.test(url)) shell.openExternal(u
 // Parsed, not a string prefix: "http://127.0.0.1:9163" must not also match port 91631.
 const sameOrigin = url => { try { return new URL(url).origin === origin } catch { return false } };
 
+// ---- Multi-monitor: pop-out windows ----
+// The page asks over one IPC channel (ct:win, validated below) for: the display list, a pop-out on a chosen display, moving
+// its own window to a display, and re-fitting windows. Each pop-out is the same app at /?po=<kind>&wid=<id> in a window
+// with the same hardening as the main one (createWindow). Position, size and display are kept per window in desktop.json
+// and restored through the placement maths (app/placement.cjs, built from src/winplace.ts): a display that is gone
+// (unplugged) puts the window back on the primary display.
+const POP_KINDS = ['chart', 'watch', 'dom', 'tester', 'positions', 'pine', 'alerts'];
+const popWins = new Map();        // id -> BrowserWindow
+const lastDisplay = new Map();    // id ('main' or a pop-out id) -> id of the display the window was last on
+const placement = () => require(join(APP, 'placement.cjs'));
+const displays = () => {
+  const primary = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((d, i) => ({ id: d.id, bounds: d.bounds, workArea: d.workArea, primary: d.id === primary, label: d.label || `Display ${i + 1}` }));
+};
+const readPops = () => { const p = settings().pops; return p && typeof p === 'object' && !Array.isArray(p) ? p : {} };
+const writePops = p => { const ids = Object.keys(p); for (const k of ids.slice(0, Math.max(0, ids.length - 24))) delete p[k]; saveSettings({ ...settings(), pops: p }) };
+const finite = r => r && ['x', 'y', 'width', 'height'].every(k => Number.isFinite(r[k]));
+function trackDisplay(w, id) {
+  const note = () => { if (!w.isDestroyed() && !w.isMinimized()) lastDisplay.set(id, screen.getDisplayMatching(w.getBounds()).id) };
+  note(); w.on('moved', note); w.on('resized', note);
+}
+function openPop({ id, kind, pane, displayId }) {
+  const had = popWins.get(id);
+  if (had && !had.isDestroyed()) { if (had.isMinimized()) had.restore(); had.show(); had.focus(); return true }
+  const P = placement(), ds = displays(), pops = readPops(), saved = pops[id];
+  const savedWin = saved && finite(saved.rect) ? { rect: saved.rect, displayId: saved.displayId ?? null } : undefined;
+  const target = displayId == null ? undefined : ds.find(d => d.id === displayId);
+  const r = target ? { rect: P.placeOn(target, savedWin?.rect, popWins.size), displayId: target.id } : P.restoreRect(savedWin, ds);
+  const w = createWindow(false, { bounds: r.rect, path: `/?po=${kind}&wid=${id}${kind === 'chart' ? `&pane=${pane}` : ''}` });
+  popWins.set(id, w); trackDisplay(w, id);
+  pops[id] = { kind, pane: kind === 'chart' ? pane : undefined, open: true, rect: r.rect, displayId: r.displayId }; writePops(pops);
+  let t = null;
+  const keep = () => { if (w.isDestroyed()) return; const rect = w.getNormalBounds(), p = readPops(); p[id] = { ...p[id], kind, pane: kind === 'chart' ? pane : undefined, rect, displayId: screen.getDisplayMatching(rect).id }; writePops(p) };
+  w.on('move', () => { clearTimeout(t); t = setTimeout(keep, 400) });
+  w.on('resize', () => { clearTimeout(t); t = setTimeout(keep, 400) });
+  w.on('close', () => { clearTimeout(t); keep(); if (!quitting) { const p = readPops(); if (p[id]) { p[id].open = false; writePops(p) } } });   // quitting keeps `open`, so it comes back next start
+  w.on('closed', () => { if (popWins.get(id) === w) popWins.delete(id); lastDisplay.delete(id) });
+  return true;
+}
+/** After a display was removed or changed: every window goes back to a display that exists. */
+function reflow() {
+  const P = placement(), ds = displays();
+  const wins = [...popWins.entries(), ...(win ? [['main', win]] : [])];
+  for (const [id, w] of wins) {
+    if (w.isDestroyed() || w.isMaximized() || w.isFullScreen() || w.isMinimized()) continue;
+    const cur = w.getBounds(), res = P.restoreRect({ rect: cur, displayId: lastDisplay.get(id) ?? null }, ds);
+    if (res.rect.x !== cur.x || res.rect.y !== cur.y || res.rect.width !== cur.width || res.rect.height !== cur.height) w.setBounds(res.rect);
+    lastDisplay.set(id, res.displayId);
+  }
+}
+function restorePops() {
+  for (const [id, s] of Object.entries(readPops())) {
+    if (!s || s.open !== true || !POP_KINDS.includes(s.kind)) continue;
+    const pane = Number.isInteger(s.pane) && s.pane >= 0 && s.pane < 16 ? s.pane : 0;
+    if (id !== `po${s.kind}${s.kind === 'chart' ? pane : ''}`) continue;
+    try { openPop({ id, kind: s.kind, pane }) } catch (e) { console.error('pop-out restore failed:', e.message) }
+  }
+}
+ipcMain.handle('ct:win', (e, op, arg) => {
+  const owner = BrowserWindow.fromWebContents(e.sender);
+  if (!owner || !sameOrigin(e.sender.getURL())) return null;
+  if (op === 'displays') return displays();
+  if (op === 'reflow') { reflow(); return true }
+  if (op === 'pop' && arg && typeof arg === 'object') {
+    const { id, kind, pane, displayId } = arg;
+    if (!POP_KINDS.includes(kind)) return false;
+    const p = kind === 'chart' ? pane : undefined;
+    if (kind === 'chart' && !(Number.isInteger(p) && p >= 0 && p < 16)) return false;
+    if (id !== `po${kind}${kind === 'chart' ? p : ''}`) return false;
+    if (displayId != null && typeof displayId !== 'number' && typeof displayId !== 'string') return false;
+    return openPop({ id, kind, pane: p, displayId });
+  }
+  if (op === 'move' && arg && typeof arg === 'object') {
+    const d = displays().find(x => x.id === arg.displayId);
+    if (!d) return false;
+    if (owner.isMaximized() || owner.isFullScreen()) { owner.setFullScreen(false); owner.unmaximize() }
+    const b = owner.getBounds();
+    owner.setBounds(placement().placeOn(d, { width: b.width, height: b.height }, 0));
+    return true;
+  }
+  return null;
+});
+
 // window.prompt() for the app (preload.cjs): a small modal input window; the page waits for the answer like a real prompt.
 // The texts travel in the URL hash as JSON and are set with textContent/value, never as HTML.
 const PROMPT_PAGE = `<!doctype html><meta charset="utf-8"><style>body{margin:0;padding:14px;font:13px system-ui;background:#1e222d;color:#d1d4dc}
@@ -148,7 +247,7 @@ ipcMain.on('ct:prompt', (e, msg, def) => {
   p.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(PROMPT_PAGE) + '#' + encodeURIComponent(JSON.stringify([msg, def])));
 });
 
-let quitting = false;
+let quitting = false, popAsked = false;
 app.on('before-quit', () => {
   quitting = true;
   // Ask the server to exit cleanly (the trade recorder flushes on exit); kill it if it doesn't within 3 s.
@@ -169,7 +268,8 @@ app.whenReady().then(async () => {
   try { await startServer() } catch (e) { dialog.showErrorBox('Chart Terminal', e.message); app.quit(); return }
   try { createTray() } catch (e) { console.error('No tray:', e.message) }   // some Linux desktops have none
   // "Start with Windows" starts hidden in the tray.
-  if (!(process.argv.includes('--hidden') && tray)) createWindow();
+  if (!(process.argv.includes('--hidden') && tray)) { createWindow(); restorePops() }
+  for (const ev of ['display-removed', 'display-added', 'display-metrics-changed']) screen.on(ev, () => setTimeout(reflow, 400));
   app.on('activate', showMain);
   if (app.isPackaged) setTimeout(() => checkUpdates(), 10_000);
 });
