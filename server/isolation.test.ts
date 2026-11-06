@@ -17,6 +17,8 @@ const { routeTable } = await import('./core/http.ts');
 const A = await signup(b, 'alice-a'), Bu = await signup(b, 'bob-b');
 
 // U-id: id-addressed, a foreign id must be 404 · U-list: lists/queries of the caller's own data · G: shared market data
+// Private-only routes are not in this table: they answer 404 on a public server (see the test "features that do not exist" below,
+// which lists /api/py/status, /api/py/config and /api/py/run, and the module check that pyrun.ts is never loaded).
 // AUTH: login family · ADMIN: admin role + password · PUB: public by design (capability link, health, push key)
 const CLASS: Record<string, 'U-id' | 'U-list' | 'G' | 'AUTH' | 'ADMIN' | 'PUB'> = {
   'GET /api/health': 'PUB', 'GET /api/auth/status': 'AUTH', 'POST /api/auth/register': 'AUTH', 'POST /api/auth/login': 'AUTH', 'POST /api/auth/logout': 'AUTH',
@@ -42,7 +44,7 @@ test('every registered route is classified (and no classified route is stale)', 
 });
 
 test('modules that must not exist on a public server were never loaded', () => {
-  const bad = [...loaded].filter(u => /\/(brokers\/|forward\.ts|engine\.ts|engineworker\.ts|recorder\.ts|llm\.ts|mt5\.ts|ml\.ts|lan\.ts|lan\/|core\/secrets\.ts|scripts\.ts|scriptsource\.ts|ptr\.ts)|\/src\/(mql|ninja)\//.test(u));
+  const bad = [...loaded].filter(u => /\/(brokers\/|forward\.ts|engine\.ts|engineworker\.ts|recorder\.ts|llm\.ts|mt5\.ts|ml\.ts|pyrun\.ts|lan\.ts|lan\/|core\/secrets\.ts|scripts\.ts|scriptsource\.ts|ptr\.ts)|\/src\/(mql|ninja)\//.test(u));
   assert.deepEqual(bad, []);
 });
 
@@ -128,7 +130,7 @@ test('WebSocket: B receives nothing of A; A does; bad origins are refused', asyn
 
 test('features that do not exist on a public server answer 404; script and webhook alerts are refused', async () => {
   const c = Bu.c;
-  for (const [m, p] of [['GET', '/api/broker/accounts'], ['GET', '/api/forward'], ['POST', '/api/forward'], ['POST', '/api/ml/x'], ['GET', '/api/ai/status'], ['POST', '/api/ai/chat'], ['GET', '/api/lan'], ['GET', '/ca.crt'], ['GET', '/ca.mobileconfig'], ['PUT', '/api/recorder'], ['GET', '/api/recorder'], ['GET', '/api/notify/telegram/chats'], ['GET', '/api/ptr/x']]) {
+  for (const [m, p] of [['GET', '/api/broker/accounts'], ['GET', '/api/forward'], ['POST', '/api/forward'], ['POST', '/api/ml/x'], ['GET', '/api/py/status'], ['POST', '/api/py/config'], ['POST', '/api/py/run'], ['GET', '/api/ai/status'], ['POST', '/api/ai/chat'], ['GET', '/api/lan'], ['GET', '/ca.crt'], ['GET', '/ca.mobileconfig'], ['PUT', '/api/recorder'], ['GET', '/api/recorder'], ['GET', '/api/notify/telegram/chats'], ['GET', '/api/ptr/x']]) {
     assert.equal((await c.call(m, p, m === 'GET' ? undefined : {})).status, 404, `${m} ${p}`);
   }
   const base = { sym: 'BTCUSDT', tf: '1h', frequency: 'once', channels: [], message: '', active: false };

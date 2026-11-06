@@ -2,6 +2,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLi
 import { EditorState } from '@codemirror/state';
 import { cpp } from '@codemirror/lang-cpp';
 import { csharp } from '@codemirror/legacy-modes/mode/clike';
+import { python } from '@codemirror/legacy-modes/mode/python';
 import { Compartment } from '@codemirror/state';
 import { StreamLanguage, HighlightStyle, syntaxHighlighting, bracketMatching, indentOnInput, indentUnit, foldService, foldGutter, foldKeymap } from '@codemirror/language';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, type CompletionContext } from '@codemirror/autocomplete';
@@ -11,10 +12,10 @@ import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/sea
 import { tags as t } from '@lezer/highlight';
 
 export interface PineEditor {
-  setLanguage(lang: 'pine' | 'mql' | 'csharp'): void;
+  setLanguage(lang: 'pine' | 'mql' | 'csharp' | 'python'): void;
   getValue(): string;
   setValue(src: string): void;
-  setErrors(errs: { line: number; col: number; msg: string }[]): void;
+  setErrors(errs: { line: number; col: number; msg: string; wide?: boolean }[]): void;
   focus(): void;
   destroy(): void;
 }
@@ -117,11 +118,11 @@ const indentFold = foldService.of((state, lineStart) => {
 
 export function createPineEditor(
   parent: HTMLElement,
-  opts: { doc: string; onChange?: (src: string) => void; onRun?: () => void; completions: string[] },
+  opts: { doc: string; onChange?: (src: string) => void; onRun?: () => void; completions: string[]; keywords?: string[]; lang?: 'pine' | 'python' },
 ): PineEditor {
   const options = [
     ...opts.completions.map(label => ({ label, type: label.includes('.') ? 'function' : 'variable' })),
-    ...[...KEYWORDS, ...ATOMS].map(label => ({ label, type: 'keyword' })),
+    ...(opts.keywords ?? [...KEYWORDS, ...ATOMS]).map(label => ({ label, type: 'keyword' })),
   ];
   const complete = (ctx: CompletionContext) => {
     const word = ctx.matchBefore(/[\w.]*/);
@@ -140,7 +141,7 @@ export function createPineEditor(
         history(), drawSelection(), indentOnInput(), bracketMatching(), closeBrackets(),
         highlightActiveLine(), highlightSelectionMatches(), search(),
         indentUnit.of('    '), EditorState.tabSize.of(4), indentFold,
-        language.of(pine), syntaxHighlighting(highlight), theme,
+        language.of(opts.lang === 'python' ? StreamLanguage.define(python) : pine), syntaxHighlighting(highlight), theme,
         autocompletion({ override: [complete] }),
         keymap.of([...closeBracketsKeymap, ...completionKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, ...foldKeymap, ...lintKeymap, indentWithTab]),
         EditorView.updateListener.of(u => { if (u.docChanged) opts.onChange?.(u.state.doc.toString()); }),
@@ -149,7 +150,7 @@ export function createPineEditor(
   });
 
   return {
-    setLanguage: lang => view.dispatch({ effects: language.reconfigure(lang === 'mql' ? cpp() : lang === 'csharp' ? StreamLanguage.define(csharp) : pine) }),
+    setLanguage: lang => view.dispatch({ effects: language.reconfigure(lang === 'mql' ? cpp() : lang === 'csharp' ? StreamLanguage.define(csharp) : lang === 'python' ? StreamLanguage.define(python) : pine) }),
     getValue: () => view.state.doc.toString(),
     setValue: src => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: src } }),
     setErrors(errs) {
@@ -158,7 +159,7 @@ export function createPineEditor(
         const line = doc.line(Math.min(Math.max(1, e.line), doc.lines));
         const from = Math.min(line.from + Math.max(0, e.col - 1), line.to);
         const m = /^\w+/.exec(doc.sliceString(from, line.to));
-        const to = m ? from + m[0].length : Math.min(from + 1, line.to);
+        const to = e.wide ? Math.max(line.to, from + 1) : m ? from + m[0].length : Math.min(from + 1, line.to);
         return { from, to, severity: 'error', message: e.msg };
       });
       view.dispatch(setDiagnostics(view.state, diags));

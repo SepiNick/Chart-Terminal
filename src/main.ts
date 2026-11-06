@@ -27,6 +27,7 @@ import { ofMenu, replayButton, marketReplayUi } from './orderflow/menu.ts';
 import { initJournal, journal, journalBrokers, journalMark, journalSource, journalSync, renderJournal } from './journalui.ts';
 import { journalReplayOrder } from './journal/replay.ts';
 import { initPineUI, openNewScript, scriptById, compileById, compileNinjaScripts, openInputs, renderPineResults, sourceFor } from './pineui.ts';
+import { initPyUI } from './pyui.ts';
 import { serverMode, onServer, api } from './sync.ts';
 import { isStandalone } from './servers.ts';
 import { bundledOrigin } from './standalone.ts';
@@ -1099,7 +1100,7 @@ function showBottom(tab: string) {
   $$('#bTabs [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $$('.bpane').forEach(p => p.classList.toggle('on', p.id === 'b-' + tab));
   $('#bottom').classList.remove('collapsed');
-  if ((tab === 'pine' || tab === 'tester') && $('#bottom').offsetHeight < 300) setBottomHeight(360);
+  if ((tab === 'pine' || tab === 'python' || tab === 'tester') && $('#bottom').offsetHeight < 300) setBottomHeight(360);
   if (tab === 'tester') renderPineResults(active());
 }
 function setBottomHeight(h: number) { const v = Math.max(80, Math.min(innerHeight - 200, h)); $('#bottom').style.setProperty('--bottom-h', v + 'px'); store.set('bottomH', v) }
@@ -1200,6 +1201,7 @@ document.addEventListener('keydown', e => {
 });
 
 initPineUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
+initPyUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
 initTesterUI({ paper: (p, side, qty) => { const px = pxOf(p.cfg.symbol); if (px) { journalSource('Forward test'); submit({ sym: p.cfg.symbol, side, type: 'market', qty }, px, p, paper); journalSource('') } }, watchlist: () => watchSyms() });
 initJournal({
   tfOf: sym => panes.find(p => p.cfg.symbol === sym)?.cfg.tf,

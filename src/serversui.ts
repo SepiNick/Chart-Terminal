@@ -6,7 +6,7 @@ import { esc, toast } from './store.ts';
 import { bundledOrigin, leaveStandalone, watchForServer } from './standalone.ts';
 import { STANDALONE_WHY, addServer, isStandalone, canBeTradeServer, gate, listServers, mixedContentWarning, normalizeBaseUrl, onServersChanged, probeStatus, recordStatus, removeServer, setSyncServer, setTradeServer, syncServer, tradeId, tradeServer, type Features, type ServerStatus } from './servers.ts';
 
-const FEATS = (['trading', 'ai', 'ml', 'forward', 'scripts'] as (keyof Features)[]).filter(f => SHOW_AI || (f !== 'ai' && f !== 'ml'));
+const FEATS = (['trading', 'ai', 'ml', 'forward', 'scripts', 'python'] as (keyof Features)[]).filter(f => SHOW_AI || (f !== 'ai' && f !== 'ml'));
 const feats = (f?: Features) => (f ? FEATS.filter(k => f[k]).join(', ') || 'none' : 'unknown');
 
 export function openServers() {

@@ -33,7 +33,7 @@ test('bundled origin', () => {
   assert.ok(!bundledOrigin('http://localhost:5173'));
 });
 test('gating: standalone keeps scripts, turns everything else off with one reason', () => {
-  assert.deepEqual(STANDALONE_FEATURES, { trading: false, ai: false, ml: false, forward: false, scripts: true });
+  assert.deepEqual(STANDALONE_FEATURES, { trading: false, ai: false, ml: false, forward: false, scripts: true, python: false });
   assert.deepEqual(gateFor('scripts', null, null, true), { on: true, why: '' });
   for (const f of ['trading', 'ai', 'ml', 'forward'] as const) assert.deepEqual(gateFor(f, { mode: 'private', features: undefined }, { mode: 'private', features: undefined }, true), { on: false, why: STANDALONE_WHY });
   assert.equal(gateFor('trading', null, { mode: 'private' }).on, true);     // normal mode unchanged

@@ -42,10 +42,13 @@ button:disabled{opacity:.4;cursor:default}
 .tabs{display:flex;align-items:center;gap:2px;padding:0 6px}
 .tabs button{border:0;border-radius:0;background:none;padding:7px 10px}.tabs button.on{color:var(--accent);box-shadow:inset 0 -2px var(--accent);background:none}
 .bpane{display:none;overflow:auto;padding:0 8px 8px;flex:1;min-height:0}.bpane.on{display:block}
-#b-pine.on,#b-tester.on{display:flex;flex-direction:column}
+#b-pine.on,#b-tester.on,#b-python.on,.pybody{display:flex;flex-direction:column}.pybody{flex:1;min-height:0}.pybody[hidden]{display:none}#pyOff{padding:12px 4px}
 .pine-bar{padding:4px 0;flex:none}
 .pine-main{flex:1;min-height:0;display:grid;grid-template-rows:1fr auto;border:1px solid var(--line);border-radius:4px;overflow:hidden}
 #pnEditor{min-height:0}#pnConsole{max-height:90px;overflow:auto;border-top:1px solid var(--line);font:11px ui-monospace,Consolas,monospace;padding:4px 8px}
+#pyEditor{min-height:0}#pyConsole{max-height:150px;overflow:auto;border-top:1px solid var(--line);font:11px ui-monospace,Consolas,monospace;padding:4px 8px;white-space:pre-wrap;direction:ltr;text-align:left}
+#pyConsole .err{color:var(--down)}#pyConsole .warn{color:var(--warn)}#pyConsole:empty{display:none}#pyConsole a{color:var(--accent);cursor:pointer}
+#pyParams label{display:inline-flex;gap:4px;align-items:center}#pyParams input[type=number],#pyParams input[type=text]{width:80px}.pybody.drop .pine-main{outline:2px dashed var(--accent)}
 #pnConsole .err{color:var(--down)}#pnConsole .warn{color:var(--warn)}#pnConsole:empty{display:none}
 .tester{display:grid;grid-template-columns:minmax(260px,1fr) 2fr;gap:8px;height:100%;min-height:150px}
 #tsTabs{padding:0;flex-wrap:wrap}#tsTabs button{padding:4px 8px}
@@ -276,7 +279,7 @@ table.seas td{font-size:11px;text-align:right}
    numbers stay left-to-right, because price charts, time axes and code have a fixed direction. */
 html.fa body { font-family: Vazirmatn, Tahoma, 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif }
 html.fa :is(#panel, dialog, #jw, #bottom .bpane, #bottomBar) { direction: rtl }
-html.fa :is(#grid, #tools, #top, #rail, #replayBar, #favBar, #pnEditor, #pnConsole, #tsEquity) { direction: ltr }
+html.fa :is(#grid, #tools, #top, #rail, #replayBar, #favBar, #pnEditor, #pnConsole, #pyEditor, #pyConsole, #tsEquity) { direction: ltr }
 html.fa :is(#panel, dialog, #jw, #bottom) :is(input[type=number], input[type=datetime-local], input[type=date], input[type=time], input[type=url], input[type=password], code, pre, kbd, .num) { direction: ltr }
 html.fa :is(input[type=text], input:not([type]), textarea) { unicode-bidi: plaintext }
 html.fa :is(#panel, dialog, #jw) :is(td, th) { text-align: start }

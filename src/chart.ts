@@ -27,6 +27,7 @@ import { renderScript, type ScriptView } from './pine/render.ts';
 import type { Outputs } from './pine/interp.ts';
 import type { PineValue } from './pine/types.ts';
 import { showMenu } from './menu.ts';
+import { partsFor, type PyRun } from './python/result.ts';
 
 export type { ChartType } from './charttypes.ts';
 interface ScriptRef { id: string; inputs: Record<string, PineValue>; hidden?: boolean }
@@ -102,6 +103,8 @@ export class ChartPane {
   crosshairTime: number | null = null;
   private builtType: ChartType | null = null;
   scriptRuns: ScriptRun[] = [];
+  /** Results of the Python tool on this chart (static: the code ran once, on the bars the chart sent). Dropped when the symbol or timeframe changes. */
+  pyRuns = new Map<string, PyRun>();
   private scriptMarkers: SeriesMarker<Time>[] = [];
   private scriptPaneBase = 0;
   private lastScriptRun = 0;
@@ -194,7 +197,7 @@ export class ChartPane {
   // ---------- data ----------
   async load() {
     const tok = ++this.loadTok;
-    this.unsub(); this.exitReplay(false); this.of?.reset(); this.secBars.clear(); this.dropSec();
+    this.unsub(); this.exitReplay(false); this.of?.reset(); this.secBars.clear(); this.dropSec(); this.pyRuns.clear();
     this.bars = []; this.noMore = false;
     try {
       const b = await this.fetch();
@@ -475,6 +478,12 @@ export class ChartPane {
     if (isPriceBased(this.cfg.type)) return;
     let pane = this.scriptPaneBase, color = 3;
     this.owners.length = pane + 1;
+    const draw = (run: ScriptRun) => {
+      run.view = renderScript(this.chart, this.main, run.out!, this.vb(), run.out!.meta.overlay ? 0 : pane + 1, color);
+      for (let j = 1; j <= run.view.panesUsed; j++) this.owners[pane + j] = 'script:' + run.id;
+      pane += run.view.panesUsed; color += run.out!.plots.length;
+      this.scriptMarkers.push(...run.view.markers);
+    };
     for (const ref of this.cfg.scripts ?? []) {
       const sc = this.hooks.script(ref.id), job = this.testerJob(ref.id);
       if (!sc || !job) continue;
@@ -497,17 +506,22 @@ export class ChartPane {
           }
           return { id: ref.id, name: res.out?.meta.shorttitle || res.out?.meta.title || sc.name, ...res };
         })();
-      const res = run;
-      if (res.out && !ref.hidden) {
-        run.view = renderScript(this.chart, this.main, res.out, this.vb(), res.out.meta.overlay ? 0 : pane + 1, color);
-        for (let j = 1; j <= run.view.panesUsed; j++) this.owners[pane + j] = 'script:' + ref.id;
-        pane += run.view.panesUsed; color += res.out.plots.length;
-        this.scriptMarkers.push(...run.view.markers);
-      }
+      if (run.out && !ref.hidden) draw(run);
       this.scriptRuns.push(run);
+    }
+    // Python tool results: drawn like any script (lines, markers, strategy arrows), from the stored result matched to the bars by time
+    for (const pr of this.pyRuns.values()) for (const out of partsFor(pr, this.vb())) {
+      const run: ScriptRun = { id: pr.id, name: out.meta.title, out, ms: pr.ms };
+      draw(run); this.scriptRuns.push(run);
     }
     this.lastScriptRun = Date.now();
     this.hooks.onScripts(this);
+  }
+  /** Show (or replace) a Python tool result on this chart; null removes it. */
+  setPyRun(id: string, run: PyRun | null) {
+    if (run) this.pyRuns.set(id, run); else this.pyRuns.delete(id);
+    if (!this.chart) return;
+    this.renderScripts(); this.applyStretch(); this.layer.update(); this.tradeOverlay();
   }
   /** Plain-data description of how a script runs on this chart; the Strategy Tester worker re-runs it with other inputs. */
   testerJob(id: string): Job | ScriptError | null {

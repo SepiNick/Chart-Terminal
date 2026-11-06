@@ -74,7 +74,7 @@
     <div id="bottom">
       <div id="bResize" title="Drag to resize"></div>
       <div class="tabs" id="bTabs">
-        <button data-tab="pine">Pine Editor</button><button data-tab="tester">Strategy Tester</button>
+        <button data-tab="pine">Pine Editor</button><button data-tab="python" title="Run your own Python code on this chart's data">Python</button><button data-tab="tester">Strategy Tester</button>
         <button data-tab="positions" class="on">Positions</button><button data-tab="orders">Orders</button><button data-tab="history">History</button>
         <span class="grow"></span><span id="acctLine" class="muted"></span><button id="bToggle" class="x" title="Collapse">▾</button>
       </div>
@@ -92,6 +92,23 @@
           <button id="pnAdd" class="on">Add to chart</button>
         </div>
         <div class="pine-main"><div id="pnEditor"></div><div id="pnConsole"></div></div>
+      </div>
+      <div class="bpane" id="b-python">
+        <div id="pyOff" class="muted" hidden></div>
+        <div id="pyBody" class="pybody">
+          <div class="row pine-bar">
+            <button id="pyScripts" title="New script, examples, your saved Python scripts">🐍 <span id="pyName">Untitled</span> ▾</button>
+            <span id="pyStatus" class="muted"></span><span class="grow"></span>
+            <label class="btn" title="Open a .py file from disk (or drop one on this panel)">⤓ Open file<input type="file" id="pyImport" accept=".py,.txt" hidden></label>
+            <button id="pySave" title="Save in this app (Ctrl+S)">Save</button>
+            <button id="pyExport" title="Download as a .py file">⤒ Download</button>
+            <label class="muted" title="Which function to run">Run <select id="pyEntry" aria-label="Entry"></select></label>
+            <button id="pyClear" title="Remove this script's lines, markers and trades from the chart">Clear</button>
+            <button id="pyRun" class="on" title="Run on the bars of the active chart (Ctrl+Enter)">▶ Run on chart</button>
+          </div>
+          <div class="row pine-bar" id="pyParams" hidden></div>
+          <div class="pine-main"><div id="pyEditor"></div><div id="pyConsole"></div></div>
+        </div>
       </div>
       <div class="bpane" id="b-tester">
         <div class="row pine-bar"><b id="tsTitle">No strategy on the chart</b>
@@ -348,6 +365,14 @@
       <span class="lbl">Certificate</span><div class="row wrap"><a href="/ca.crt" download>CA certificate (Android, Windows)</a><a href="/ca.mobileconfig" download>iPhone / iPad profile</a></div>
       <p class="hint muted al-span">Install the certificate on each phone once, then open one of the addresses above. Step-by-step guide (Persian): <code>docs/lan-setup.md</code> in the project folder.</p>
       <div class="row al-span"><span class="st" id="lanSt" aria-live="polite"></span></div>
+    </form>
+    <form class="srv" id="sPy" onsubmit="return false">
+      <h4>Python (run your own code)</h4>
+      <p class="hint muted al-span"><b>Warning:</b> Python code runs on this computer with the same rights as this program. It can read, change and delete your files and use the network; there is no sandbox. Turn it on only for code you wrote or trust. It can only be switched on from this computer.</p>
+      <span class="lbl">Run Python code</span><div class="row wrap"><label><input type="checkbox" id="pyOn"> Enabled</label><span id="pyNote" class="muted"></span></div>
+      <span class="lbl">Other devices</span><div class="row wrap"><label title="Off: only this computer can run code, even if you are signed in on a phone"><input type="checkbox" id="pyRemote"> Also let phones and other devices on the network run code</label></div>
+      <span class="lbl">Interpreter</span><div id="pyInfo" class="muted"></div>
+      <div class="row al-span"><span class="st" id="pySt" aria-live="polite"></span></div>
     </form>
   </div>
   <form method="dialog" class="row"><span class="grow"></span><button value="ok">Close</button></form>

@@ -3,7 +3,7 @@
 // this machine only). Stored per device in localStorage under `ctsrv` (not `ct.*`, so it never syncs; it holds tokens).
 // Imports nothing from the app (sync.ts builds on it) and is safe to import in node (tests).
 export type Role = 'sync' | 'trade';
-export interface Features { trading: boolean; ai: boolean; ml: boolean; forward: boolean; scripts: boolean }
+export interface Features { trading: boolean; ai: boolean; ml: boolean; forward: boolean; scripts: boolean; python: boolean }
 export interface ServerStatus {
   setup: boolean; loggedIn: boolean; mode: 'public' | 'private'; registration: 'invite' | 'open' | 'closed';
   version?: string; serverName?: string; features: Features; user?: { name: string; role?: string; mustChange?: boolean; id?: string | number };
@@ -13,9 +13,9 @@ export interface Server { id: string; name: string; baseUrl: string; token?: str
 type Kv = Pick<Storage, 'getItem' | 'setItem'>;
 
 const KEY = 'ctsrv', LOCAL = 'local';
-export const ALL_FEATURES: Features = { trading: true, ai: true, ml: true, forward: true, scripts: true };
+export const ALL_FEATURES: Features = { trading: true, ai: true, ml: true, forward: true, scripts: true, python: true };
 /** Standalone mode (no server at all): only the browser-side scripts remain. */
-export const STANDALONE_FEATURES: Features = { trading: false, ai: false, ml: false, forward: false, scripts: true };
+export const STANDALONE_FEATURES: Features = { trading: false, ai: false, ml: false, forward: false, scripts: true, python: false };
 export const STANDALONE_WHY = 'Standalone mode: this needs a server';
 let standalone = false;
 export const isStandalone = () => standalone;
@@ -76,7 +76,7 @@ export function parseStatus(j: unknown): ServerStatus | null {
     registration: o.registration === 'open' || o.registration === 'closed' ? o.registration : 'invite',
     version: typeof o.version === 'string' ? o.version : undefined,
     serverName: typeof o.serverName === 'string' && o.serverName ? o.serverName.slice(0, 60) : undefined,
-    features: { trading: flag(f.trading ?? f.brokers), ai: flag(f.ai), ml: flag(f.ml), forward: flag(f.forward), scripts: flag(f.scripts ?? f.scriptAlerts) },
+    features: { trading: flag(f.trading ?? f.brokers), ai: flag(f.ai), ml: flag(f.ml), forward: flag(f.forward), scripts: flag(f.scripts ?? f.scriptAlerts), python: flag(f.python) },
     user: u && typeof u.name === 'string' ? { name: u.name, role: typeof u.role === 'string' ? u.role : undefined, mustChange: !!u.mustChange, id: typeof u.id === 'string' || typeof u.id === 'number' ? u.id : undefined } : undefined,
     oauth: { google: (o.oauth as Record<string, unknown> | undefined)?.google === true, apple: (o.oauth as Record<string, unknown> | undefined)?.apple === true },
   };

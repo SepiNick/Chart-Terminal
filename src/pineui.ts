@@ -21,7 +21,7 @@ import { showMenu } from './menu.ts';
 import { store, $, esc, toast } from './store.ts';
 import type { ScriptSource } from './alerttypes.ts';
 
-export type Lang = 'pine' | 'mql4' | 'mql5' | 'mqh' | 'ninja';
+export type Lang = 'pine' | 'mql4' | 'mql5' | 'mqh' | 'ninja' | 'python';   // python scripts live in the same store but are edited and run by pyui.ts, never here
 export interface Script { id: string; name: string; src: string; updated: number; lang?: Lang }
 export interface PineHost {
   active(): ChartPane;
@@ -35,6 +35,9 @@ let editingId = store.get<string>('pineEditing', '');
 let editor: PineEditor | null = null;
 let host: PineHost;
 const save = () => store.set('scripts', scripts);
+/** The one script store (Pine, MQL, NinjaScript and Python scripts share it): pyui.ts reads and saves through these so the two never overwrite each other. */
+export const allScripts = () => scripts;
+export const saveScripts = () => save();
 setInstalledScripts(() => Object.values(scripts).filter(s => langOf(s) === 'pine').map(s => s.src));   // Pine `import` resolves libraries here
 const langOf = (s: Script | undefined): Lang => s?.lang ?? 'pine';
 const isMql = (l: Lang) => l === 'mql4' || l === 'mql5' || l === 'mqh';
@@ -80,7 +83,7 @@ function compileMqlScript(id: string, override?: string): CompileResult {
 }
 
 function open(id: string) {
-  const s = scripts[id]; if (!s) return;
+  const s = scripts[id]; if (!s || langOf(s) === 'python') return;
   editingId = id; store.set('pineEditing', id);
   editor?.setLanguage(langOf(s) === 'ninja' ? 'csharp' : isMql(langOf(s)) ? 'mql' : 'pine');
   editor?.setValue(s.src);
@@ -139,7 +142,7 @@ export function openNewScript(src: string) { const s = newScript(src); host.show
 export function sourceFor(id: string, prec: number): ScriptSource | null {
   const s = scripts[id]; if (!s) return null;
   const lang = langOf(s), fam = (l: Lang) => (isMql(l) ? 'mql' : l);
-  if (lang === 'mqh') return null;
+  if (lang === 'mqh' || lang === 'python') return null;   // Python runs on this computer's server on demand, never as an alert or forward test
   if (lang === 'pine') return { lang, files: { 'main.pine': s.src }, main: 'main.pine', prec };
   return { lang, files: Object.fromEntries(usedFiles(s, Object.values(scripts).filter(x => fam(langOf(x)) === fam(lang)), lang === 'ninja').map(x => [x.name, x.src])), main: s.name, prec };
 }
@@ -230,7 +233,7 @@ export function initPineUI(h: PineHost) {
   };
   $('#pnScripts').onclick = e => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const mine = Object.values(scripts).sort((a, b) => b.updated - a.updated);
+    const mine = Object.values(scripts).filter(s => langOf(s) !== 'python').sort((a, b) => b.updated - a.updated);
     const named = (src: string, ext: string, base: string) => { let n = `${base}.${ext}`, k = 2; while (Object.values(scripts).some(s => s.name === n)) n = `${base}${k++}.${ext}`; const s = newScript(src, n); open(s.id) };
     showMenu(r.left, r.bottom + 2, [
       { label: 'New Pine indicator', icon: '＋', action: () => open(newScript(NEW_INDICATOR).id) },
@@ -248,7 +251,7 @@ export function initPineUI(h: PineHost) {
         if (!confirm(`Delete “${scripts[editingId].name}”? Charts using it will drop it.`)) return;
         const id = editingId; delete scripts[id]; save(); compileCache.clear(); ntCache.clear();
         host.panes().forEach(p => { if (p.cfg.scripts?.some(x => x.id === id)) p.set({ scripts: p.cfg.scripts!.filter(x => x.id !== id) }) });
-        const next = Object.keys(scripts)[0]; if (next) open(next); else { editingId = ''; editor?.setValue(NEW_INDICATOR); $('#pnName').textContent = 'Untitled' }
+        const next = Object.keys(scripts).find(k => langOf(scripts[k]) !== 'python'); if (next) open(next); else { editingId = ''; editor?.setValue(NEW_INDICATOR); $('#pnName').textContent = 'Untitled' }
       } }] : []),
     ]);
   };

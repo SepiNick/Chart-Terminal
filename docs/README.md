@@ -25,6 +25,7 @@
 - [android.md](android.md): نصب به‌صورت PWA روی اندروید، اعلان‌ها، باتری، IP ثابت.
 - [android-apk.md](android-apk.md): اپ APK با دو flavor (client و standalone)، حالت Standalone برنامه، قواعد HTTP/HTTPS، ساخت و امضا.
 - [multi-server.md](multi-server.md): ورود با توکن دستگاه و CORS برای کلاینت‌های origin دیگر.
+- [python.md](python.md): تب Python؛ اجرای کد پایتون خودتان روی داده‌ی نمودار (قرارداد، نمونه‌ها، نصب pandas، مدل امنیتی و محدودیت‌ها).
 - [performance.md](performance.md): اندازه‌گیری و بهینه‌سازی مصرف CPU/رم سرور.
 - [desktop-shell-spec.md](desktop-shell-spec.md): مشخصات رفتاری پوسته‌ی TradingView Desktop (مرجع clean-room).
 - [phase5-contracts.md](phase5-contracts.md): قراردادهای فاز ۵ (سرور، SQLite، ورود، هشدار، Push). سند تاریخی.

@@ -1,7 +1,7 @@
 // "Server & notifications" dialog (docs/phase5-contracts.md §9): Telegram, email, webhook, push, trade recording, LAN access.
 // Every section loads and saves on its own, so one unavailable server module doesn't break the rest.
 import { $, esc, fmtVol } from './store.ts';
-import { api, serverMode } from './sync.ts';
+import { api, apiTrade, serverMode } from './sync.ts';
 import { STANDALONE_WHY, isStandalone } from './servers.ts';
 import { pushState, enablePush, disablePush, type PushState } from './push.ts';
 
@@ -14,6 +14,7 @@ interface NotifySettings {
 interface Delivery { channel: string; ok: boolean; error?: string }
 interface Recorder { symbols: string[]; retentionDays: number; stats: { sym: string; from?: number; to?: number; count: number; approxBytes: number }[] }
 interface Lan { enabled: boolean; port: number; urls: string[]; caFingerprint?: string }
+interface Py { enabled: boolean; remote: boolean; local: boolean; python: string | null; packages: Record<string, boolean> }
 
 const val = (id: string) => $<HTMLInputElement>(id).value.trim();
 const status = (id: string, msg: string, ok?: boolean) => { const el = $(id); el.textContent = msg; el.className = 'st' + (ok === true ? ' up' : ok === false ? ' dn' : ' muted') };
@@ -35,6 +36,14 @@ export function initSettingsUI() {
   $('#srvDlg').addEventListener('click', e => { const ch = (e.target as HTMLElement).dataset.test; if (ch) test(ch) });
   $('#pushBtn').onclick = togglePush;
   $('#notifBtn').onclick = async () => { try { await Notification.requestPermission() } catch {} renderNotif() };
+  const pySet = (id: string, key: 'enabled' | 'remote') => {
+    $(id).onchange = async e => {
+      const on = (e.target as HTMLInputElement).checked;
+      try { await apiTrade('/api/py/config', { body: { [key]: on } }); status('#pySt', 'Saved', true); loadPy() }
+      catch (err) { (e.target as HTMLInputElement).checked = !on; status('#pySt', errMsg(err), false) }
+    };
+  };
+  pySet('#pyOn', 'enabled'); pySet('#pyRemote', 'remote');
   $('#lanOn').onchange = async e => {
     const on = (e.target as HTMLInputElement).checked;
     try { await api('/api/lan', { body: { enabled: on } }); status('#lanSt', on ? 'Enabled' : 'Disabled', true); loadLan() }
@@ -47,8 +56,8 @@ function openServerSettings() {
   $('#srvOff').hidden = serverMode; $('#srvBody').hidden = !serverMode;
   $<HTMLDialogElement>('#srvDlg').showModal();
   if (!serverMode) return;
-  for (const id of ['#tgSt', '#emSt', '#whSt', '#recSt', '#lanSt']) status(id, '');
-  loadNotify(); loadRecorder(); loadLan(); renderPush(); renderNotif();
+  for (const id of ['#tgSt', '#emSt', '#whSt', '#recSt', '#lanSt', '#pySt']) status(id, '');
+  loadNotify(); loadRecorder(); loadLan(); loadPy(); renderPush(); renderNotif();
 }
 
 // ---------- Telegram / email / webhook ----------
@@ -151,6 +160,15 @@ async function saveRecorder() {
 }
 
 // ---------- home network ----------
+async function loadPy() {
+  const on = $<HTMLInputElement>('#pyOn'), remote = $<HTMLInputElement>('#pyRemote');
+  let p: Py;
+  try { p = await apiTrade<Py>('/api/py/status') } catch (e) { on.disabled = remote.disabled = true; $('#pyNote').textContent = ''; $('#pyInfo').textContent = 'Not available on this server'; status('#pySt', errMsg(e), false); return }
+  on.checked = p.enabled; remote.checked = p.remote;
+  on.disabled = remote.disabled = !p.local;
+  $('#pyNote').textContent = p.local ? '' : 'Can only be changed on the server PC';
+  $('#pyInfo').textContent = p.python ? `Python ${p.python} · ${Object.entries(p.packages).map(([k, v]) => `${k} ${v ? '✓' : '✗'}`).join('  ')}` : 'Python 3 not found (install it from python.org, or set CT_PYTHON)';
+}
 async function loadLan() {
   let l: Lan;
   try { l = await api<Lan>('/api/lan') } catch (e) { status('#lanSt', errMsg(e), false); return }
