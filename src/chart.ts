@@ -8,6 +8,7 @@ import { INDICATORS, type Series } from './indicators.ts';
 import { DrawingLayer, type Drawing } from './drawings.ts';
 import { createMainSeries, toSeriesData, transformBars, isPriceBased, typeDefaults, CHART_TYPES, type ChartType, type TypeOpts } from './charttypes.ts';
 import { isExpr, parse, symbols, combine } from './symmath.ts';
+import { fmtDom, isDomSym, isShare } from './market/dominance.ts';
 import { JALALI_MONTHS, JALALI_WEEKDAYS, jalaliIn } from './jalali.ts';
 import type { Settings } from './settings.ts';
 import type { Side } from './trading.ts';
@@ -180,7 +181,7 @@ export class ChartPane {
 
   vb() { return this.replay && !this.replay.picking ? this.bars.slice(0, this.replay.idx) : this.bars }
   lastPrice() { return this.vb().at(-1)?.close }
-  fmt = (p: number) => p.toFixed(this.prec);
+  fmt = (p: number) => (isDomSym(this.cfg.symbol) ? fmtDom(this.cfg.symbol, p) : p.toFixed(this.prec));
   typeOpts(): TypeOpts {
     const s = this.hooks.settings();
     return typeDefaults({
@@ -274,8 +275,12 @@ export class ChartPane {
       timeScale: { borderColor: c('--line'), timeVisible: true, secondsVisible: tfSeconds(this.cfg.tf) < 60, rightOffset: s.rightOffset, tickMarkFormatter: (t: Time, type: number) => tf.tick(t as number, type) },
       localization: { timeFormatter: (t: Time) => tf.full(t as number, this.cfg.tf) },
     });
-    this.prec = s.precision === 'default' ? calcPrec(this.bars.at(-1)?.close || 1) : +s.precision;
-    const pf = { type: 'price' as const, precision: this.prec, minMove: 10 ** -this.prec };
+    const dom = isDomSym(this.cfg.symbol);
+    this.prec = dom ? 2 : s.precision === 'default' ? calcPrec(this.bars.at(-1)?.close || 1) : +s.precision;
+    // Crypto market series: dominance in percent, market caps as 2.45T / 812.30B.
+    const sym = this.cfg.symbol;
+    const pf = dom ? (isShare(sym) ? { type: 'percent' as const, precision: 2, minMove: 0.01 } : { type: 'custom' as const, formatter: (p: number) => fmtDom(sym, p), minMove: 1e9 })
+      : { type: 'price' as const, precision: this.prec, minMove: 10 ** -this.prec };
     const scaleId = s.scaleSide;
     this.main = createMainSeries(this.chart, this.cfg.type, this.typeOpts(), pf, 0);
     this.main.applyOptions({ priceScaleId: scaleId, lastValueVisible: s.lastPriceLabel, priceLineVisible: s.lastPriceLine });

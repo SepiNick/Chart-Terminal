@@ -11,6 +11,7 @@
     "server": "node server/index.ts",
     "test:server": "npm --prefix server test",
     "check:ir": "node server/iran/check.ts",
+    "check:dominance": "node server/dominance/check.ts",
     "audit:html": "node scripts/audit-html.mjs",
     "bench": "node --experimental-strip-types --expose-gc scripts/bench.ts",
     "build:lite": "node lite/build.mjs",
