@@ -7,7 +7,7 @@ import { matches, parseQuery, type Query } from './query.ts';
 
 export type SymType = 'spot' | 'perpetual' | 'future';
 export interface Metrics { perf1w: number | null; perf1m: number | null; perf3m: number | null; perf6m: number | null; perfytd: number | null; volchg: number | null; rsi: number | null; rating: number | null; ma: number | null; osc: number | null; label: string }
-export interface Row { key: string; sym: string; ex: string; base: string; quote: string; type: SymType; price: number; chg: number; qv: number | null; m?: Metrics }
+export interface Row { key: string; sym: string; ex: string; fam: string; base: string; quote: string; type: SymType; price: number; chg: number; qv: number | null; m?: Metrics }
 
 const QUOTES = ['FDUSD', 'USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'USD', 'EUR', 'TRY', 'BRL', 'BTC', 'ETH', 'BNB'];
 export const USD_QUOTES = new Set(['USDT', 'USDC', 'USD', 'BUSD', 'FDUSD', 'TUSD', 'DAI', 'USDE']);
@@ -21,13 +21,30 @@ export function parseSymbol(raw: string): { base: string; quote: string; type: S
   return q ? { base: pair.slice(0, -q.length), quote: q, type } : null;
 }
 
+/** One exchange name can cover several of our sources: Binance spot, USD-M and COIN-M futures are separate ids. */
+const FAMILY: Record<string, { name: string; spot: string[]; deriv: string[] }> = {
+  binance: { name: 'Binance', spot: ['binance'], deriv: ['binanceusdm', 'binancecoinm'] },
+  kucoin: { name: 'KuCoin', spot: ['kucoin'], deriv: ['kucoinfutures'] },
+  kraken: { name: 'Kraken', spot: ['kraken'], deriv: ['krakenfutures'] },
+  coinbase: { name: 'Coinbase', spot: ['coinbase'], deriv: ['coinbaseinternational'] },
+};
+const MEMBER_OF: Record<string, string> = Object.fromEntries(Object.entries(FAMILY).flatMap(([h, f]) => [...f.spot, ...f.deriv].map(id => [id, h])));
+export const familyOf = (ex: string) => MEMBER_OF[ex] ?? ex;
+export const isFamilyMember = (ex: string) => !!MEMBER_OF[ex] && MEMBER_OF[ex] !== ex;
+export const familyName = (id: string) => FAMILY[id]?.name;
+/** The sources to load for the chosen exchanges and symbol types ("Binance" + Perpetual → the USD-M and COIN-M sources). */
+export function sourcesFor(exchanges: string[], types: SymType[]): string[] {
+  const spot = !types.length || types.includes('spot'), deriv = !types.length || types.some(t => t !== 'spot');
+  return [...new Set(exchanges.flatMap(id => { const f = FAMILY[id]; return f ? [...(spot ? f.spot : []), ...(deriv ? f.deriv : [])] : [id] }))];
+}
+
 export interface RawTicker { sym: string; last: number; change: number; quoteVolume: number }
 /** `direct`: Binance spot read by the browser (app symbol "BTCUSDT"); otherwise the symbol is "EXCHANGE:RAW". */
 export function toRow(ex: string, t: RawTicker, direct: boolean): Row | null {
   const p = parseSymbol(t.sym);
   if (!p || !Number.isFinite(t.last) || t.last <= 0) return null;
   const sym = direct ? t.sym : `${ex.toUpperCase()}:${t.sym}`;
-  return { key: `${ex}|${t.sym}`, sym, ex, ...p, price: t.last, chg: t.change, qv: USD_QUOTES.has(p.quote) && Number.isFinite(t.quoteVolume) ? t.quoteVolume : null };
+  return { key: `${ex}|${t.sym}`, sym, ex, fam: familyOf(ex), ...p, price: t.last, chg: t.change, qv: USD_QUOTES.has(p.quote) && Number.isFinite(t.quoteVolume) ? t.quoteVolume : null };
 }
 
 // ---------- metrics from daily bars ----------
@@ -56,7 +73,7 @@ export const needsMetrics = (F: Filters) => Object.keys(F.ranges).some(k => LAZY
 
 /** The conditions that need no daily bars (everything but the lazy fields). */
 export function matchesCheap(r: Row, F: Filters): boolean {
-  if (F.exchanges.length && !F.exchanges.includes(r.ex)) return false;
+  if (F.exchanges.length && !F.exchanges.includes(r.fam)) return false;
   if (F.types.length && !F.types.includes(r.type)) return false;
   if (F.bases.length && !F.bases.includes(r.base)) return false;
   if (F.quotes.length && !F.quotes.includes(r.quote)) return false;

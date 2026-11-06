@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Bar } from '../data.ts';
-import { emptyFilters, matchesAll, matchesCheap, metricsOf, needsMetrics, parseSymbol, safeQuery, sortRows, titleOf, toRow, type Row } from './sprocore.ts';
+import { emptyFilters, familyOf, sourcesFor, matchesAll, matchesCheap, metricsOf, needsMetrics, parseSymbol, safeQuery, sortRows, titleOf, toRow, type Row } from './sprocore.ts';
 
 test('exchange symbols are split into base, quote and type', () => {
   assert.deepEqual(parseSymbol('BTC_USDT'), { base: 'BTC', quote: 'USDT', type: 'spot' });
@@ -56,4 +56,14 @@ test('plain-words condition and sorting, title', () => {
   assert.deepEqual(sortRows(rows, 'sym', false).map(r => r.base), ['A', 'B', 'C']);
   assert.equal(sortRows([row('A_USDT'), row('B_USDT')], 'rsi', true).length, 2, 'missing values sink, nothing is dropped');
   assert.equal(titleOf({ ...emptyFilters(), types: ['perpetual'] }), '*/usdt.p');
+});
+
+test('"Binance" covers its spot and futures sources', () => {
+  assert.deepEqual(sourcesFor(['binance'], []), ['binance', 'binanceusdm', 'binancecoinm']);
+  assert.deepEqual(sourcesFor(['binance'], ['perpetual']), ['binanceusdm', 'binancecoinm']);
+  assert.deepEqual(sourcesFor(['binance'], ['spot']), ['binance']);
+  assert.deepEqual(sourcesFor(['bybit', 'binance'], ['future']), ['bybit', 'binanceusdm', 'binancecoinm']);
+  assert.equal(familyOf('binanceusdm'), 'binance'); assert.equal(familyOf('bybit'), 'bybit');
+  const r = toRow('binanceusdm', { sym: 'BTC_USDT.P', last: 1, change: 0, quoteVolume: 1 }, false)!;
+  assert.equal(matchesCheap(r, { ...emptyFilters(), exchanges: ['binance'], quotes: [] }), true, 'a USD-M row passes the Binance filter');
 });

@@ -99,7 +99,7 @@ async function screener(v: HTMLElement) {
     <input id="scrMin" type="number" value="${esc(scr.minVol)}" title="Minimum 24h volume (quote)" style="width:90px">
     <input id="scrQ" value="${esc(scr.q)}" placeholder="Search" style="width:80px">
     <button id="scrRate" title="Technical rating (daily) of the first 25 rows">Rate</button><button id="scrPro" title="Full-screen screener with filters, tabs and saved presets">Screener Pro ↗</button></div>
-    <div class="row"><input id="scrCond" class="grow" dir="auto" value="${esc(scr.cond)}" placeholder="شرط: RSI زیر ۳۰ و حجم بالای ۱ میلیون · price above sma 50 and change > 3%"><button id="scrCondGo">Filter</button></div>
+    <div class="row"><input id="scrCond" class="grow" dir="auto" value="${esc(scr.cond)}" placeholder="Condition in words, e.g. RSI below 30 and volume above 1 million · price above sma 50 and change > 3%"><button id="scrCondGo">Filter</button></div>
     <div id="scrCondOut" class="muted"></div><div id="scrOut" class="muted">Loading…</div>`;
   const read = () => { Object.assign(scr, { ex: $<HTMLSelectElement>('#scrEx').value, quote: $<HTMLInputElement>('#scrQuote').value.trim().toUpperCase(), minVol: +$<HTMLInputElement>('#scrMin').value || 0, q: $<HTMLInputElement>('#scrQ').value.trim().toUpperCase() }); store.set('mktScr', scr); draw() };
   v.querySelector('.row')!.addEventListener('change', read);

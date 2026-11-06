@@ -155,6 +155,7 @@ export const FA: Record<string, string> = {
   'Stocks & ETFs': 'سهام و ETF',
   'Futures': 'فیوچرز',
   'Sign up': 'ثبت‌نام',
+  'Condition in words, e.g. RSI below 30 and volume above 1 million · price above sma 50 and change > 3%': 'شرط به زبان ساده، مثلاً: RSI زیر ۳۰ و حجم بالای ۱ میلیون · price above sma 50 and change > 3%',
   'Sign in with Telegram': 'ورود با تلگرام',
   'Pop out to its own window (another monitor)': 'خارج کردن در پنجره‌ی جدا (مانیتور دیگر)',
   'Pop out this panel to its own window (another monitor)': 'خارج کردن این پنل در پنجره‌ی جدا (مانیتور دیگر)',

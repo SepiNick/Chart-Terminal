@@ -5,7 +5,7 @@ import { esc, fmtVol, calcPrec, store, toast } from './store.ts';
 import { isStandalone } from './servers.ts';
 import { CATALOG } from './providers/catalog.ts';
 import { UNUSABLE } from './exchangegroups.ts';
-import { LAZY, emptyFilters, matchesAll, matchesCheap, metricsOf, needsMetrics, safeQuery, sortRows, titleOf, toRow, valueOf, type Field, type Filters, type Metrics, type RawTicker, type Row, type SymType } from './market/sprocore.ts';
+import { LAZY, emptyFilters, familyName, isFamilyMember, sourcesFor, matchesAll, matchesCheap, metricsOf, needsMetrics, safeQuery, sortRows, titleOf, toRow, valueOf, type Field, type Filters, type Metrics, type RawTicker, type Row, type SymType } from './market/sprocore.ts';
 
 export interface ScreenerProHost { openSymbol(sym: string): void; watchlists(): { id: string; name: string; syms: string[] }[]; openClassic(): void }
 
@@ -65,29 +65,39 @@ async function rowsOf(ex: string): Promise<Row[]> {
 }
 async function reload(force = false) {
   if (force) rowsCache.clear();
-  const me = ++loading, want = S.f.exchanges.length ? S.f.exchanges : ['binance'];
-  status = 'Loading…'; draw();
-  const out: Row[] = [], errs: string[] = [];
-  await Promise.all(want.map(async ex => { try { out.push(...(await rowsOf(ex))) } catch (e) { errs.push(`${ex}: ${(e as Error).message}`) } }));
-  if (me !== loading) return;
-  all = out; status = errs.length ? errs.join(' · ') : ''; shown = 100; draw();
+  const me = ++loading, want = sourcesFor(S.f.exchanges.length ? S.f.exchanges : ['binance'], isStandalone() ? ['spot'] : S.f.types);
+  all = []; shown = 100; status = `Loading ${want.length} source${want.length > 1 ? 's' : ''}…`; draw();
+  const errs: string[] = []; let done = 0;
+  // Each source shows up as soon as it answers: a slow exchange must not keep the table empty.
+  await Promise.all(want.map(async ex => {
+    try { const rows = await rowsOf(ex); if (me === loading) all = all.concat(rows) } catch (e) { errs.push(`${ex}: ${(e as Error).message}`) }
+    if (me !== loading) return;
+    done++; status = [done < want.length ? `Loading ${done}/${want.length} sources…` : '', ...errs].filter(Boolean).join(' · '); draw();
+  }));
 }
-/** Daily-bar metrics for `list` (5 at a time); the table redraws as they arrive. */
+/**
+ * Daily-bar metrics for `list`, 3 requests at a time. They go through the same exchange connection a chart uses, so they stop the moment
+ * the screener closes or asks for a different set: a queue of 100 requests must never sit in front of the chart the user just opened.
+ */
+let epoch = 0, activeSig = '';
 async function analyze(list: Row[]) {
-  const todo = list.filter(r => !metrics.has(r.key));
+  const sig = `${list.length}:${list[0]?.key}:${list.at(-1)?.key}`;
+  if (sig === activeSig && analyzing) return;   // already working on exactly this set
+  activeSig = sig;
+  const my = ++epoch, todo = list.filter(r => !metrics.has(r.key));
   wanted = list.length; analyzed = list.length - todo.length;
   if (!todo.length) return;
   let next = 0;
   const worker = async () => {
     analyzing++;
-    while (next < todo.length) {
+    while (next < todo.length && my === epoch) {
       const r = todo[next++];
       try { metrics.set(r.key, metricsOf(await dailyBars(r), r.qv)) } catch { metrics.set(r.key, null) }
       analyzed++; scheduleDraw();
     }
     analyzing--;
   };
-  void Promise.all(Array.from({ length: Math.min(5, todo.length) }, worker));
+  void Promise.all(Array.from({ length: Math.min(3, todo.length) }, worker));
 }
 const scheduleDraw = () => { if (!drawTimer) drawTimer = window.setTimeout(() => { drawTimer = 0; draw() }, 400) };
 
@@ -111,7 +121,7 @@ function chip(key: string, name: string, value: string): string {
   return value ? `<span class="sp-chip on"><button data-chip="${key}">${esc(value)}</button><button class="x" data-clear="${key}" aria-label="Clear ${esc(name)}">×</button></span>` : `<button class="sp-chip" data-chip="${key}">${esc(name)} ▾</button>`;
 }
 const rangeText = (g?: { min?: number; max?: number }) => (g && (g.min != null || g.max != null) ? `${g.min ?? ''}…${g.max ?? ''}` : '');
-const exName = (id: string) => CATALOG.find(p => p.id === id)?.name ?? (id === 'binance' ? 'Binance' : id);
+const exName = (id: string) => familyName(id) ?? CATALOG.find(p => p.id === id)?.name ?? id;
 const TYPE_NAMES: Record<SymType, string> = { spot: 'Spot', perpetual: 'Perpetual', future: 'Futures' };
 
 function chipsHtml(): string {
@@ -194,7 +204,7 @@ const menu = (anchor: HTMLElement, items: [string, () => void][]) => pop(anchor,
 function exchangeOptions() {
   const rank = (id: string) => { const c = CATALOG.find(p => p.id === id)?.category; return c === 'perp' ? 0 : c === 'spot' ? 1 : 2 };
   const list = isStandalone() ? [{ id: 'binance', name: 'binance' }] : [{ id: 'binance', name: 'binance' }, ...exchanges.filter(x => x.id !== 'binance')];
-  return list.filter(x => !LOCAL_ONLY.has(x.id) && !UNUSABLE.has(x.id)).sort((a, b) => rank(a.id) - rank(b.id) || exName(a.id).localeCompare(exName(b.id))).map(x => ({ v: x.id, l: exName(x.id) }));
+  return list.filter(x => !LOCAL_ONLY.has(x.id) && !UNUSABLE.has(x.id) && !isFamilyMember(x.id)).sort((a, b) => rank(a.id) - rank(b.id) || exName(a.id).localeCompare(exName(b.id))).map(x => ({ v: x.id, l: exName(x.id) }));
 }
 const distinct = (f: (r: Row) => string) => { const n = new Map<string, number>(); for (const r of all) n.set(f(r), (n.get(f(r)) ?? 0) + 1); return [...n.entries()].sort((a, b) => b[1] - a[1]).map(([v]) => ({ v, l: v })) };
 
@@ -230,7 +240,7 @@ function exportCsv() {
   const csv = [['symbol', 'exchange', ...cols.map(c => COLS[c].name + (COLS[c].sub ? ' ' + COLS[c].sub : ''))].join(','), ...list.map(r => [`${r.base}${r.quote}`, r.ex, ...cols.map(c => text(r, c))].join(','))].join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'screener-pro.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
 }
-function close() { if (root) root.hidden = true }
+function close() { epoch++; activeSig = ''; if (root) root.hidden = true }
 
 function savePreset(anchor: HTMLElement) {
   const names = Object.keys(presets);
