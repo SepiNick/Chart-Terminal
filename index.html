@@ -36,12 +36,15 @@
   <button id="syncBtn" title="Sync across charts">🔗</button>
   <button id="layoutsBtn" title="Save / load layouts"><span id="layoutName">Unnamed</span> ▾</button>
   <button id="srvBtn" title="Server &amp; notifications" aria-label="Server and notifications">🔔</button>
-  <button id="monBtn" title="Monitors: pop out to other screens, move windows">🖥</button>
-  <button id="settingsBtn" title="Chart settings">⚙</button>
   <button id="fullBtn" title="Fullscreen">⛶</button>
-  <button id="shotBtn" title="Snapshot">📷</button>
-  <button id="langBtn" title="زبان / Language">فا</button>
-  <button id="themeBtn" title="Theme">◐</button>
+  <button id="monBtn" title="Multi-monitor: pop out to other screens, move windows">🖥</button>
+  <button id="menuBtn" title="Menu: settings, theme, language" aria-label="Menu">☰</button>
+  <span hidden>
+    <button id="settingsBtn" title="Chart settings">⚙</button>
+    <button id="shotBtn" title="Snapshot">📷</button>
+    <button id="langBtn" title="زبان / Language">فا</button>
+    <button id="themeBtn" title="Theme">◐</button>
+  </span>
 </header>
 <div id="replayBar">
   <button id="rpSelect" title="Select bar">✂ Select bar</button>
@@ -60,6 +63,7 @@
 <main id="body">
   <nav id="tools"></nav>
   <section id="center">
+    <div id="tabs"></div>
     <div id="favBar"></div>
     <div id="favGuide" aria-hidden="true"></div>
     <div id="grid"></div>
@@ -78,7 +82,7 @@
       <div class="tabs" id="bTabs">
         <button data-tab="pine">Pine Editor</button><button data-tab="python" title="Run your own Python code on this chart's data">Python</button><button data-tab="tester">Strategy Tester</button>
         <button data-tab="positions" class="on">Positions</button><button data-tab="orders">Orders</button><button data-tab="history">History</button>
-        <span class="grow"></span><span id="acctLine" class="muted"></span><button id="bToggle" class="x" title="Collapse">▾</button>
+        <span class="grow"></span><span id="acctLine" class="muted"></span><button id="bToggle" class="x" title="Collapse" aria-label="Collapse panel"></button>
       </div>
       <div class="bpane on" id="b-positions"><table id="posT"></table></div>
       <div class="bpane" id="b-orders"><table id="ordT"></table></div>

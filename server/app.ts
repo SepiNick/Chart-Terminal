@@ -15,7 +15,7 @@ await import('./alerts/index.ts');
 if (!isPublic) { await import('./forward.ts'); await import('./recorder.ts'); await import('./dominance/record.ts') }
 await import('./share.ts');
 await import('./derivs.ts');
-if (!isPublic) await import('./brokers/index.ts');
+if (!isPublic) { await import('./brokers/index.ts'); await import('./providers.ts') }
 await import('./marketdata.ts');
 await import('./sec.ts');
 if (!isPublic || process.env.CT_ENABLE_PTR === '1') await import('./ptr.ts');   // shells out to pdftotext: opt-in on a public server

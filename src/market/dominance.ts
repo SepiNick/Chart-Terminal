@@ -16,9 +16,20 @@ export const DOM_SYMS: DomSym[] = [
   { sym: 'USDC.D', name: 'USDC dominance', kind: 'share' },
   { sym: 'OTHERS.D', name: 'Others dominance (without the top 10)', kind: 'share' },
   { sym: 'STABLE.D', name: 'Stablecoin share', kind: 'share' },
+  { sym: 'BTCETH.D', name: 'Bitcoin + Ethereum dominance', kind: 'share' },
+  { sym: 'ALTS.D', name: 'Altcoin share (everything but BTC, ETH and stablecoins)', kind: 'share' },
   { sym: 'TOTAL', name: 'Total crypto market cap', kind: 'cap' },
   { sym: 'TOTAL2', name: 'Total market cap without BTC', kind: 'cap' },
   { sym: 'TOTAL3', name: 'Total market cap without BTC and ETH', kind: 'cap' },
+  { sym: 'TOTAL4', name: 'Total market cap without the top 10', kind: 'cap' },
+  { sym: 'TOTALES', name: 'Total market cap without stablecoins', kind: 'cap' },
+  { sym: 'TOTAL2ES', name: 'Total market cap without BTC and stablecoins', kind: 'cap' },
+  { sym: 'TOTAL3ES', name: 'Total market cap without BTC, ETH and stablecoins', kind: 'cap' },
+  { sym: 'STABLE', name: 'Stablecoin market cap', kind: 'cap' },
+  { sym: 'BTC', name: 'Bitcoin market cap', kind: 'cap' },
+  { sym: 'ETH', name: 'Ethereum market cap', kind: 'cap' },
+  { sym: 'USDT', name: 'Tether market cap', kind: 'cap' },
+  { sym: 'USDC', name: 'USDC market cap', kind: 'cap' },
 ];
 const bare = (s: string) => s.trim().toUpperCase().replace(/^CRYPTOCAP:/, '');
 export const domOf = (s: string) => DOM_SYMS.find(d => d.sym === bare(s));
@@ -50,6 +61,17 @@ export function valueOf(sym: string, c: Comp): number {
     case 'TOTAL': return c.total;
     case 'TOTAL2': return c.total - c.btc;
     case 'TOTAL3': return c.total - c.btc - c.eth;
+    case 'TOTAL4': return c.total - c.top10;
+    case 'TOTALES': return c.total - c.stable;
+    case 'TOTAL2ES': return c.total - c.btc - c.stable;
+    case 'TOTAL3ES': return c.total - c.btc - c.eth - c.stable;
+    case 'BTCETH.D': return share(c.btc + c.eth, c.total);
+    case 'ALTS.D': return share(c.total - c.btc - c.eth - c.stable, c.total);
+    case 'STABLE': return c.stable;
+    case 'BTC': return c.btc;
+    case 'ETH': return c.eth;
+    case 'USDT': return c.usdt;
+    case 'USDC': return c.usdc;
   }
   return NaN;
 }

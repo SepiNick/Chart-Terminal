@@ -23,7 +23,7 @@ io.candles = async (pair, tf) => { const p = pair === 'BTCUSDT' ? 100 : pair ===
 test('exchange list, markets with the approximation flag, bars through /api/bars logic', async () => {
   assert.ok(M.SRC['cryptocap'] && Object.keys(M.SRC).includes('cryptocap'));
   const ms = (await M.SRC['cryptocap'].markets()) as unknown as { sym: string; approxUntil: number | null; note: string; type: string }[];
-  assert.deepEqual(ms.map(m => m.sym), ['BTC.D', 'ETH.D', 'USDT.D', 'USDC.D', 'OTHERS.D', 'STABLE.D', 'TOTAL', 'TOTAL2', 'TOTAL3']);
+  assert.deepEqual(ms.map(m => m.sym), ['BTC.D', 'ETH.D', 'USDT.D', 'USDC.D', 'OTHERS.D', 'STABLE.D', 'BTCETH.D', 'ALTS.D', 'TOTAL', 'TOTAL2', 'TOTAL3', 'TOTAL4', 'TOTALES', 'TOTAL2ES', 'TOTAL3ES', 'STABLE', 'BTC', 'ETH', 'USDT', 'USDC']);
   assert.ok(ms.every(m => m.approxUntil === null && /approximation from price × current supply/.test(m.note)));
   const r = await M.bars('cryptocap', 'BTC.D', '1h', undefined, 1000);
   assert.equal(r.bars.length, 3);

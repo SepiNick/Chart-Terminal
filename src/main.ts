@@ -12,6 +12,8 @@ import { styleFor } from './drawings.ts';
 import { sizeOf } from './tools/basic.ts';
 import { isExpr, parse } from './symmath.ts';
 import { showMenu, type MenuItem } from './menu.ts';
+import { openConnections, initConnections } from './connections.ts';
+import { exchangeOptions } from './exchangegroups.ts';
 import { newAccount, onPrice, type Account, type Order, type OrderType, type Side } from './trading.ts';
 import { PaperBroker, fromOrder, toOrder } from './broker/paper.ts';
 import { registerBroker, activeBroker, allBrokers, setActiveBroker, onBrokers } from './broker/registry.ts';
@@ -71,6 +73,8 @@ const DEFAULT_LAYOUT: Layout = { mode: '1', panes: [{ symbol: 'BTCUSDT', tf: '1h
 const st = {
   settings: loadSettings(),
   layout: store.get<Layout>('layout', DEFAULT_LAYOUT),
+  tabs: store.get<{ name: string; layout: Layout }[]>('tabs', []),
+  tab: store.get<number>('tab', 0),
   layoutName: store.get<string>('layoutName', 'Unnamed'),
   layouts: store.get<Record<string, Layout>>('layouts', {}),
   autosave: store.get<boolean>('autosave', true),
@@ -87,6 +91,10 @@ const st = {
   maximized: false,
 };
 st.layout = { ...DEFAULT_LAYOUT, ...st.layout, sync: { ...DEFAULT_LAYOUT.sync, ...st.layout.sync } };
+// Workspace tabs: each tab is its own multi-chart layout; st.layout is always the open tab's.
+if (!st.tabs.length) st.tabs = [{ name: '', layout: st.layout }];
+st.tab = Math.min(st.tab, st.tabs.length - 1);
+st.tabs[st.tab].layout = st.layout;
 let panes: ChartPane[] = [];
 const lastPx: Record<string, number> = {}, tick24: Record<string, Ticker> = {}, alertLog: string[] = [];
 const active = () => panes[st.layout.active] ?? panes[0];
@@ -105,6 +113,7 @@ onServer('state', m => {
 const saveLayout = () => {
   st.layout.panes = panes.map((p, i) => ({ ...p.cfg, link: st.layout.panes[i]?.link }));
   store.set('layout', st.layout);
+  st.tabs[st.tab].layout = st.layout; store.set('tabs', st.tabs);
   pushCfg();
   if (st.autosave && st.layoutName !== 'Unnamed') { st.layouts[st.layoutName] = structuredClone(st.layout); store.set('layouts', st.layouts) }
 };
@@ -679,7 +688,7 @@ const styleOf = (type: string, color: string) => styleFor(TOOL_MAP.get(type)!, c
 let allSymbols: string[] = [];
 fetchSymbols().then(s => (allSymbols = s.sort())).catch(() => {});
 // Search tabs of the Iranian sources: Tehran bourse instrument kinds, tgju groups, Nobitex quote currencies.
-const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'], cryptocap: ['all', 'share', 'cap'] };
+const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'], cryptocap: ['all', 'share', 'cap'], oanda: ['all', 'forex', 'metal', 'cfd'], alpaca: ['all', 'stock'] };
 let searchMode: 'symbol' | 'compare' = 'symbol', searchQuote = 'USDT', searchEx = store.get<string>('searchEx', 'binance');
 const marketCache = new Map<string, RemoteMarket[]>();
 let exchangesLoaded = false;
@@ -688,7 +697,7 @@ async function loadExchanges() {
   try {
     const ex = await fetchExchanges();
     exchangesLoaded = true;
-    $('#searchEx').innerHTML = '<option value="binance">Binance (direct)</option>' + ex.map(x => `<option value="${esc(x.id)}">${esc(x.name && x.name !== x.id ? x.name : x.id)}</option>`).join('');
+    $('#searchEx').innerHTML = exchangeOptions(ex);
     $<HTMLSelectElement>('#searchEx').value = searchEx;
   } catch (e) { if (isStandalone()) searchEx = 'binance'; else if (searchEx !== 'binance') toast((e as Error).message, 6000) }
 }
@@ -705,7 +714,7 @@ async function renderSearch() {
   const q = $<HTMLInputElement>('#searchIn').value.trim().toUpperCase();
   const row = (sym: string, desc: string, i: number) => `<div class="sl${i === 0 ? ' sel' : ''}" data-s="${esc(sym)}"><b>${esc(sym)}</b><span class="muted">${esc(desc)}</span></div>`;
   if (searchEx !== 'binance') {
-    const tabs = IR_TABS[searchEx] ?? (searchEx === 'fx' ? ['all', 'forex', 'metal', 'energy', 'index', 'commodity'] : ['all', 'spot', 'swap', 'future']);
+    const tabs = IR_TABS[searchEx] ?? (searchEx === 'fx' ? ['all', 'forex', 'metal', 'energy', 'index', 'commodity', 'stock', 'crypto'] : ['all', 'spot', 'swap', 'future']);
     if (!tabs.includes(searchQuote)) searchQuote = 'all';
     $('#searchTabs').innerHTML = tabs.map(x => `<button type="button" data-q="${x}" class="${x === searchQuote ? 'on' : ''}">${x === 'swap' ? 'perpetual' : x}</button>`).join('');
     let ms = marketCache.get(searchEx);
@@ -771,6 +780,48 @@ function openTfDialog(first: string) {
 const tfHint = () => { const t = parseTf($<HTMLInputElement>('#tfIn').value); $('#tfHint').textContent = t ? tfLabel(t) : 'Not a valid interval' };
 $('#tfIn').oninput = tfHint;
 $<HTMLFormElement>('#tfForm').addEventListener('submit', () => { const t = parseTf($<HTMLInputElement>('#tfIn').value); if (t) setTf(t) });
+
+// ---------- workspace tabs ----------
+function renderWsTabs() {
+  const bar = $('#tabs');
+  bar.innerHTML = st.tabs.map((t, i) => {
+    const sym = t.layout.panes[t.layout.active]?.symbol ?? t.layout.panes[0].symbol, px = lastPx[sym];
+    const label = t.name && !/^Tab \d+$/.test(t.name) ? t.name : sym;
+    return `<span class="tab${i === st.tab ? ' on' : ''}" data-i="${i}" title="Double-click to rename">${esc(label)}${px != null ? `<span class="px">${px}</span>` : ''}${st.tabs.length > 1 ? '<b class="x" data-x="1" title="Close tab">×</b>' : ''}</span>`;
+  }).join('') + '<button type="button" id="tabAdd" title="New tab">+</button>';
+}
+setInterval(renderWsTabs, 3000);
+function openWsTab(i: number) {
+  if (i === st.tab || !st.tabs[i]) return;
+  saveLayout();
+  st.tab = i; store.set('tab', i);
+  st.layout = st.tabs[i].layout; st.layoutName = 'Unnamed'; store.set('layoutName', 'Unnamed'); // so autosave can't overwrite a named layout
+  st.maximized = false; buildLayout(); renderWsTabs();
+}
+$('#tabs').onclick = e => {
+  const el = e.target as HTMLElement;
+  if (el.id === 'tabAdd') {
+    saveLayout();
+    const l = structuredClone(DEFAULT_LAYOUT); l.panes[0].symbol = active().cfg.symbol;
+    st.tabs.push({ name: '', layout: l });
+    st.tab = st.tabs.length - 1; store.set('tab', st.tab);
+    st.layout = l; st.layoutName = 'Unnamed'; st.maximized = false; buildLayout(); renderWsTabs(); return;
+  }
+  const t = el.closest<HTMLElement>('.tab'); if (!t) return;
+  const i = +t.dataset.i!;
+  if (!el.dataset.x) return openWsTab(i);
+  if (!confirm('Close this tab?')) return;
+  st.tabs.splice(i, 1);
+  const next = Math.min(i < st.tab ? st.tab - 1 : st.tab, st.tabs.length - 1);
+  st.tab = next; store.set('tab', next);
+  st.layout = st.tabs[next].layout; st.layoutName = 'Unnamed'; st.maximized = false; buildLayout(); renderWsTabs();
+};
+$('#tabs').ondblclick = e => {
+  const t = (e.target as HTMLElement).closest<HTMLElement>('.tab'); if (!t) return;
+  const i = +t.dataset.i!, n = prompt('Tab name (empty = symbol)', st.tabs[i].name)?.trim();
+  if (n != null) { st.tabs[i].name = n; store.set('tabs', st.tabs); renderWsTabs() }
+};
+renderWsTabs();
 
 // ---------- layout manager ----------
 function renderLayouts() {
@@ -1256,7 +1307,7 @@ $('#bResize').onmousedown = e => {
 $('#bottom').onclick = e => {
   const el = e.target as HTMLElement;
   if (el.dataset.tab) showBottom(el.dataset.tab);
-  if (el.id === 'bToggle') { $('#bottom').classList.toggle('collapsed'); el.textContent = $('#bottom').classList.contains('collapsed') ? '▴' : '▾' }
+  if (el.id === 'bToggle') { $('#bottom').classList.toggle('collapsed') }
   const s = el.dataset.close, oid = el.dataset.cancel, b = activeBroker();
   const fail = (e: unknown) => toast(`${b?.account.label}: ${errMsg(e)}`, 6000);
   if (b && s) b.closePosition(s).catch(fail);
@@ -1422,6 +1473,24 @@ addEventListener('storage', e => {
   }
 });
 function saveWatchLocal() { connectTickers(); renderWatch() }   // like saveWatch, without writing it back
+initConnections({ openMarkets: (ex, perp) => { searchEx = ex; store.set('searchEx', ex); searchQuote = perp ? 'swap' : 'USDT'; openSearch('') } });
+$('#menuBtn').onclick = e => {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect(), click = (id: string) => () => $(id).click();
+  showMenu(r.right - 220, r.bottom + 2, [
+    { label: 'Settings', icon: '⚙', action: click('#settingsBtn') },
+    { label: 'New tab', icon: '＋', action: click('#tabAdd') },
+    { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
+    { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
+    { sep: true },
+    { head: 'Theme' },
+    ...(['dark', 'light'] as const).map(t => ({ label: t === 'dark' ? 'Dark' : 'Light', checked: st.settings.theme === t, action: () => { if (st.settings.theme !== t) $('#themeBtn').click() } })),
+    { head: 'Language' },
+    { label: 'English', checked: document.documentElement.lang !== 'fa', action: () => { if (document.documentElement.lang === 'fa') $('#langBtn').click() } },
+    { label: 'فارسی', checked: document.documentElement.lang === 'fa', action: () => { if (document.documentElement.lang !== 'fa') $('#langBtn').click() } },
+    { sep: true },
+    { label: 'Snapshot', icon: '📷', action: click('#shotBtn') },
+  ]);
+};
 $('#monBtn').onclick = e => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); void monitorsMenu(r.left, r.bottom + 2) };
 initWindows({
   panes: () => panes, active: () => st.layout.active,

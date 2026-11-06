@@ -132,7 +132,9 @@ export const FA: Record<string, string> = {
   'Drag to move the toolbar (arrow keys move it, Enter snaps, double-click resets)': 'برای جابه‌جایی نوار بکشید (کلیدهای جهت‌دار حرکتش می‌دهند، Enter می‌چسباند، دوبار کلیک بازنشانی می‌کند)',
   'Switch between horizontal and vertical': 'تغییر بین حالت افقی و عمودی', 'Expand the toolbar': 'باز کردن نوار', 'Collapse the toolbar': 'جمع کردن نوار',
   // multi-monitor: pop-out windows
-  'Monitors: pop out to other screens, move windows': 'مانیتورها: خارج کردن پنل به صفحه‌ی دیگر و جابه‌جایی پنجره‌ها',
+  'Multi-monitor: pop out to other screens, move windows': 'مانیتورها: خارج کردن پنل به صفحه‌ی دیگر و جابه‌جایی پنجره‌ها',
+  'Connections (live data)…': 'اتصال‌ها (دیتای زنده)…',
+  'Menu: settings, theme, language': 'منو: تنظیمات، تم، زبان',
   'Pop out to its own window (another monitor)': 'خارج کردن در پنجره‌ی جدا (مانیتور دیگر)',
   'Pop out this panel to its own window (another monitor)': 'خارج کردن این پنل در پنجره‌ی جدا (مانیتور دیگر)',
   'Pop out to its own window': 'خارج کردن در پنجره‌ی جدا',

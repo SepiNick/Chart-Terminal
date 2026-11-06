@@ -16,6 +16,7 @@ import { isPublic } from './core/mode.ts';
 import { limits } from './core/quota.ts';
 import { IRAN } from './iran/index.ts';
 import { DOMINANCE, dom } from './dominance/index.ts';
+import { LIVE } from './live/index.ts';
 import { DOM_EX, domOf } from '../src/market/dominance.ts';
 import { probeIran, timed } from './iran/probe.ts';
 
@@ -27,7 +28,7 @@ import { HttpError, bad, clients, onWs, onWsClose, route, type WsClient } from '
 export const SYM_RE = /^[A-Z0-9_.\u0600-\u06FF]{1,40}$/, EX_RE = /^[a-z0-9]{2,30}$/;
 /** Sources served here rather than through CCXT: Yahoo ('fx') and the local MetaTrader 5 bridge ('mt5'). */
 /** Local sources of the Iranian source shape: the Iranian ones (private servers, or CT_IRAN_PUBLIC) plus the crypto market series (always: fixed hosts). */
-export const SRC = { ...IRAN, ...DOMINANCE };
+export const SRC = { ...IRAN, ...DOMINANCE, ...LIVE };
 const LOCAL = new Set([...(MT5 ? ['fx', 'mt5'] : ['fx']), ...Object.keys(SRC)]);
 
 
