@@ -118,7 +118,7 @@ export function accountMenu() {
   injectStyle();
   const top = document.getElementById('top'); if (!top || document.getElementById('acctBtn')) return;
   const b = document.createElement('button'); b.id = 'acctBtn'; b.innerHTML = '👤<i></i>';
-  top.insertBefore(b, document.getElementById('settingsBtn'));
+  top.insertBefore(b, document.getElementById('menuBtn'));
   let st: SyncStatus = 'synced';
   onSyncStatus(s => { st = s; b.querySelector('i')!.className = s; b.title = `Account · ${LABEL[s]}` });
   b.onclick = e => {
