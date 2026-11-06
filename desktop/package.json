@@ -13,6 +13,7 @@
     "start": "node build.mjs && electron .",
     "dist": "node build.mjs && electron-builder",
     "dist:win": "node build.mjs && electron-builder --win",
+    "dist:win:signed": "node sign-check.mjs && node build.mjs && electron-builder --win",
     "dist:mac": "node build.mjs && electron-builder --mac",
     "dist:linux": "node build.mjs && electron-builder --linux"
   },

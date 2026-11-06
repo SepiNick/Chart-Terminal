@@ -60,7 +60,8 @@ async function test(p: Provider): Promise<{ ok: boolean; message: string }> {
     }
     return { ok: false, message: 'No test available for this provider' };
   } catch (e) {
-    const m = (e as Error).message ?? String(e);
+    let m = (e as Error).message ?? String(e);
+    for (const k of p.keys ?? []) { const v = secretGet(name(p.id, k.name)); if (v && v.length > 3) m = m.split(v).join('***') }   // a saved key must never echo back in an error
     return { ok: false, message: m.startsWith('Save the') ? m : `Could not reach the provider: ${m.slice(0, 120)}` };
   }
 }
