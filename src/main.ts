@@ -1488,6 +1488,8 @@ $('#menuBtn').onclick = e => {
     { label: 'English', checked: document.documentElement.lang !== 'fa', action: () => { if (document.documentElement.lang === 'fa') $('#langBtn').click() } },
     { label: 'فارسی', checked: document.documentElement.lang === 'fa', action: () => { if (document.documentElement.lang !== 'fa') $('#langBtn').click() } },
     { sep: true },
+    ...(serverMode ? [{ label: 'Back up to Telegram…', icon: '✈', action: () => void import('./tgbackup.ts').then(m => m.backupToTelegram()) }] : []),
+    { label: 'Restore from backup file…', icon: '⤒', action: () => void import('./tgbackup.ts').then(m => m.restoreFromFile()) },
     { label: 'Snapshot', icon: '📷', action: click('#shotBtn') },
   ]);
 };

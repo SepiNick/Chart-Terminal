@@ -1,0 +1,47 @@
+# HawkScan config for the Chart Terminal server (private mode).
+# Run a throwaway server with its own data folder (never your real one), set its first password, save a Bearer device token
+# (POST /api/auth/login with {"password": …, "device": "hawkscan"}), then:
+#   APP_HOST=http://127.0.0.1:8788 SCAN_TOKEN=<token> hawk scan stackhawk.yml
+# openapi.json is generated from the route() calls: node scripts/gen-openapi.mjs
+app:
+  applicationId: 04ae8ae7-1c79-4d1e-95ef-0783b6efc93f
+  env: ${STACKHAWK_ENV:Development}
+  host: ${APP_HOST:http://127.0.0.1:8788}
+  openApiConf:
+    filePath: openapi.json
+  authentication:
+    external:
+      type: TOKEN
+      values:
+        - type: TOKEN
+          tokenType: Bearer
+          value:
+            name: Authorization
+            val: ${SCAN_TOKEN}
+    testPath:
+      path: /api/providers
+      success: ".*200.*"
+  # Scanning must not end its own login or change the password it logs in with, and must not make the server call outward.
+  excludePaths:
+    - /api/auth/logout
+    - /api/auth/password
+    - /api/auth/setup
+    - /api/auth/sessions.*
+    - /api/auth/devices.*
+    - /api/providers/.*/test
+hawk:
+  spider:
+    maxDurationMinutes: 5
+hawkAddOn:
+  replacer:
+    rules:
+      # State-changing requests are refused without this header (CSRF guard), so every request carries it.
+      - matchString: x-ct-client
+        replacement: hawkscan01
+tags:
+  - name: _STACKHAWK_AGENT
+    value: ${HAWK_AGENT:none}
+  - name: _STACKHAWK_GIT_COMMIT_SHA
+    value: ${COMMIT_SHA:none}
+  - name: _STACKHAWK_GIT_BRANCH
+    value: ${BRANCH_NAME:none}

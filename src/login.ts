@@ -66,11 +66,38 @@ export async function authPost<T = { ok: true }>(path: string, body: Record<stri
 }
 
 export function loginScreen() {
-  return screen(`<h2>Chart Terminal</h2><p class="muted">Sign in to your server.</p>
+  const done = screen(`<h2>Chart Terminal</h2><p class="muted">Sign in to your server.</p>
     <input type="password" name="pw" placeholder="Password" autocomplete="current-password">`, async f => {
     const pw = val(f, 'pw'); if (!pw) throw Error('Enter your password');
     await authPost('/api/auth/login', { password: pw });   // the server's message covers wrong password and lockout
-  });
+  }, '<button type="button" data-tg hidden>Sign in with Telegram</button><div class="muted" data-tgmsg></div>');
+  void telegramButton();
+  return done;
+}
+
+/** "Sign in with Telegram": shown only when the server has a bot and a personal chat set up (Notifications settings). */
+async function telegramButton() {
+  const btn = document.querySelector<HTMLButtonElement>('.ct-auth [data-tg]'), msg = document.querySelector<HTMLElement>('.ct-auth [data-tgmsg]');
+  if (!btn || !msg) return;
+  const on = await api<{ enabled: boolean }>('/api/auth/telegram/status').then(r => r.enabled, () => false);
+  if (!on) return;
+  btn.hidden = false;
+  btn.onclick = async () => {
+    btn.disabled = true; msg.textContent = '';
+    try {
+      const s = await authPost<{ id: string; url: string; expires: number }>('/api/auth/telegram/start', {});
+      window.open(s.url, '_blank', 'noopener');
+      msg.innerHTML = `Open Telegram and tap <b>Start</b> in the bot chat. <a href="${esc(s.url)}" target="_blank" rel="noopener">Open the chat again</a>`;
+      const until = Date.now() + s.expires * 1000;
+      while (Date.now() < until && document.body.contains(btn)) {
+        await new Promise(r => setTimeout(r, 2000));
+        const r = await authPost<{ pending?: boolean }>('/api/auth/telegram/poll', { id: s.id });
+        if (!r.pending) return location.reload();
+      }
+      msg.textContent = 'This sign-in expired. Try again.';
+    } catch (e) { msg.textContent = (e as Error).message }
+    finally { btn.disabled = false }
+  };
 }
 
 /** Modal dialog built from HTML; `wire` gets the form and a close function. Escape doesn't close it unless `escapable`. */

@@ -82,6 +82,7 @@ interface TelegramCfg { chatId: string }
 interface EmailCfg { host: string; port: number; secure: boolean; user: string; from: string; to: string }
 interface WebhookCfg { url: string }
 const tgCfg = () => configGet<TelegramCfg>('notify.telegram', { chatId: '' });
+export const tgChatId = () => tgCfg().chatId;
 const emailCfg = () => configGet<EmailCfg>('notify.email', { host: '', port: 587, secure: false, user: '', from: '', to: '' });
 const hookCfg = () => configGet<WebhookCfg>('notify.webhook', { url: '' });
 
@@ -233,7 +234,7 @@ route('POST', '/api/notify/push/unsubscribe', c => {
 });
 
 // ---------- telegram ----------
-async function tgCall(method: string, params: Record<string, unknown>): Promise<unknown> {
+export async function tgCall(method: string, params: Record<string, unknown>): Promise<unknown> {
   const token = secretGet('telegram.token');
   if (!token) throw Error('Telegram bot token not set');
   const r = await senders.fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(params), signal: AbortSignal.timeout(TIMEOUT) });
