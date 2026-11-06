@@ -4,6 +4,7 @@ import type { Drawing, Geo, Pt, Style, ToolDef, XY } from './tools/types.ts';
 import { RecordingRenderer, hitShapes, rgba, type HitShape } from './tools/render.ts';
 import { TOOL_MAP, type CursorMode } from './tools/index.ts';
 import { nearestOHLC } from './tools/math.ts';
+import { logicalX } from './logicalx.ts';
 
 export type { Drawing, Pt } from './tools/types.ts';
 export type Magnet = 'off' | 'weak' | 'strong';
@@ -130,7 +131,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const ts = this.host.chart.timeScale(), pane = this.host.chart.panes()[k], s = (k && pane?.getSeries()[0]) || this.host.series;
     const x0 = ts.logicalToCoordinate(0 as Logical) ?? 0, x1 = ts.logicalToCoordinate(1 as Logical) ?? 1;
     return {
-      x: t => ts.logicalToCoordinate(this.logical(t) as Logical) ?? -1e4,
+      x: t => logicalX(ts, this.logical(t)) ?? -1e4,
       y: p => s.priceToCoordinate(p) ?? -1e4,
       t: x => this.timeAt(ts.coordinateToLogical(x) ?? 0),
       p: y => s.coordinateToPrice(y) ?? 0,
