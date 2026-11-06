@@ -4,7 +4,8 @@ import {
   type IChartApi, type ISeriesApi, type SeriesType, type IPriceLine, type ISeriesMarkersPluginApi, type Time, type UTCTimestamp, type SeriesMarker, type MouseEventParams,
 } from 'lightweight-charts';
 import { fetchBars, streamBars, tfSeconds, type Bar } from './data.ts';
-import { INDICATORS, type Series } from './indicators.ts';
+import { type Series } from './indicators.ts';
+import { indicatorDef } from './indlib.ts';
 import { DrawingLayer, type Drawing } from './drawings.ts';
 import { createMainSeries, toSeriesData, transformBars, isPriceBased, typeDefaults, CHART_TYPES, type ChartType, type TypeOpts } from './charttypes.ts';
 import { isExpr, parse, symbols, combine } from './symmath.ts';
@@ -300,7 +301,7 @@ export class ChartPane {
     }
     this.ind = []; let pane = 0, color = 0;
     if (!priceBased) for (const k of this.cfg.ind) {
-      const d = INDICATORS[k]; if (!d) continue;
+      const d = indicatorDef(k); if (!d) continue;
       const idx = d.pane ? ++pane : 0, plots: Record<string, ISeriesApi<SeriesType>> = {};
       if (idx) this.owners[idx] = 'ind:' + k;
       // Pin to scale: the main/pane scale by default, or right, left, or an invisible scale of its own ("no scale").
@@ -367,7 +368,7 @@ export class ChartPane {
   paneLabels(): string[] {
     return this.chart.panes().map((_, i) => {
       const o = this.owners[i] ?? '';
-      return !i ? 'Main pane' : o.startsWith('ind:') ? INDICATORS[o.slice(4)]?.name ?? o : o.startsWith('script:') ? this.scriptRuns.find(r => r.id === o.slice(7))?.name ?? 'Script' : `Pane ${i + 1}`;
+      return !i ? 'Main pane' : o.startsWith('ind:') ? indicatorDef(o.slice(4))?.name ?? o : o.startsWith('script:') ? this.scriptRuns.find(r => r.id === o.slice(7))?.name ?? 'Script' : `Pane ${i + 1}`;
     });
   }
   private applyStretch() {

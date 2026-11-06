@@ -1,7 +1,7 @@
 import { initWindows, pushCfg, redirectSelect, decorateCells, isPopout, monitorsMenu } from './popout.ts';   // first: a pop-out redirects its storage keys before anything reads them
 import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from './chart.ts';
 import { TFS, anyTf, streamTickers, fetchBars, fetchSymbols, serverJson, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type RemoteMarket } from './data.ts';
-import { INDICATORS } from './indicators.ts';
+import { openIndicatorPicker } from './indpicker.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { TOOL_MAP } from './tools/index.ts';
 import type { Drawing } from './tools/types.ts';
@@ -509,16 +509,9 @@ $('#typeBtn').onclick = e => {
   ]);
 };
 $('#indBtn').onclick = e => indicatorsMenu(e.target as HTMLElement);
-function indicatorsMenu(el: HTMLElement) {
-  const r = el.getBoundingClientRect(), cur = active().cfg.ind;
-  const toggle = (k: string) => () => applyCfg(active(), { ind: active().cfg.ind.includes(k) ? active().cfg.ind.filter(x => x !== k) : [...active().cfg.ind, k] }, 'indicators');
-  showMenu(r.left, r.bottom + 2, [
-    { label: 'Overlays', disabled: true },
-    ...Object.entries(INDICATORS).filter(([, d]) => !d.pane).map(([k, d]) => ({ label: d.name, checked: cur.includes(k), action: toggle(k) })),
-    { sep: true }, { label: 'Oscillators', disabled: true },
-    ...Object.entries(INDICATORS).filter(([, d]) => d.pane).map(([k, d]) => ({ label: d.name, checked: cur.includes(k), action: toggle(k) })),
-    ...derivsMenu(active().cfg, d => applyCfg(active(), { derivs: d } as never, 'derivatives')),   // derivs
-  ]);
+function indicatorsMenu(_el?: HTMLElement) {
+  openIndicatorPicker({ keys: () => active().cfg.ind, set: ind => applyCfg(active(), { ind }, 'indicators'), openPine: () => showBottom('pine'),
+    derivs: el => { const r = el.getBoundingClientRect(); showMenu(r.left, r.bottom + 2, derivsMenu(active().cfg, d => applyCfg(active(), { derivs: d } as never, 'derivatives'))) } });
 }
 $('#tplBtn').onclick = e => {
   const r = (e.target as HTMLElement).getBoundingClientRect(), p = active();
