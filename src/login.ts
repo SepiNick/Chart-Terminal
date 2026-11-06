@@ -85,9 +85,9 @@ async function telegramButton() {
   btn.onclick = async () => {
     btn.disabled = true; msg.textContent = '';
     try {
-      const s = await authPost<{ id: string; url: string; expires: number }>('/api/auth/telegram/start', {});
+      const s = await authPost<{ id: string; url: string; short: string; expires: number }>('/api/auth/telegram/start', {});
       window.open(s.url, '_blank', 'noopener');
-      msg.innerHTML = `Open Telegram and tap <b>Start</b> in the bot chat. <a href="${esc(s.url)}" target="_blank" rel="noopener">Open the chat again</a>`;
+      msg.innerHTML = `Open Telegram, tap <b>Start</b>, then tap <b>Approve</b> only if the bot shows the code <b>${esc(s.short)}</b>. <a href="${esc(s.url)}" target="_blank" rel="noopener">Open the chat again</a>`;
       const until = Date.now() + s.expires * 1000;
       while (Date.now() < until && document.body.contains(btn)) {
         await new Promise(r => setTimeout(r, 2000));

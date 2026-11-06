@@ -89,10 +89,10 @@ function ca() {
   try { return ensureCerts(TLS_DIR) } catch (e) { throw new HttpError(500, (e as Error).message) }
 }
 route('GET', '/ca.crt', c => {
-  c.res.writeHead(200, { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="chart-terminal-ca.crt"', 'cache-control': 'no-store' }).end(ca().caDer);
+  c.res.writeHead(200, { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="chart-terminal-ca.crt"', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }).end(ca().caDer);
   return RAW;
 }, { public: true });
 route('GET', '/ca.mobileconfig', c => {
-  c.res.writeHead(200, { 'content-type': 'application/x-apple-aspen-config', 'content-disposition': 'attachment; filename="chart-terminal.mobileconfig"', 'cache-control': 'no-store' }).end(mobileconfig(ca().caDer));
+  c.res.writeHead(200, { 'content-type': 'application/x-apple-aspen-config', 'content-disposition': 'attachment; filename="chart-terminal.mobileconfig"', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }).end(mobileconfig(ca().caDer));
   return RAW;
 }, { public: true });

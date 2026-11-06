@@ -20,7 +20,7 @@ const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 after(() => { server.closeAllConnections(); server.close(); try { rmSync(dir, { recursive: true, force: true }) } catch {} });
 
 // The bot: getMe answers its name; getUpdates returns whatever messages the test queued.
-const inbox: { message: { text: string; chat: { type: string }; from: { id: number } } }[] = [], sent: unknown[] = [];
+const inbox: ({ message: { text: string; chat: { type: string }; from: { id: number } } } | { callback_query: { id: string; data: string; from: { id: number } } })[] = [], sent: unknown[] = [];
 N.senders.fetch = async (url, init) => {
   const method = String(url).split('/').pop();
   const params = JSON.parse(String(init?.body ?? '{}'));
@@ -44,19 +44,37 @@ test('disabled until a bot token and a personal chat are saved', async () => {
   assert.equal(await status(), true);
 });
 
-test('the owner signs in once; the link works one time only', async () => {
+test('the owner signs in only after approving in Telegram; the link works one time only', async () => {
   const s = await post('/api/auth/telegram/start', { device: 'pc' });
   assert.equal(s.status, 200);
   const code = new URL(s.body.url).searchParams.get('start')!;
   assert.match(s.body.url, /^https:\/\/t\.me\/ct_test_bot\?start=/);
+  assert.match(s.body.short, /^\d{4}$/);
   assert.notEqual(code, s.body.id, 'the link carries a different value than the poll id');
   assert.deepEqual((await post('/api/auth/telegram/poll', { id: s.body.id, device: 'pc' })).body, { pending: true });
   inbox.push({ message: { text: `/start ${code}`, chat: { type: 'private' }, from: { id: 777 } } });
   await wait(1600);
+  const asked = await post('/api/auth/telegram/poll', { id: s.body.id, device: 'pc' });
+  assert.deepEqual(asked.body, { pending: true, asked: true }, 'tapping Start alone does not sign in');
+  const ask = sent.at(-1) as { text: string; reply_markup: unknown };
+  assert.ok(ask.text.includes(s.body.short) && ask.text.includes('127.0.0.1'), 'the bot shows the code and the IP');
+  await wait(1600);
+  assert.equal((await post('/api/auth/telegram/poll', { id: s.body.id, device: 'pc' })).body.pending, true);
+  inbox.push({ callback_query: { id: 'q1', data: `ok:${code}`, from: { id: 777 } } });
+  await wait(1600);
   const r = await post('/api/auth/telegram/poll', { id: s.body.id, device: 'pc' });
   assert.equal(r.status, 200); assert.ok(r.body.token); assert.equal(r.cookie, null);
   assert.equal((await post('/api/auth/telegram/poll', { id: s.body.id, device: 'pc' })).status, 410, 'one use');
-  assert.ok(sent.length >= 1, 'the bot confirms in the chat');
+});
+
+test('Deny in Telegram refuses the sign-in', async () => {
+  const s = await post('/api/auth/telegram/start', { device: 'pc' });
+  const code = new URL(s.body.url).searchParams.get('start')!;
+  inbox.length = 0; inbox.push({ message: { text: `/start ${code}`, chat: { type: 'private' }, from: { id: 777 } } });
+  await wait(1600); await post('/api/auth/telegram/poll', { id: s.body.id, device: 'pc' });
+  inbox.push({ callback_query: { id: 'q2', data: `no:${code}`, from: { id: 777 } } });
+  await wait(1600);
+  assert.equal((await post('/api/auth/telegram/poll', { id: s.body.id, device: 'pc' })).status, 403);
 });
 
 test('another Telegram account, or a start code someone guessed, does not sign in', async () => {
