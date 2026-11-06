@@ -2,6 +2,7 @@ import { initWindows, pushCfg, redirectSelect, decorateCells, isPopout, monitors
 import { ChartPane, type Alert, type PaneCfg, type Hooks, type ChartType } from './chart.ts';
 import { TFS, anyTf, streamTickers, fetchBars, fetchSymbols, serverJson, fetchExchanges, fetchMarkets, isRemote, parseTf, tfLabel, tfSeconds, type Ticker, type RemoteMarket } from './data.ts';
 import { openIndicatorPicker } from './indpicker.ts';
+import { latinKey } from './keymap.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { TOOL_MAP } from './tools/index.ts';
 import type { Drawing } from './tools/types.ts';
@@ -1290,6 +1291,17 @@ function showBottom(tab: string) {
 }
 function setBottomHeight(h: number) { const v = Math.max(80, Math.min(innerHeight - 200, h)); $('#bottom').style.setProperty('--bottom-h', v + 'px'); store.set('bottomH', v) }
 setBottomHeight(store.get('bottomH', 220));
+function setPanelWidth(w: number) { const v = Math.max(220, Math.min(Math.floor(innerWidth * 0.6), 900, w)); document.documentElement.style.setProperty('--panel-w', v + 'px'); store.set('panelW', v) }
+setPanelWidth(store.get('panelW', 290));
+$('#pResize').onmousedown = e => {
+  e.preventDefault();
+  const x0 = e.clientX, w0 = $('#panel').offsetWidth;
+  document.body.classList.add('resizing');
+  const move = (m: MouseEvent) => setPanelWidth(w0 + x0 - m.clientX);
+  const up = () => { document.body.classList.remove('resizing'); removeEventListener('mousemove', move); removeEventListener('mouseup', up) };
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
+};
+$('#pResize').ondblclick = () => setPanelWidth(290);
 $('#bResize').onmousedown = e => {
   e.preventDefault();
   const y0 = e.clientY, h0 = $('#bottom').offsetHeight;
@@ -1343,7 +1355,7 @@ function openKeys() { $('#keysT').innerHTML = KEYS.map(([k, v]) => `<tr><td><kbd
 document.addEventListener('keydown', e => {
   if ((e.target as HTMLElement).matches('input,textarea,select') || document.querySelector('dialog[open]')) return;
   const p = active(), l = p?.layer; if (!p) return;
-  const k = e.key, ctrl = e.ctrlKey || e.metaKey;
+  const k = latinKey(e), ctrl = e.ctrlKey || e.metaKey;
   const combo = `${ctrl ? 'Ctrl+' : ''}${e.altKey ? 'Alt+' : ''}${e.shiftKey && (e.altKey || ctrl) ? 'Shift+' : ''}${k.length === 1 ? k.toUpperCase() : k}`;
   const tool = [...TOOL_MAP.values()].find(t => t.key === combo);
   const act = (fn: () => void) => { e.preventDefault(); fn() };
@@ -1383,6 +1395,7 @@ document.addEventListener('keydown', e => {
   if (k === '.') return act(() => $('#layoutsBtn').click());
   if (/^[0-9,]$/.test(k)) return act(() => openTfDialog(k === ',' ? '' : k));
   if (/^[a-zA-Z]$/.test(k)) return act(() => openSearch(k.toUpperCase()));
+  if (/^\p{L}$/u.test(e.key)) return act(() => openSearch(e.key));   // a Persian letter starts a search too (Tehran bourse tickers are Persian)
 });
 
 initPineUI({ active, panes: () => panes, applyCfg, showTab: showBottom });
