@@ -1533,6 +1533,7 @@ $('#menuBtn').onclick = e => {
     { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
     { label: 'Screener Pro…', icon: '📊', action: openScreenerPro },
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
+    { label: 'Licences', icon: 'ⓘ', action: () => { window.open('/licenses.html', '_blank') } },
     ...(canWidget ? [{ label: 'Desktop widgets…', icon: '🧩', action: () => void widgetsMenu(r.right - 220, r.bottom + 2, { sym: active().cfg.symbol, tf: active().cfg.tf }, sortedIds(lists).map(i => ({ id: i, name: lists[i].name }))) }] : []),
     { sep: true },
     { head: 'Theme' },

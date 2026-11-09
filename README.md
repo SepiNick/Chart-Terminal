@@ -39,4 +39,4 @@ npm run audit:html  # رشته‌های escape‌نشده در قالب‌های
 
 ## مجوز
 
-GNU General Public License نسخه‌ی ۲ (GPL-2.0-only)؛ متن کامل در [LICENSE](LICENSE).
+GNU General Public License نسخه‌ی ۲ **یا هر نسخه‌ی بعدی** (GPL-2.0-or-later)؛ متن کامل در [LICENSE](LICENSE). نمودارها از کتابخانه‌ی Apache-2.0 شرکت TradingView (`lightweight-charts`) ساخته می‌شوند که با GPL نسخه‌ی ۲ تنها سازگار نیست ولی با نسخه‌ی ۳ سازگار است؛ برای همین گزینه‌ی «یا نسخه‌ی بعدی» لازم است. اطلاعیه‌ی کتابخانه‌ها در برنامه از منوی ☰ و بعد «Licences» و در [public/licenses.html](public/licenses.html) آمده است.
