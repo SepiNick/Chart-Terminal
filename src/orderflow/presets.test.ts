@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { OF_PRESETS } from './presets.ts';
+import { OF_PRESETS, presetActive, presetToggle } from './presets.ts';
 import { defaultOF, ofActive } from './layer.ts';
 
 test('presets: unique ids, a plain-language hint each, valid settings, only "off" is inactive', () => {
@@ -13,4 +13,14 @@ test('presets: unique ids, a plain-language hint each, valid settings, only "off
   }
   const imb = { ...defaultOF(), ...OF_PRESETS.find(p => p.id === 'imbalance')!.cfg };
   assert.deepEqual([imb.footprint, imb.ratio, imb.absorption], ['bidask', 3, true]);
+});
+
+test('presets toggle independently: two on at once, each off on its own', () => {
+  const [tape, auction] = ['tape', 'auction'].map(id => OF_PRESETS.find(p => p.id === id)!);
+  let of = defaultOF();
+  of = { ...of, ...presetToggle(of, tape) }; of = { ...of, ...presetToggle(of, auction) };
+  assert.ok(presetActive(of, tape) && presetActive(of, auction));
+  of = { ...of, ...presetToggle(of, auction) };
+  assert.ok(presetActive(of, tape) && !presetActive(of, auction));
+  assert.equal(of.tpo, false); assert.equal(of.cvd, true);
 });

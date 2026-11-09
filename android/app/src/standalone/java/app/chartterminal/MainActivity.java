@@ -136,6 +136,9 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+        // targetSdk 35 draws edge-to-edge: pad the page by the status/navigation bars (and the keyboard) so nothing sits under them.
+        web.setOnApplyWindowInsetsListener((v, i) -> { v.setPadding(i.getSystemWindowInsetLeft(), i.getSystemWindowInsetTop(), i.getSystemWindowInsetRight(), i.getSystemWindowInsetBottom()); return i; });
+        getWindow().getDecorView().setBackgroundColor(Color.parseColor("#131722"));
         setContentView(web);
         if (b != null) web.restoreState(b); else web.loadUrl(HOME);
     }

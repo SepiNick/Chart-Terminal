@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chart Terminal widget</title>
+<link rel="stylesheet" href="/src/widget.css">
+</head>
+<body>
+<div id="chart"></div>
+<div id="info"></div>
+<div id="list"></div>
+<div id="setup" hidden>
+  <span id="dims"></span>
+  <input id="symIn" size="9" aria-label="Symbol" spellcheck="false"><select id="tfSel" aria-label="Timeframe"></select>
+  <span class="grow"></span>
+  <button data-pct="15">15%</button><button data-pct="25">25%</button><button data-pct="40">40%</button>
+  <button id="lock" class="on">Lock</button><button id="rm" title="Remove widget">✕</button>
+</div>
+<script type="module" src="/src/widget.ts"></script>
+</body>
+</html>

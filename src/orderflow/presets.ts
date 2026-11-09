@@ -16,3 +16,15 @@ export const OF_PRESETS: OfPreset[] = [
   { id: 'off', label: 'Turn everything off', hint: 'Back to a plain price chart.',
     cfg: { footprint: 'off', heatmap: false, bubbles: false, cvd: false, delta: false, tpo: false, vprofile: false, absorption: false, cluster: 'off', clusterAlert: false } },
 ];
+
+/** A preset's own switches (what it turns on), so several presets can be on together instead of replacing each other. */
+const onKeys = (p: OfPreset) => Object.entries(p.cfg).filter(([k, v]) => k === 'ratio' || v === true || (k === 'footprint' && v !== 'off'));
+const isOn = (k: string, v: unknown) => (k === 'ratio' ? true : v === true || (k === 'footprint' && v !== 'off'));
+/** True when every switch the preset turns on is on now ('off' is a reset, never "on"). */
+export const presetActive = (of: Partial<OFCfg>, p: OfPreset) => p.id !== 'off' && onKeys(p).every(([k, v]) => k === 'ratio' || (of as Record<string, unknown>)[k] === v);
+/** Clicking a preset: on → switch only its own features off; off → switch only its own on, leaving the others alone. 'off' resets all. */
+export function presetToggle(of: Partial<OFCfg>, p: OfPreset): Partial<OFCfg> {
+  if (p.id === 'off') return p.cfg;
+  if (!presetActive(of, p)) return Object.fromEntries(onKeys(p)) as Partial<OFCfg>;
+  return Object.fromEntries(onKeys(p).filter(([k, v]) => isOn(k, v) && k !== 'ratio').map(([k, v]) => [k, typeof v === 'boolean' ? false : 'off'])) as Partial<OFCfg>;
+}

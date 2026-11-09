@@ -5,6 +5,7 @@ import { openIndicatorPicker } from './indpicker.ts';
 import { latinKey } from './keymap.ts';
 import { openScreenerPro, initScreenerPro } from './screenerpro.ts';
 import { CHART_TYPES } from './charttypes.ts';
+import { canWidget, widgetItems, listWidgetItems, widgetsMenu } from './widgets.ts';
 import { TOOL_MAP } from './tools/index.ts';
 import type { Drawing } from './tools/types.ts';
 import { renderLeftToolbar, wireLeftToolbar, renderFloating, drawingMenu, openProps, copyDrawings, pasteDrawings, setTool, setZoomOut, templateFor, type DrawUIHost } from './drawui.ts';
@@ -39,7 +40,7 @@ import { bundledOrigin } from './standalone.ts';
 import { initServerAlerts, serverAlerts, openAlertDialog, renderAlertsPanel, migrateToServer, BUILTIN_PINE, type AlertCtx, type OldAlert } from './alertsui.ts';
 import { initSettingsUI } from './settingsui.ts';
 import './tooltip.ts';
-import { MSG, COLORS, addSymbol, checkBytes, combinedRows, createList, deleteList, duplicateList, exportText, importAsList, importEntries, isSection, migrate, moveBefore, moveSymbol, parseImport, removeSymbol, renameList, reorder, resolveActive, restoreList, setColor, setIcon, sortedIds, symCount } from './watchlists.ts';
+import { MSG, COLORS, COLOR_NAMES, addSymbol, checkBytes, combinedRows, createList, deleteList, duplicateList, exportText, importAsList, importEntries, isSection, migrate, moveBefore, moveSymbol, parseImport, removeSymbol, renameList, reorder, resolveActive, restoreList, setColor, setIcon, sortedIds, symCount } from './watchlists.ts';
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 import { chartEvents, initMarket, renderDetails, renderMarket } from './market/ui.ts';
 import './market/domhook.ts';
@@ -51,7 +52,7 @@ import { SHOW_AI } from './flags.ts';
 import { registerServiceWorker } from './push.ts';
 import { rMultiple } from './journal.ts';
 import { initI18n, t as tr } from './i18n.ts';
-import { OF_PRESETS } from './orderflow/presets.ts';
+import { OF_PRESETS, presetActive, presetToggle } from './orderflow/presets.ts';
 import { describePlan, parseExitPlan, resolvePlan, type ExitPlan } from './exits.ts';
 import { collectReport, installErrorLog } from './diagnostics.ts';
 
@@ -241,6 +242,26 @@ function buildLayout() {
     return p;
   });
   st.layout.active = Math.min(st.layout.active, A.n - 1);
+  renderSplitters(); saveLayout(); syncUI(); connectTickers(); decorateCells();
+}
+/** Charts of the tabs that are not on screen. They are taken out of the page but kept alive (data, streams, drawings,
+ *  zoom), so coming back to a tab shows it at once instead of building and loading its charts again. Key: that tab's layout. */
+const parked = new Map<object, { panes: ChartPane[]; cells: HTMLElement[] }>();
+function parkTab() {
+  const cells = $$('#grid > .cell');
+  parked.set(st.tabs[st.tab].layout, { panes, cells });
+  $('#grid').replaceChildren();   // the cells stay alive in `parked`
+  panes = [];
+}
+/** Show st.layout's tab: its parked charts if it has them, else build them. */
+function enterTab() {
+  const k = parked.get(st.layout);
+  if (!k) return buildLayout();
+  parked.delete(st.layout);
+  panes = k.panes;
+  $('#grid').replaceChildren(...k.cells);
+  applyGridTemplate();
+  document.body.classList.toggle('multi', panes.length > 1);
   renderSplitters(); saveLayout(); syncUI(); connectTickers(); decorateCells();
 }
 function applyGridTemplate() {
@@ -599,7 +620,7 @@ $('#ofBtn').onclick = e => {
   if (!hasOrderFlow(p.cfg.symbol) || isExpr(p.cfg.symbol)) return toast('Order flow needs a crypto symbol (Binance or an exchange via the data server)');
   const num = (q: string, cur: number) => { const v = prompt(q, String(cur)); return v == null || v.trim() === '' || !Number.isFinite(+v) || +v < 0 ? null : +v };
   showMenu(r.left, r.bottom + 2, [
-    { label: 'Quick start', hint: 'ready-made views', sub: OF_PRESETS.map(q => ({ label: q.label, hint: q.hint.split('. ')[0], action: () => set(q.cfg, `order flow: ${q.id}`) })) },
+    { label: 'Quick start', hint: 'ready-made views', sub: OF_PRESETS.map(q => ({ label: q.label, hint: q.hint.split('. ')[0], checked: presetActive(of, q), action: () => set(presetToggle(of, q), `order flow: ${q.id}`) })) },
     { sep: true },
     { label: 'Footprint', sub: (['off', 'bidask', 'delta', 'volume'] as const).map(m => ({ label: { off: 'Off', bidask: 'Bid × Ask', delta: 'Delta', volume: 'Volume profile per bar' }[m], checked: of.footprint === m, action: () => set({ footprint: m }) })) },
     { label: 'Liquidity heatmap (order book history)', checked: of.heatmap, action: () => set({ heatmap: !of.heatmap }) },
@@ -614,6 +635,7 @@ $('#ofBtn').onclick = e => {
     ...ofMenu(p, of, set, num, () => panes),
     { sep: true },
     { label: 'DOM / Level 2 panel', icon: '≣', action: () => { if (st.side !== 'dom') showSide('dom') } },
+    ...widgetItems(p.cfg.symbol, p.cfg.tf),
   ]);
 };
 $('#rpSelect').onclick = () => { active().startReplay(); syncUI() };
@@ -797,16 +819,17 @@ function renderWsTabs() {
 setInterval(renderWsTabs, 3000);
 function openWsTab(i: number) {
   if (i === st.tab || !st.tabs[i]) return;
-  saveLayout();
+  saveLayout(); parkTab();
   st.tab = i; store.set('tab', i);
   st.layout = st.tabs[i].layout; st.layoutName = 'Unnamed'; store.set('layoutName', 'Unnamed'); // so autosave can't overwrite a named layout
-  st.maximized = false; buildLayout(); renderWsTabs();
+  st.maximized = false; enterTab(); renderWsTabs();
 }
 $('#tabs').onclick = e => {
   const el = e.target as HTMLElement;
   if (el.id === 'tabAdd') {
     saveLayout();
     const l = structuredClone(DEFAULT_LAYOUT); l.panes[0].symbol = active().cfg.symbol;
+    parkTab();
     st.tabs.push({ name: '', layout: l });
     st.tab = st.tabs.length - 1; store.set('tab', st.tab);
     st.layout = l; st.layoutName = 'Unnamed'; st.maximized = false; buildLayout(); renderWsTabs(); return;
@@ -815,10 +838,13 @@ $('#tabs').onclick = e => {
   const i = +t.dataset.i!;
   if (!el.dataset.x) return openWsTab(i);
   if (!confirm('Close this tab?')) return;
+  const gone = parked.get(st.tabs[i].layout);   // a tab that is not on screen: end its charts
+  gone?.panes.forEach(p => p.destroy()); parked.delete(st.tabs[i].layout);
+  if (i === st.tab) { panes.forEach(p => p.destroy()); panes = [] }
   st.tabs.splice(i, 1);
   const next = Math.min(i < st.tab ? st.tab - 1 : st.tab, st.tabs.length - 1);
   st.tab = next; store.set('tab', next);
-  st.layout = st.tabs[next].layout; st.layoutName = 'Unnamed'; st.maximized = false; buildLayout(); renderWsTabs();
+  st.layout = st.tabs[next].layout; st.layoutName = 'Unnamed'; st.maximized = false; enterTab(); renderWsTabs();
 };
 $('#tabs').ondblclick = e => {
   const t = (e.target as HTMLElement).closest<HTMLElement>('.tab'); if (!t) return;
@@ -890,7 +916,9 @@ function showSide(name: string) {
   if (SHOW_AI && st.side === 'ai') void refreshAi();
   domSync();
 }
-$('#rail').onclick = e => { const s = (e.target as HTMLElement).dataset.side; if (s) showSide(s) };
+const phone = matchMedia('(max-width:900px)');   // phones show the side page or the chart, never both
+$('#rail').onclick = e => { const d = (e.target as HTMLElement).dataset; if (d.side) showSide(d.side); else if (d.chart !== undefined && st.side) showSide(st.side) };
+$('#bottom').classList.add('collapsed');   // positions / Pine / tester stay closed until opened (every screen size)
 $('#keysBtn').onclick = () => openKeys();
 
 // ---------- watchlists ----------
@@ -945,7 +973,7 @@ function listMenu(id: string): MenuItem[] {
   const l = lists[id], ids = sortedIds(lists), at = ids.indexOf(id);
   return [
     { label: 'Rename list…', action: () => { const n = prompt('Watchlist name', l.name)?.trim(); if (n) { const r = renameList(lists, id, n); r.ok ? saveLists() : toast(r.msg) } } },
-    { label: 'List colour', sub: COLORS.map(c => ({ label: c, iconHtml: dot(c), checked: l.color === c, action: () => { setColor(lists, id, c); saveLists() } })) },
+    { label: 'List colour', sub: COLORS.map((c, k) => ({ label: COLOR_NAMES[k] ?? c, iconHtml: dot(c), checked: l.color === c, action: () => { setColor(lists, id, c); saveLists() } })) },
     { label: 'List icon', sub: [...['⭐', '🔥', '💎', '📈', '📉', '🪙', '🏦', '🌍', '🧪', '💤'].map(e => ({ label: e, checked: l.icon === e, action: () => { setIcon(lists, id, e); saveLists() } })),
       { label: 'Custom…', action: () => { const e = prompt('Emoji or short symbol', l.icon ?? ''); if (e !== null) { setIcon(lists, id, e); saveLists() } } }, { label: 'No icon', action: () => { setIcon(lists, id, ''); saveLists() } }] },
     { label: 'Duplicate list', action: () => { const r = duplicateList(lists, id, '(copy)'); if (r.ok) { selectList(r.id!); saveLists() } else toast(r.msg) } },
@@ -959,6 +987,7 @@ function listMenu(id: string): MenuItem[] {
       if (watchActive === id) selectList(resolveActive(lists)); saveLists();
       undoToast(`Deleted "${keep.name}".`, () => { restoreList(lists, id, keep); reorder(lists, order); saveLists() });
     } },
+    ...listWidgetItems(id, l.name),
   ];
 }
 /** Symbol menu: move / copy to another list, remove. `from` = the lists that hold the symbol in the current view. */
@@ -967,7 +996,8 @@ function symMenu(x: number, y: number, sym: string, from: string[]) {
   const target = (copy: boolean): MenuItem[] => [...others.map(i => ({ label: lists[i].name, iconHtml: dot(lists[i].color), action: () => { const r = moveSymbol(lists, src, i, sym, copy); r.ok ? (saveLists(), toast(`${sym} ${copy ? 'copied' : 'moved'} to ${lists[i].name}`)) : toast(r.msg) } })),
     { label: 'New list…', action: () => { const n = prompt('Watchlist name')?.trim(); if (!n) return; const c = createList(lists, n); if (!c.ok) return void toast(c.msg); moveSymbol(lists, src, c.id!, sym, copy); saveLists() } }];
   showMenu(x, y, [{ head: sym }, { label: 'Move to list', sub: target(false) }, { label: 'Copy to list', sub: target(true) }, { sep: true },
-    ...from.map(i => ({ label: from.length > 1 ? `Remove from ${lists[i].name}` : 'Remove', action: () => { removeSymbol(lists, i, sym); saveLists() } }))]);
+    ...from.map(i => ({ label: from.length > 1 ? `Remove from ${lists[i].name}` : 'Remove', action: () => { removeSymbol(lists, i, sym); saveLists() } })),
+    ...widgetItems(sym, active().cfg.tf)]);
 }
 function renderTabs() {
   const ids = sortedIds(lists), multi = watchView.multi;
@@ -1035,7 +1065,7 @@ $('#watchT').onclick = e => {
     showMenu(r.left, r.bottom, [...FLAGS.map((c, k) => ({ label: FLAG_NAMES[k], iconHtml: `<span class="wflag" style="background:${c}"></span>`, checked: l.flags[s] === c, action: () => { l.flags[s] = c; saveLists() } })), { label: 'No flag', action: () => { delete l.flags[s]; saveLists() } }]);
     return;
   }
-  if (row?.dataset.sym) setSymbol(row.dataset.sym);
+  if (row?.dataset.sym) { setSymbol(row.dataset.sym); if (phone.matches && st.side === 'watch') showSide('watch') }
 };
 $('#watchT').oncontextmenu = e => {
   const row = (e.target as HTMLElement).closest<HTMLElement>('[data-sym]'); if (!row || isSection(row.dataset.sym!)) return;
@@ -1503,6 +1533,7 @@ $('#menuBtn').onclick = e => {
     { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
     { label: 'Screener Pro…', icon: '📊', action: openScreenerPro },
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
+    ...(canWidget ? [{ label: 'Desktop widgets…', icon: '🧩', action: () => void widgetsMenu(r.right - 220, r.bottom + 2, { sym: active().cfg.symbol, tf: active().cfg.tf }, sortedIds(lists).map(i => ({ id: i, name: lists[i].name }))) }] : []),
     { sep: true },
     { head: 'Theme' },
     ...(['dark', 'light'] as const).map(t => ({ label: t === 'dark' ? 'Dark' : 'Light', checked: st.settings.theme === t, action: () => { if (st.settings.theme !== t) $('#themeBtn').click() } })),

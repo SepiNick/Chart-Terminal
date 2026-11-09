@@ -183,6 +183,8 @@ public class MainActivity extends Activity {
         corner.setOnLongClickListener(v -> { showMenu(); return true; });
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
         root.addView(corner, new FrameLayout.LayoutParams(120, 120, Gravity.TOP | Gravity.END));
+        root.setOnApplyWindowInsetsListener((v, i) -> { v.setPadding(i.getSystemWindowInsetLeft(), i.getSystemWindowInsetTop(), i.getSystemWindowInsetRight(), i.getSystemWindowInsetBottom()); return i; });   // edge-to-edge (targetSdk 35)
+        getWindow().getDecorView().setBackgroundColor(Color.parseColor("#131722"));
         setContentView(root);
         web.loadUrl(origin);
     }

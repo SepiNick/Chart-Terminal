@@ -213,11 +213,19 @@ kbd{font:11px ui-monospace,Consolas,monospace;background:var(--bg);border:1px so
 #domTape tr.big.up{background:color-mix(in srgb,var(--up) 16%,transparent)}#domTape tr.big.dn{background:color-mix(in srgb,var(--down) 16%,transparent)}#domTape tr.big td{font-weight:700}
 .dom-hint{font-size:10px}
 @container (max-width:230px){#domLadder .trd,#domTape th:nth-child(4),#domTape td:nth-child(4){display:none}}
+#rail [data-chart]{display:none}
 @media (max-width:900px){
-  body{overflow:auto}
-  #body,#body.no-panel{grid-template-columns:1fr;grid-template-rows:auto 70vh auto auto}
-  #tools,#rail{flex-direction:row;overflow-x:auto;border:0;border-bottom:1px solid var(--line)}
-  #center{grid-row:2}#panel{border-left:0;min-height:320px}#rail{grid-row:3}
+  /* phone: one page at a time. Side page (watchlist first) OR chart; the drawing tools sit under the chart, the page switcher is the bottom bar */
+  html,body{height:100dvh}
+  body{overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  #body,#body.no-panel{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto auto}
+  #center{grid-row:1}#tools{grid-row:2}#panel{grid-row:1;border-left:0}#rail{grid-row:3}
+  #tools,#rail{flex-direction:row;overflow-x:auto;overflow-y:hidden;border:0;border-top:1px solid var(--line)}
+  #body:not(.no-panel) :is(#center,#tools){display:none}
+  #body.no-panel #panel{display:none}
+  #rail [data-chart]{display:block}#body.no-panel #rail [data-chart]{background:var(--accent);color:#fff}
+  #bottom.collapsed #bTabs>:not(.grow):not(#bToggle){display:none}
+  #bottom{height:min(var(--bottom-h,220px),45dvh)}#bottom.collapsed{height:auto}
 }
 /* journal workspace */
 #jw{position:fixed;inset:0;z-index:40;background:var(--bg);display:grid;grid-template-columns:210px 1fr}#jw[hidden]{display:none}

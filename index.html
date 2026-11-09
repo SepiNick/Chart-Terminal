@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Chart Terminal</title>
 <meta name="theme-color" content="#131722">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="/src/style.css">
 </head>
 <body>
+<div id="tabs"></div>
 <header id="top">
   <button id="symBtn" class="sym" title="Symbol search (start typing on the chart)"></button>
   <button id="cmpBtn" title="Compare or add symbol">⊕</button>
@@ -63,7 +64,6 @@
 <main id="body">
   <nav id="tools"></nav>
   <section id="center">
-    <div id="tabs"></div>
     <div id="favBar"></div>
     <div id="favGuide" aria-hidden="true"></div>
     <div id="grid"></div>
@@ -202,6 +202,7 @@
     </div>
   </aside>
   <nav id="rail">
+    <button data-chart title="Chart">📈</button><!-- phones only: leave the side page and show the chart -->
     <button data-side="watch" class="on" title="Watchlist">☰</button>
     <button data-side="alerts" title="Alerts">⏰</button>
     <button data-side="trade" title="Trade">⇅</button>

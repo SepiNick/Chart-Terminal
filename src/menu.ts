@@ -1,5 +1,6 @@
 // Small popup menu used for context menus and toolbar flyouts.
 import { esc } from './store.ts';
+import { place, type Anchor } from './menuplace.ts';
 
 /** head: a section title row. iconHtml: trusted markup from our own icon set (never data). selected: highlighted row (tool flyouts). */
 export interface MenuItem { label?: string; icon?: string; iconHtml?: string; hint?: string; checked?: boolean; selected?: boolean; disabled?: boolean; sep?: boolean; head?: string; action?: () => void; sub?: MenuItem[] }
@@ -9,7 +10,7 @@ function closeMenus() { open.forEach(m => m.remove()); open = [] }
 document.addEventListener('mousedown', e => { if (!open.some(m => m.contains(e.target as Node))) closeMenus() });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus() });
 
-export function showMenu(x: number, y: number, items: MenuItem[], level = 0): HTMLElement {
+export function showMenu(x: number, y: number, items: MenuItem[], level = 0, anchor?: Anchor): HTMLElement {
   if (level === 0) closeMenus();
   else open.splice(level).forEach(m => m.remove());
   const m = document.createElement('div');
@@ -18,13 +19,13 @@ export function showMenu(x: number, y: number, items: MenuItem[], level = 0): HT
     `<div class="ctx-i${it.disabled ? ' dis' : ''}${it.selected ? ' sel' : ''}" data-i="${i}"><span class="ci">${it.iconHtml ?? (it.checked ? '✓' : esc(it.icon ?? ''))}</span><span>${esc(it.label ?? '')}</span><span class="ch">${it.sub ? '▸' : esc(it.hint ?? '')}</span></div>`).join('');
   document.body.append(m);
   const r = m.getBoundingClientRect();
-  m.style.left = Math.min(x, innerWidth - r.width - 4) + 'px';
-  m.style.top = Math.min(y, innerHeight - r.height - 4) + 'px';
+  const at = place(x, y, r.width, r.height, innerWidth, innerHeight, anchor);
+  m.style.left = at.left + 'px'; m.style.top = at.top + 'px'; m.style.maxHeight = at.maxH + 'px';
   open.push(m);
   m.addEventListener('mouseover', e => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('.ctx-i'); if (!el) return;
     const it = items[+el.dataset.i!];
-    if (it.sub) { const b = el.getBoundingClientRect(); showMenu(b.right, b.top, it.sub, level + 1) }
+    if (it.sub) { const b = el.getBoundingClientRect(); showMenu(b.right, b.top, it.sub, level + 1, { left: el.closest('.ctx')!.getBoundingClientRect().left, bottom: b.bottom }) }
     else open.splice(level + 1).forEach(x => x.remove());
   });
   m.addEventListener('click', e => {

@@ -15,6 +15,8 @@ export const MAX_BYTES = 1_500_000;
 export const DEFAULT_ID = 'default';
 export const DEFAULT_SYMS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT'];
 export const COLORS = ['#2962ff', '#f23645', '#ff9800', '#ffeb3b', '#4caf50', '#00bcd4', '#9c27b0', '#e91e63', '#8d6e63', '#9aa0a6'];
+/** Names for COLORS, same order (the list-colour menu shows these, not the hex codes). */
+export const COLOR_NAMES = ['Blue', 'Red', 'Orange', 'Yellow', 'Green', 'Cyan', 'Purple', 'Pink', 'Brown', 'Gray'];
 export const MSG = {
   lists: 'You can have at most 50 watchlists',
   syms: 'A watchlist can hold at most 500 symbols',
