@@ -36,3 +36,7 @@ npm run audit:html  # رشته‌های escape‌نشده در قالب‌های
 ## میانبرها
 
 `Alt+T` خط روند · `Alt+H` خط افقی · `Alt+J` شعاع افقی · `Alt+V` خط عمودی · `Alt+F` فیبوناچی · `Alt+Shift+R` مستطیل · `Shift+کلیک` اندازه‌گیری · `Alt+A` هشدار · `Delete` حذف رسم انتخاب‌شده · `Esc` بازگشت به Cursor · دوبار کلیک روی متن برای ویرایش
+
+## مجوز
+
+GNU General Public License نسخه‌ی ۲ (GPL-2.0-only)؛ متن کامل در [LICENSE](LICENSE).

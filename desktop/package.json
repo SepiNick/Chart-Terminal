@@ -6,6 +6,7 @@
     "node": ">=24"
   },
   "version": "0.1.0",
+  "license": "GPL-2.0-only",
   "description": "Chart Terminal desktop app",
   "author": "Chart Terminal",
   "main": "main.cjs",
