@@ -431,3 +431,14 @@ dialog.ip h3{display:flex;justify-content:space-between;align-items:center}
 @keyframes ld-shadow{0%,100%{transform:scaleX(1);opacity:.25}25%,75%{transform:scaleX(.8);opacity:.15}}
 @keyframes ld-pulse{0%,100%{opacity:.18}50%{opacity:.34}}
 @media (prefers-reduced-motion:reduce){.ld-body,.ld-legs,.ld-arml,.ld-armr,.ld-legl,.ld-legr,.ld-shadow,.ld-sk{animation:none}}
+
+/* drawing toolbar: clearer Delete, the T button and its text panel */
+.ftb .del{background:var(--down);border-color:var(--down);color:#fff;font-weight:600;font-size:14px;padding:6px 14px;min-height:32px;border-radius:6px}
+.ftb .del:hover{filter:brightness(1.15);border-color:var(--down)}
+.ftb .tbtn{font-weight:700;font-size:15px;min-width:32px;min-height:32px;font-family:Georgia,serif}
+.ftb [data-act="lock"]{min-width:32px;min-height:32px;font-size:15px}
+.ftb-pop{position:absolute;z-index:12;width:min(300px,90%);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:8px;box-shadow:0 8px 24px #0006}
+.ftb-pop textarea{width:100%;resize:vertical;font:inherit;font-size:14px;padding:6px 8px;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:6px}
+.ftb-pop .row{gap:8px;flex-wrap:wrap}.ftb-pop label{display:flex;align-items:center;gap:4px}
+.ftb-pop .posgrid{display:grid;grid-template-columns:repeat(3,36px);gap:4px;justify-content:start}
+.ftb-pop .posgrid button{height:30px;padding:0;font-size:15px}.ftb-pop .posgrid button.on{background:var(--accent);border-color:var(--accent);color:#fff}

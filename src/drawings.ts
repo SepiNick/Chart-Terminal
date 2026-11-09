@@ -5,6 +5,7 @@ import { RecordingRenderer, hitShapes, rgba, type HitShape } from './tools/rende
 import { TOOL_MAP, type CursorMode } from './tools/index.ts';
 import { nearestOHLC } from './tools/math.ts';
 import { logicalX } from './logicalx.ts';
+import { labelAt, type LabelH, type LabelV } from './tools/labels.ts';
 
 export type { Drawing, Pt } from './tools/types.ts';
 export type Magnet = 'off' | 'weak' | 'strong';
@@ -350,11 +351,26 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     try { def.draw(r, d, this.P(d, g, def), g) } catch (err) { console.error(`draw ${d.type}`, err) }
     ctx.restore();
     if (record) this.hits.set(d, r.shapes);
+    this.drawLabel(ctx, d, def, g, record);
     if (sel) for (const [hx, hy] of this.handlesOf(d, g)) {
       ctx.beginPath(); ctx.arc(hx, hy, 4.5, 0, Math.PI * 2);
       ctx.fillStyle = d.locked ? '#787b86' : '#fff'; ctx.fill();
       ctx.strokeStyle = d.style.color; ctx.lineWidth = 1.5; ctx.stroke();
     }
+  }
+  /** The text a user wrote with the T button, on a line or channel, where they put it (left / centre / right, top / middle / bottom). */
+  private drawLabel(ctx: CanvasRenderingContext2D, d: Drawing, def: ToolDef, g: Geo, record: boolean) {
+    const s = d.style, text = typeof s.lbl === 'string' ? s.lbl : '';
+    if (!text || !def.frame) return;
+    let frame; try { frame = def.frame(d, this.P(d, g, def), g) } catch { return }
+    const at = frame && labelAt(frame, (s.lblH as LabelH) ?? 'center', (s.lblV as LabelV) ?? 'top', g.W);
+    if (!at) return;
+    const size = Number(s.lblSize) || 13, color = typeof s.lblColor === 'string' ? s.lblColor : s.color;
+    ctx.save();
+    const r = new RecordingRenderer(ctx, { ...s, textColor: color, fontSize: size, bold: !!s.lblBold, italic: false }, false, g.W, g.H);
+    r.text(text, [at.x, at.y], { align: at.align, baseline: at.baseline, color, size, bold: !!s.lblBold, ...(at.baseline === 'middle' ? { bg: rgba('#131722', 0.7), pad: 4 } : {}) });
+    ctx.restore();
+    if (record) this.hits.get(d)?.push(...r.shapes);   // clicking the text selects the drawing too
   }
   private renderMeasure(ctx: CanvasRenderingContext2D, g: Geo) {
     const { a, b } = this.measure!, up = b.p >= a.p, c = up ? '#2962ff' : '#f23645';

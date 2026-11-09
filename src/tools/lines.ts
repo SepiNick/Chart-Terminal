@@ -1,6 +1,7 @@
 // Trend-line tools beyond the basics (channels, pitchforks, info/angle/cross lines).
 import type { Drawing, Geo, Level, Pt, Renderer, ToolDef, XY } from './types.ts';
 import { moveStats } from './basic.ts';
+import { frameOf } from './labels.ts';
 
 /** Repeat the last element so drafts with fewer clicks still have n points. */
 export const pad = <T>(a: T[], n: number): T[] => Array.from({ length: n }, (_, i) => a[Math.min(i, a.length - 1)]);
@@ -125,6 +126,7 @@ export const LINE_TOOLS: ToolDef[] = [
       const { a, b, off } = parOffset(d, g), [p0, p1] = pad(P, 2);
       channel(r, d, g, [p0, p1], [[p0[0], g.y(a.p + off)], [p1[0], g.y(b.p + off)]], !!d.style.midline);
     },
+    frame(d, P, g) { const { a, b, off } = parOffset(d, g), [p0, p1] = pad(P, 2); return frameOf([p0, p1], [[p0[0], g.y(a.p + off)], [p1[0], g.y(b.p + off)]]) },
     priceAt(d, t, g) { const { a, b, off } = parOffset(d, g), p = priceOn(a, b, g.logical(t), g); return p == null ? null : p + Math.max(0, off) },
   },
   {
@@ -141,18 +143,26 @@ export const LINE_TOOLS: ToolDef[] = [
       r.line(M[0], M[1], { dash: 'dashed' });
       if (d.style.showR) r.text(f.R.toFixed(4), [x0, Math.max(at(k)[0][1], at(-k)[0][1]) + 4], { size: 11, color: d.style.color, baseline: 'top' });
     },
+    frame(d, _P, g) {
+      const f = regress(d, g); if (!f) return null;
+      const k = Number(d.style.deviation) * f.sd, x0 = g.x(g.bars[f.i0].time), x1 = g.x(g.bars[f.i1].time);
+      const at = (o: number): [XY, XY] => [[x0, g.y(f.c + f.m * f.i0 + o)], [x1, g.y(f.c + f.m * f.i1 + o)]];
+      return frameOf(at(k), at(-k));
+    },
     priceAt(d, t, g) { const f = regress(d, g); return f && f.c + f.m * g.logical(t) + Number(d.style.deviation) * f.sd },
   },
   {
     id: 'flattop', name: 'Flat top/bottom', icon: '⊐', group: 'lines', points: 3,
     defaults: { fillAlpha: 0.08 },
     draw(r, d, P, g) { const [a, b, c] = pad(P, 3); channel(r, d, g, [a, b], [[a[0], c[1]], [b[0], c[1]]], false) },
+    frame: (_d, P) => { const [a, b, c] = pad(P, 3); return frameOf([a, b], [[a[0], c[1]], [b[0], c[1]]]) },
     priceAt(d, t, g) { const [a, b, c] = pad(d.pts, 3); return maxN(priceOn(a, b, g.logical(t), g), c.p) },
   },
   {
     id: 'disjoint', name: 'Disjoint channel', icon: '⫻', group: 'lines', points: 4,
     defaults: { fillAlpha: 0.08 },
     draw(r, d, P, g) { const [a, b, c, e] = pad(P, 4); channel(r, d, g, [a, b], [c, e], false) },
+    frame: (_d, P) => { const [a, b, c, e] = pad(P, 4); return frameOf([a, b], [c, e]) },
     priceAt(d, t, g) { const [a, b, c, e] = pad(d.pts, 4), l = g.logical(t); return maxN(priceOn(a, b, l, g), priceOn(c, e, l, g)) },
   },
   pitchfork('pitchfork', 'Pitchfork', 'ψ', 0, 0),

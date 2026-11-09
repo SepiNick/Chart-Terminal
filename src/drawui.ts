@@ -2,6 +2,7 @@
 import { ALL_TOOLS, CURSORS, GROUPS, TOOL_MAP, groupSections, type CursorMode } from './tools/index.ts';
 import type { Drawing, GroupId, Style, ToolDef } from './tools/types.ts';
 import { iconSvg } from './tools/icons.ts';
+import type { LabelH, LabelV } from './tools/labels.ts';
 import { styleFor, type DrawingLayer, type Magnet } from './drawings.ts';
 import { showMenu, type MenuItem } from './menu.ts';
 import { store, $, $$, esc, toast } from './store.ts';
@@ -226,13 +227,14 @@ export function setZoomOut(fn: (h: DrawUIHost) => void) { zoomOut = fn }
 
 // ---------- floating toolbar ----------
 const WIDTHS = [1, 2, 3, 4], DASHES = ['solid', 'dashed', 'dotted'] as const;
+const floatCtx = new WeakMap<HTMLElement, { cell: HTMLElement; host: DrawUIHost; l: DrawingLayer }>();
 export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLayer) {
   let bar = cell.querySelector<HTMLElement>('.ftb');
   if (!bar) {
     bar = document.createElement('div'); bar.className = 'ftb'; cell.append(bar);
     bar.addEventListener('mousedown', e => e.stopPropagation());
     bar.addEventListener('input', e => {
-      const i = e.target as HTMLInputElement, k = i.dataset.k!;
+      const { l } = floatCtx.get(bar!)!, i = e.target as HTMLInputElement, k = i.dataset.k!;
       l.selected.forEach(d => {
         if (k === 'color') { d.style.color = i.value; d.style.textColor = i.value }
         else if (k === 'fill') { d.style.fillColor = i.value; if (!d.style.fillAlpha) d.style.fillAlpha = 0.2 }
@@ -243,7 +245,7 @@ export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLa
     });
     bar.addEventListener('click', e => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('button'); if (!b) return;
-      const d = l.primary; if (!d) return;
+      const { cell, host, l } = floatCtx.get(bar!)!, d = l.primary; if (!d) return;
       const r = b.getBoundingClientRect();
       switch (b.dataset.act) {
         case 'tpl': templateMenu(r.left, r.bottom + 2, d, l); break;
@@ -253,12 +255,16 @@ export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLa
         case 'lock': { const on = !d.locked; l.selected.forEach(x => (x.locked = on)); l.onChange(); renderFloating(cell, host, l); break }
         case 'clone': cloneDrawings(l); break;
         case 'more': drawingMenu(r.left, r.bottom + 2, d, l, host); break;
+        case 'text': textPanel(b, d, l, cell); break;
         case 'del': l.remove(...l.selected); break;
       }
     });
   }
+  floatCtx.set(bar, { cell, host, l });
   const d = l.primary;
   bar.style.display = d ? 'flex' : 'none';
+  const pop = cell.querySelector<HTMLElement>('.ftb-pop');
+  if (pop && (!d || pop.dataset.id !== String(d.id))) pop.remove();   // the text panel belongs to one drawing
   if (!d) return;
   const def = TOOL_MAP.get(d.type);
   bar.innerHTML = `<button data-act="tpl" title="Template">▤</button>
@@ -269,10 +275,49 @@ export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLa
     <button data-act="props" title="Settings">⚙</button>
     ${def?.priceAt ? '<button data-act="alert" title="Add alert on this drawing">⏰</button>' : ''}
     ${isPosition(d) ? '<button data-act="order" title="Place as paper order with TP/SL">📤</button>' : ''}
-    <button data-act="lock" class="${d.locked ? 'on' : ''}" title="Lock">🔒</button>
+    ${def?.frame ? '<button data-act="text" class="tbtn" title="Write text on this drawing">T</button>' : ''}
+    <button data-act="lock" class="${d.locked ? 'on' : ''}" title="${d.locked ? 'Unlock' : 'Lock'}">${d.locked ? '🔒' : '🔓'}</button>
     <button data-act="clone" title="Clone (Ctrl+drag)">⧉</button>
     <button data-act="more" title="More">⋯</button>
-    <button data-act="del" title="Remove (Del)">🗑</button>`;
+    <button data-act="del" class="del" title="Delete this drawing (Del)" aria-label="Delete">🗑 Delete</button>`;
+}
+const POS: [LabelV, LabelH, string, string][] = [
+  ['top', 'left', '↖', 'Top left'], ['top', 'center', '↑', 'Top center'], ['top', 'right', '↗', 'Top right'],
+  ['middle', 'left', '←', 'Middle left'], ['middle', 'center', '●', 'Middle'], ['middle', 'right', '→', 'Middle right'],
+  ['bottom', 'left', '↙', 'Bottom left'], ['bottom', 'center', '↓', 'Bottom center'], ['bottom', 'right', '↘', 'Bottom right'],
+];
+const SIZES = [10, 12, 14, 16, 20, 24, 32, 40];
+/** The "T" panel: write text on a line or channel, choose where it goes, its color and size. Changes apply as you type. */
+function textPanel(anchor: HTMLElement, d: Drawing, l: DrawingLayer, cell: HTMLElement) {
+  const old = cell.querySelector<HTMLElement>('.ftb-pop');
+  if (old) { old.remove(); if (old.dataset.id === String(d.id)) return }   // a second click on T closes it
+  const s = d.style, h = (s.lblH as LabelH) ?? 'center', v = (s.lblV as LabelV) ?? 'top', size = Number(s.lblSize) || 14, color = typeof s.lblColor === 'string' ? s.lblColor : s.color;
+  const pop = document.createElement('div'); pop.className = 'ftb-pop'; pop.dataset.id = String(d.id);
+  pop.innerHTML = `<textarea data-t="text" rows="2" maxlength="200" placeholder="Write something…" aria-label="Text">${esc(typeof s.lbl === 'string' ? s.lbl : '')}</textarea>
+    <div class="row"><label>Color <input type="color" data-t="color" value="${esc(color)}"></label>
+      <label>Size <select data-t="size">${SIZES.map(n => `<option ${n === size ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label><input type="checkbox" data-t="bold" ${s.lblBold ? 'checked' : ''}> Bold</label><span class="grow"></span><button type="button" data-t="clear">Clear</button></div>
+    <div class="posgrid" role="group" aria-label="Position">${POS.map(([pv, ph, ch, name]) => `<button type="button" data-pv="${pv}" data-ph="${ph}" class="${pv === v && ph === h ? 'on' : ''}" title="${name}" aria-label="${name}">${ch}</button>`).join('')}</div>`;
+  cell.append(pop);
+  const br = (anchor.closest('.ftb') ?? anchor).getBoundingClientRect(), cr = cell.getBoundingClientRect();   // the bar is centred with a transform: measure, don't use offsetLeft
+  pop.style.top = `${br.bottom - cr.top + 6}px`; pop.style.left = `${Math.max(4, Math.min(br.left - cr.left, cr.width - 304))}px`;
+  pop.addEventListener('mousedown', e => e.stopPropagation());
+  pop.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') pop.remove() });
+  const apply = (patch: Record<string, unknown>) => { for (const x of l.selected) if (TOOL_MAP.get(x.type)?.frame) Object.assign(x.style, patch); l.onChange(); l.update() };
+  const text = pop.querySelector<HTMLTextAreaElement>('[data-t="text"]')!;
+  text.addEventListener('input', () => apply({ lbl: text.value, lblH: (d.style.lblH as string) ?? 'center', lblV: (d.style.lblV as string) ?? 'top', lblSize: Number(d.style.lblSize) || 14, lblColor: typeof d.style.lblColor === 'string' ? d.style.lblColor : d.style.color }));
+  pop.addEventListener('input', e => {
+    const t = (e.target as HTMLInputElement).dataset.t;
+    if (t === 'color') apply({ lblColor: (e.target as HTMLInputElement).value });
+    else if (t === 'size') apply({ lblSize: +(e.target as HTMLSelectElement).value });
+    else if (t === 'bold') apply({ lblBold: (e.target as HTMLInputElement).checked });
+  });
+  pop.addEventListener('click', e => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('button'); if (!b) return;
+    if (b.dataset.t === 'clear') { apply({ lbl: '' }); text.value = ''; text.focus(); return }
+    if (b.dataset.pv) { apply({ lblV: b.dataset.pv, lblH: b.dataset.ph }); pop.querySelectorAll('.posgrid button').forEach(x => x.classList.toggle('on', x === b)) }
+  });
+  text.focus();
 }
 function cloneDrawings(l: DrawingLayer, offsetBars = 3) {
   const copies = [...l.selected].map(d => ({ ...structuredClone(d), id: Date.now() + Math.random(), locked: false }));

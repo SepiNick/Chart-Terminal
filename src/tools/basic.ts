@@ -1,6 +1,7 @@
 // Reference tools. New tool files follow the same shape: export a ToolDef[] and register it in tools/index.ts.
 import type { Drawing, Geo, Level, Pt, ToolDef } from './types.ts';
 import { positionSize, stepDecimals } from './math.ts';
+import { frameOf } from './labels.ts';
 
 /** Price on the infinite line through a drawing's first two points, at time t (linear in bar index). */
 function linePriceAt(d: Drawing, t: number, g: Geo): number | null {
@@ -36,6 +37,7 @@ const trendLike = (id: string, name: string, icon: string, extS: boolean, extE: 
     if (d.style.showStats) r.label(moveStats(d.pts[0], d.pts[1], g), [P[1][0], P[1][1] - 16], d.style.color);
   },
   priceAt: linePriceAt,
+  frame: (_d, P) => frameOf([P[0], P[1]], [P[0], P[1]]),
 });
 
 export const BASIC_TOOLS: ToolDef[] = [
@@ -48,6 +50,7 @@ export const BASIC_TOOLS: ToolDef[] = [
       r.hline(P[0][1]);
       r.text(d.style.text || g.fmt(d.pts[0].p), [4, P[0][1] - 3], { size: 11, color: d.style.color, noHit: true });
     },
+    frame: (_d, P, g) => frameOf([[0, P[0][1]], [g.W, P[0][1]]], [[0, P[0][1]], [g.W, P[0][1]]]),
     handles: (_d, P, g) => [[g.W / 2, P[0][1]]],
     moveHandle(d, _i, pt) { d.pts[0] = { t: d.pts[0].t, p: pt.p } },
     priceAt: d => d.pts[0].p,
@@ -58,6 +61,7 @@ export const BASIC_TOOLS: ToolDef[] = [
       r.hline(P[0][1], P[0][0], g.W);
       r.text(d.style.text || g.fmt(d.pts[0].p), [P[0][0] + 4, P[0][1] - 3], { size: 11, color: d.style.color, noHit: true });
     },
+    frame: (_d, P, g) => frameOf([[P[0][0], P[0][1]], [g.W, P[0][1]]], [[P[0][0], P[0][1]], [g.W, P[0][1]]]),
     priceAt: (d, t) => (t >= d.pts[0].t ? d.pts[0].p : null),
   },
   {

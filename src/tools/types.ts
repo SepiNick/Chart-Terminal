@@ -103,4 +103,6 @@ export interface ToolDef {
   moveHandle?(d: Drawing, i: number, pt: Pt, g: Geo): void;
   /** Price on this drawing at time t, for alerts on drawings (lines/channels). */
   priceAt?(d: Drawing, t: number, g: Geo): number | null;
+  /** Upper and lower edge of a line or channel (screen coordinates): where the T-button label can go (src/tools/labels.ts). */
+  frame?(d: Drawing, P: XY[], g: Geo): import('./labels.ts').Frame | null;
 }
