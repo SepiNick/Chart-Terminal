@@ -8,6 +8,25 @@ import { store } from './store.ts';
 export type Lang = 'en' | 'fa';
 
 export const FA: Record<string, string> = {
+  // feature tour
+  'Welcome to Chart Terminal': 'به Chart Terminal خوش آمدید', 'A two-minute tour of what is here. You can skip it any time, and replay it from the ☰ menu › Feature tour.': 'یک تور دو دقیقه‌ای از امکانات برنامه. هر وقت خواستید می‌توانید رد کنید و از منوی ☰ › Feature tour دوباره ببینید.',
+  'Tap to search any coin, forex pair or stock. On the chart you can also just start typing a symbol.': 'برای جستجوی هر ارز دیجیتال، جفت‌ارز یا سهم بزنید. روی نمودار هم می‌توانید مستقیم نام نماد را تایپ کنید.',
+  'Timeframes': 'تایم‌فریم‌ها', 'Switch between 1 minute and 1 week candles. The ▾ button next to them lists every interval, and you can type your own.': 'بین کندل ۱ دقیقه‌ای تا ۱ هفته‌ای جابه‌جا شوید. دکمه‌ی ▾ همه‌ی بازه‌ها را نشان می‌دهد و بازه‌ی دلخواه هم می‌شود تایپ کرد.',
+  'Indicators': 'اندیکاتورها', 'Add moving averages, RSI, MACD and hundreds more, or write your own in Pine, MQL, NinjaScript or Python.': 'میانگین متحرک، RSI، MACD و صدها اندیکاتور دیگر اضافه کنید یا خودتان با Pine، MQL، NinjaScript یا Python بنویسید.',
+  'Get a notification when price crosses a level or an indicator fires. With a server they keep working while the app is closed.': 'وقتی قیمت از یک سطح رد شد یا اندیکاتور سیگنال داد خبر بگیرید. با سرور، حتی وقتی برنامه بسته است هم کار می‌کنند.',
+  'Rewind the chart and replay the market candle by candle to practise or test an idea without knowing the future.': 'نمودار را به عقب ببرید و بازار را کندل‌به‌کندل پخش کنید تا بدون دانستن آینده تمرین کنید یا ایده‌ای را بسنجید.',
+  'Order flow': 'اردرفلو', 'Footprint, delta, big-trade bubbles and the liquidity heatmap. "Quick start" has ready-made views; each can be switched on and off on its own.': 'فوت‌پرینت، دلتا، حباب معامله‌های بزرگ و نقشه‌ی نقدینگی. «Quick start» نمایش‌های آماده دارد و هر کدام جدا روشن و خاموش می‌شود.',
+  'Drawing tools': 'ابزارهای ترسیم', 'Trend lines, Fibonacci, shapes, text, measure and more. Click a tool, then click on the chart. Right-click a drawing to edit it.': 'خط روند، فیبوناچی، شکل‌ها، متن، خط‌کش و بیشتر. ابزار را انتخاب و روی نمودار کلیک کنید. روی هر ترسیم راست‌کلیک کنید تا ویرایشش کنید.',
+  'The chart': 'نمودار', 'Scroll to move, pinch or use the wheel to zoom, drag the price scale to stretch. Right-click for the chart menu: buy and sell, alerts, widgets.': 'برای حرکت بکشید، برای زوم دو انگشتی یا چرخ ماوس، و برای کشیدن مقیاس قیمت را بکشید. با راست‌کلیک منوی نمودار باز می‌شود: خرید و فروش، هشدار، ویجت.',
+  'Workspace tabs': 'تب‌های کاری', 'Keep several charts open in tabs. Switching tabs is instant: each tab keeps its charts loaded. Double-click a tab to rename it.': 'چند نمودار را در تب‌ها باز نگه دارید. عوض کردن تب فوری است چون هر تب نمودارهایش را لود نگه می‌دارد. با دابل‌کلیک نام تب را عوض کنید.',
+  'Layouts': 'چیدمان‌ها', 'Show up to 16 charts at once, link them by symbol, interval, crosshair or time, and save the arrangement.': 'تا ۱۶ نمودار هم‌زمان نشان دهید، آن‌ها را بر اساس نماد، بازه، خط‌چین یا زمان به هم وصل کنید و چیدمان را ذخیره کنید.',
+  'Side panels': 'پنل‌های کناری', 'Watchlist, alerts, the paper-trading ticket, object tree, market screener, DOM, journal, accounts, skills and the AI assistant live here.': 'واچ‌لیست، هشدارها، فرم معامله‌ی کاغذی، درخت اشیاء، اسکرینر بازار، DOM، ژورنال، حساب‌ها، مهارت‌ها و دستیار هوش مصنوعی این‌جا هستند.',
+  'Your symbols with live price and change, tabs for several lists, and a mini-chart on desktop widgets. Tap a symbol to open it; right-click for more.': 'نمادهای شما با قیمت و تغییر زنده، تب برای چند لیست، و نمودار کوچک در ویجت دسکتاپ. روی نماد بزنید تا باز شود؛ راست‌کلیک گزینه‌های بیشتر دارد.',
+  'Bottom panel': 'پنل پایین', 'Positions, orders and history, the Pine and Python editors and the Strategy Tester. It starts collapsed: tap a tab or the arrow to open it.': 'پوزیشن‌ها، سفارش‌ها و تاریخچه، ویرایشگرهای Pine و Python و تستر استراتژی. بسته شروع می‌شود: یک تب یا فلش را بزنید تا باز شود.',
+  'Connect Telegram, email, a webhook or push so alerts reach you anywhere. This needs the app connected to your server.': 'تلگرام، ایمیل، وبهوک یا پوش را وصل کنید تا هشدارها همه‌جا به شما برسند. برنامه باید به سرورتان وصل باشد.',
+  'Menu': 'منو', 'Settings, theme, language (English / فارسی), connections, screener, desktop widgets, licences and this tour.': 'تنظیمات، تم، زبان (English / فارسی)، اتصال‌ها، اسکرینر، ویجت‌های دسکتاپ، مجوزها و همین تور.',
+  'You are ready': 'آماده‌اید', 'Start with the watchlist: pick a symbol, add an indicator, draw a line. Everything is saved automatically.': 'از واچ‌لیست شروع کنید: یک نماد انتخاب کنید، اندیکاتور اضافه کنید، خط بکشید. همه‌چیز خودکار ذخیره می‌شود.',
+  'Back': 'قبلی', 'Next': 'بعدی', 'Feature tour': 'تور امکانات', 'Licences': 'مجوزها',
   // top bar
   'ƒx Indicators': 'ƒx اندیکاتورها', '⏰ Alert': '⏰ هشدار', '⏪ Replay': '⏪ بازپخش', '▦ Order flow': '▦ اردرفلو', 'Unnamed': 'بدون‌نام',
   'Symbol search (start typing on the chart)': 'جستجوی نماد (روی نمودار شروع به تایپ کنید)', 'Compare or add symbol': 'مقایسه یا افزودن نماد', 'All intervals': 'همه‌ی بازه‌ها',

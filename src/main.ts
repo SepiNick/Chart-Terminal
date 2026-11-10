@@ -6,6 +6,7 @@ import { latinKey } from './keymap.ts';
 import { openScreenerPro, initScreenerPro } from './screenerpro.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { canWidget, widgetItems, listWidgetItems, widgetsMenu } from './widgets.ts';
+import { initTour, startTour } from './tour.ts';
 import { TOOL_MAP } from './tools/index.ts';
 import type { Drawing } from './tools/types.ts';
 import { renderLeftToolbar, wireLeftToolbar, renderFloating, drawingMenu, openProps, copyDrawings, pasteDrawings, setTool, setZoomOut, templateFor, type DrawUIHost } from './drawui.ts';
@@ -601,6 +602,7 @@ function shareShot(c: HTMLCanvasElement) {
 }
 function copyShot(c: HTMLCanvasElement) { c.toBlob(b => b && navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(() => toast('Chart image copied'), () => toast('Clipboard not available'))) }
 initI18n();
+initTour();
 installErrorLog();
 $('#diagRun').onclick = async () => {
   const out = $<HTMLTextAreaElement>('#diagOut'), stat = $('#diagSt'), copy = $('#diagCopy'), run = $<HTMLButtonElement>('#diagRun');
@@ -1533,6 +1535,7 @@ $('#menuBtn').onclick = e => {
     { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
     { label: 'Screener Pro…', icon: '📊', action: openScreenerPro },
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
+    { label: 'Feature tour', icon: '❓', action: startTour },
     { label: 'Licences', icon: 'ⓘ', action: () => { window.open('/licenses.html', '_blank') } },
     ...(canWidget ? [{ label: 'Desktop widgets…', icon: '🧩', action: () => void widgetsMenu(r.right - 220, r.bottom + 2, { sym: active().cfg.symbol, tf: active().cfg.tf }, sortedIds(lists).map(i => ({ id: i, name: lists[i].name }))) }] : []),
     { sep: true },
