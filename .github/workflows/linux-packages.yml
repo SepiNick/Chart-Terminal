@@ -25,7 +25,6 @@ jobs:
           cd desktop/release
           cp ./*.AppImage ./*.deb ./*.pacman ../../out/
           cd ../../out
-          for f in *; do case "$f" in *.AppImage) n="Chart-Terminal-${f##*-}";; esac; done
           ls -la
       - uses: actions/upload-artifact@v4
         with: { name: linux-packages, path: out/* }
