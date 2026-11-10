@@ -56,6 +56,7 @@
       "icon": "build/icon.png"
     },
     "nsis": {
+      "artifactName": "${productName} Setup ${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
