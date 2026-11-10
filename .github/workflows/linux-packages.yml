@@ -1,0 +1,41 @@
+# Builds the Linux desktop packages (AppImage, deb, and pacman for Arch) on a Linux runner, since they cannot be built on Windows.
+# Run it by hand: Actions > Linux packages > Run workflow, with the release tag to attach the files to (e.g. v0.1.1).
+name: Linux packages
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to upload the packages to (empty = only keep them as a run artifact)
+        required: false
+permissions:
+  contents: write
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libarchive-tools rpm fakeroot
+      - run: npm ci && npm --prefix server ci && npm --prefix desktop ci
+      - run: npm --prefix desktop run dist:linux
+      - name: Collect
+        run: |
+          mkdir out
+          cd desktop/release
+          cp ./*.AppImage ./*.deb ./*.pacman ../../out/
+          cd ../../out
+          for f in *; do case "$f" in *.AppImage) n="Chart-Terminal-${f##*-}";; esac; done
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with: { name: linux-packages, path: out/* }
+      - name: Attach to the release
+        if: ${{ inputs.tag != '' }}
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          cd out
+          v="${{ inputs.tag }}"; v="${v#v}"
+          mv ./*.AppImage "Chart-Terminal-${v}-linux-x64.AppImage"
+          mv ./*.deb "Chart-Terminal-${v}-linux-amd64.deb"
+          mv ./*.pacman "Chart-Terminal-${v}-linux-x64.pacman"
+          gh release upload "${{ inputs.tag }}" ./* --clobber

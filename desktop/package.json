@@ -91,6 +91,12 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "pacman",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "category": "Finance",
