@@ -21,8 +21,7 @@ ssh -t "$HOST" "set -e; cd ~/$DIR
 
 cat <<'MSG'
 
-Done. Next, on the Pi itself (one time):
-  1. Set the first password:   ssh -t HOST 'cd ~/chart-terminal && sudo docker compose exec app node server/cli.ts'
-  2. Open http://localhost:8787 in a browser ON THE PI (or use the same command's output) and finish setup.
+Done. Set the first password once, on the Pi itself (the server refuses to do it over the network):
+  ssh -t HOST 'read -rsp "New password: " p; echo; curl -s -X POST http://127.0.0.1:8787/api/auth/setup -H "content-type: application/json" -d "{\"password\":\"$p\"}"'
 Then follow docs/raspberry-pi.md to add the server in the apps and connect Telegram.
 MSG
