@@ -7,6 +7,7 @@ import { openScreenerPro, initScreenerPro } from './screenerpro.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { canWidget, widgetItems, listWidgetItems, widgetsMenu } from './widgets.ts';
 import { initTour, startTour } from './tour.ts';
+import { openBugReport } from './bugreport.ts';
 import { TOOL_MAP } from './tools/index.ts';
 import type { Drawing } from './tools/types.ts';
 import { renderLeftToolbar, wireLeftToolbar, renderFloating, drawingMenu, openProps, copyDrawings, pasteDrawings, setTool, setZoomOut, templateFor, type DrawUIHost } from './drawui.ts';
@@ -1542,6 +1543,7 @@ $('#menuBtn').onclick = e => {
     { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
     { label: 'Screener Pro…', icon: '📊', action: openScreenerPro },
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
+    { label: 'Report a bug…', icon: '🐞', action: () => openBugReport({ charts: panes.length, theme: st.settings.theme, lang: document.documentElement.lang, charts_info: panes.map(p => `${p.cfg.symbol} ${p.cfg.tf} ${p.cfg.type}`).join('; ') }) },
     { label: 'Feature tour', icon: '❓', action: startTour },
     { label: 'Licences', icon: 'ⓘ', action: () => { window.open('/licenses.html', '_blank') } },
     ...(canWidget ? [{ label: 'Desktop widgets…', icon: '🧩', action: () => void widgetsMenu(r.right - 220, r.bottom + 2, { sym: active().cfg.symbol, tf: active().cfg.tf }, sortedIds(lists).map(i => ({ id: i, name: lists[i].name }))) }] : []),

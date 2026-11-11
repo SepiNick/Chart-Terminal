@@ -8,6 +8,11 @@ import { store } from './store.ts';
 export type Lang = 'en' | 'fa';
 
 export const FA: Record<string, string> = {
+  // bug report
+  'Report a bug…': 'گزارش باگ…', 'Report a bug': 'گزارش باگ', 'What went wrong?': 'چه مشکلی پیش آمد؟', 'What you did, what you expected, what happened.': 'چه کاری کردید، چه انتظاری داشتید، چه اتفاقی افتاد.',
+  'Describe the problem': 'مشکل را توضیح دهید', 'Screenshots': 'عکس‌ها', 'How can we reach you?': 'چطور با شما در تماس باشیم؟', '(optional)': '(اختیاری)',
+  'Include diagnostic info: version, system, screen size, chart symbols and settings, recent app errors. No keys, passwords or tokens.': 'اطلاعات تشخیصی همراه باشد: نسخه، سیستم، اندازه‌ی صفحه، نمادها و تنظیمات نمودار، خطاهای اخیر برنامه. بدون کلید، رمز و توکن.',
+  'Send report': 'ارسال گزارش',
   // feature tour
   'Welcome to Chart Terminal': 'به Chart Terminal خوش آمدید', 'A two-minute tour of what is here. You can skip it any time, and replay it from the ☰ menu › Feature tour.': 'یک تور دو دقیقه‌ای از امکانات برنامه. هر وقت خواستید می‌توانید رد کنید و از منوی ☰ › Feature tour دوباره ببینید.',
   'Tap to search any coin, forex pair or stock. On the chart you can also just start typing a symbol.': 'برای جستجوی هر ارز دیجیتال، جفت‌ارز یا سهم بزنید. روی نمودار هم می‌توانید مستقیم نام نماد را تایپ کنید.',

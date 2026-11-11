@@ -461,3 +461,7 @@ dialog.ip h3{display:flex;justify-content:space-between;align-items:center}
 #tour .tr-btns{display:flex;gap:6px;align-items:center}#tour .tr-btns button{padding:6px 14px}#tour .tr-btns [hidden]{display:none}
 html.fa #tour .tr-card{direction:rtl}
 @media (prefers-reduced-motion:reduce){#tour .tr-hl{transition:none}}
+
+/* bug report dialog (src/bugreport.ts) */
+.br-th{position:relative;display:inline-block}.br-th img{height:64px;border:1px solid var(--line);border-radius:6px;display:block}
+.br-th .x{position:absolute;top:-6px;right:-6px;background:var(--panel);border:1px solid var(--line);border-radius:50%;width:20px;height:20px;padding:0;font-size:13px}
