@@ -1,11 +1,18 @@
 // NinjaScript (C#) → JS compiler: lex → parse → codegen. See ../contract.ts for the generated-code conventions.
 import type { Diagnostic, NtCompileOptions, NtCompileResult, Rt } from '../contract.ts';
-import { lex } from './lexer.ts';
+import { lex, type Tok } from './lexer.ts';
 import { parse } from './parser.ts';
 import { generate } from './codegen.ts';
 import type { Decl } from './ast.ts';
 
 const UNSAFE = /^(constructor|__proto__|prototype|caller|callee|__define[GS]etter__|__lookup[GS]etter__)$/;   // names that reach Function / Object internals from generated JS (`constructor.constructor("…")()` runs anything)
+/** Scans every identifier, including the ones inside $"{…}" interpolation holes (their tokens and alignment tokens are nested). */
+function forbidden(toks: Tok[], errors: Diagnostic[]) {
+  for (const t of toks) {
+    if (t.t === 'id' && UNSAFE.test(t.v)) errors.push({ file: t.file, line: t.line, col: t.col, msg: `'${t.v}' is not allowed in scripts` });
+    for (const p of t.parts ?? []) if (typeof p !== 'string') { forbidden(p.toks, errors); if (p.align) forbidden(p.align, errors) }
+  }
+}
 const makeRef = <T>(v: T) => ({ v });
 const dedupe = (list: Diagnostic[]) => {
   const seen = new Set<string>();
@@ -18,7 +25,7 @@ export function compile(files: Record<string, string>, opts: NtCompileOptions): 
   const errors: Diagnostic[] = [], warnings: Diagnostic[] = [], decls: Decl[] = [], usings = new Set<string>();
   for (const [path, src] of Object.entries(files)) {
     const toks = lex(src, path, errors);
-    for (const t of toks) if (t.t === 'id' && UNSAFE.test(t.v)) errors.push({ file: t.file, line: t.line, col: t.col, msg: `'${t.v}' is not allowed in scripts` });
+    forbidden(toks, errors);
     const r = parse(toks, errors);
     decls.push(...r.decls);
     r.usings.forEach(u => usings.add(u));

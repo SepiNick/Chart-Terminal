@@ -26,6 +26,12 @@ test('NinjaScript: the same names are rejected', () => {
   assert.ok(r.errors.some(e => /not allowed/.test(e.msg)));
 });
 
+test('NinjaScript: the names are also rejected inside interpolated strings', () => {
+  const r = ninja({ 'a.cs': 'class A { void F() { var s = $"{constructor}"; var t = $"{1,constructor}"; } }' }, { globals: [] });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.filter(e => /not allowed/.test(e.msg)).length >= 2);
+});
+
 test('Pine: a huge array is an error, not a heap crash; builtin names are own properties only', () => {
   assert.throws(() => pine('//@version=6\nindicator("t")\na = array.new_float(2000000000, 0)\nplot(array.size(a))'), /at most 100000/);
   const v = pine('//@version=6\nindicator("t")\nplot(constructor)').plots[0]?.values ?? [];   // an unknown name is na, never Object's own `constructor`
