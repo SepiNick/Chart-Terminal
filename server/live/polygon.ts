@@ -36,7 +36,7 @@ async function markets(): Promise<MarketRow[]> {
 
 async function bars(sym: string, tf: string, until?: number, limit = 1000): Promise<{ bars: Bar[]; base: string }> {
   const g = pickSpan(tf); if (!g) throw Error(`Polygon has no bars for ${tf}`);
-  const n = Math.min(50000, Math.max(1, limit)), end = (until ?? Math.floor(Date.now() / 1000)) * 1000;
+  const n = Math.min(50000, Math.max(1, limit)), end = until ?? Date.now();
   const start = end - n * tfSeconds(g.base) * 1000 * (tfSeconds(g.base) >= 86400 ? 2 : 6);   // nights, weekends and holidays have no bars
   const q = new URLSearchParams({ adjusted: 'true', sort: 'desc', limit: String(n) });
   const j = await get<{ results?: { t: number; o: number; h: number; l: number; c: number; v: number }[] }>(`https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(sym)}/range/${g.mult}/${g.span}/${Math.floor(start)}/${Math.floor(end)}?${q}`);

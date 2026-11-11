@@ -13,3 +13,10 @@ graphify-out
 *.jks
 keystore.properties
 server/data
+.env
+.env.*
+**/*.pem
+**/*.key
+**/*.jks
+mt5bridge/token.txt
+server/data

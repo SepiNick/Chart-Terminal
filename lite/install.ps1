@@ -19,6 +19,8 @@ $old = Join-Path $InstallDir 'node.exe'
 if (Test-Path $old) { & $old (Join-Path $InstallDir 'launcher.mjs') --stop | Out-Null }
 
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
+if ((Resolve-Path $src).Path -eq (Resolve-Path $InstallDir).Path) { throw 'Run install.ps1 from the extracted download, not from the installed folder.' }
+if ((Get-ChildItem $InstallDir -Force | Measure-Object).Count -gt 0 -and -not (Test-Path (Join-Path $InstallDir 'launcher.mjs'))) { throw "$InstallDir is not empty and is not a Chart Terminal install; choose another -InstallDir." }
 # Replace the program files only; a clean copy avoids stale files from an older version.
 Get-ChildItem $InstallDir -Force | Remove-Item -Recurse -Force
 Copy-Item (Join-Path $src '*') $InstallDir -Recurse -Force

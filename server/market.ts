@@ -121,11 +121,12 @@ export function startFeed(exchange: string, symbol: string, tf: string, send: (b
     })();
     return () => { alive = false };
   }
-  let stop = () => {};
+  let stop = () => {}, stopped = false;
   cx.ohlcv(exchange, symbol, tf, undefined, 2).then(({ base }) => {
+    if (stopped) return;   // dropped before this answered: never start the watch
     stop = cx.watch(exchange, symbol, base, base === tf ? send : emitAgg);
   }).catch(() => onFail?.());
-  return () => stop();
+  return () => { stopped = true; stop() };
 }
 
 // Clients send {op:'sub'|'unsub', exchange, symbol, tf} for candles or {op, kind:'trades'|'book', exchange, symbol} for order flow.

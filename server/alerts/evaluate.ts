@@ -130,7 +130,7 @@ export function scriptHits(a: Alert, st: EvalState, out: Outputs, i: number, clo
 
 // Same contract as notify's `render` (§4); kept local so this module stays pure (importing notify would open the database).
 /** Replace {{name}} placeholders; unknown names stay as they are. */
-export const render = (tpl: string, vars: Record<string, string>) => tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (m, k: string) => vars[k] ?? m);
+export const render = (tpl: string, vars: Record<string, string>) => tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (m, k: string) => (Object.hasOwn(vars, k) ? vars[k] : m));
 
 /** Placeholder values for a fire on bar i. */
 export function barVars(a: Alert, bars: Bar[], i: number, now: number, out?: Outputs): Record<string, string> {

@@ -3,7 +3,7 @@
 const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, screen, shell, utilityProcess, session } = require('electron');
 const { createServer } = require('node:net');
 const { execFile } = require('node:child_process');
-const { readFileSync, writeFileSync } = require('node:fs');
+const { readFileSync, writeFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 
 // CT_USER_DATA: a separate data folder for testing, so a test login never lands in the real app's data.
@@ -117,7 +117,7 @@ function createTray() {
     { type: 'separator' },
     { label: 'Keep running in the tray when the window closes', type: 'checkbox', checked: settings().tray, click: i => { saveSettings({ ...settings(), tray: i.checked }) } },
     { label: 'Start with Windows', type: 'checkbox', visible: process.platform !== 'linux', checked: app.getLoginItemSettings().openAtLogin, click: i => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },
-    { label: 'Check for updates', enabled: app.isPackaged, click: () => checkUpdates(true) },
+    { label: 'Check for updates', enabled: updatesOn(), click: () => checkUpdates(true) },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ]);
@@ -128,6 +128,8 @@ function createTray() {
 
 // Updates: electron-updater reads the feed from app-update.yml, which electron-builder writes only when package.json
 // "build.publish" is set. Without it (or offline) the check fails quietly unless asked from the tray.
+// electron-builder writes app-update.yml only when package.json build.publish is set; without it there is nothing to check.
+const updatesOn = () => app.isPackaged && existsSync(join(process.resourcesPath, 'app-update.yml'));
 function checkUpdates(manual = false) {
   let autoUpdater;
   try { ({ autoUpdater } = require('electron-updater')) } catch { return }
@@ -337,10 +339,15 @@ ipcMain.on('ct:prompt', (e, msg, def) => {
 });
 
 let quitting = false, popAsked = false;
-app.on('before-quit', () => {
+let serverStopped = false;
+app.on('before-quit', e => {
   quitting = true;
-  // Ask the server to exit cleanly (the trade recorder flushes on exit); kill it if it doesn't within 3 s.
-  if (server) { server.postMessage('quit'); const s = server; setTimeout(() => s.kill(), 3000).unref() }
+  // Ask the server to exit cleanly (the trade recorder flushes on exit) and wait for it, up to 3 s, before the app goes.
+  if (server && !serverStopped) {
+    e.preventDefault(); serverStopped = true;
+    const s = server, done = () => { clearTimeout(t); app.quit() }, t = setTimeout(() => { s.kill(); done() }, 3000);
+    s.once('exit', done); s.postMessage('quit');
+  }
 });
 app.on('second-instance', showMain);
 // Without the tray, closing the last window stops the server too (alerts, forward tests, recording).
@@ -348,12 +355,19 @@ app.on('window-all-closed', () => { if (!tray || !settings().tray) app.quit() })
 
 // Default-deny for web permissions (camera, microphone, geolocation, ...): the app needs notifications, fullscreen and copying only.
 const ALLOWED_PERMISSIONS = new Set(['notifications', 'fullscreen', 'clipboard-sanitized-write']);
-app.on('web-contents-created', (_e, wc) => wc.on('will-attach-webview', ev => ev.preventDefault()));
+// The journal records voice notes: allow the microphone (audio only: never the camera or the screen), for our own origin.
+const permitted = (permission, details) => ALLOWED_PERMISSIONS.has(permission) || (permission === 'media' && Array.isArray(details?.mediaTypes) && details.mediaTypes.length > 0 && details.mediaTypes.every(t => t === 'audio'));
+app.on('web-contents-created', (_e, wc) => {
+  wc.on('will-attach-webview', ev => ev.preventDefault());
+  // Every window (also the ones the page opens) stays on our origin, redirects and frames included; the prompt window is a data: page.
+  const stay = (ev, url) => { if (!sameOrigin(url) && !url.startsWith('data:')) { ev.preventDefault(); openOutside(url) } };
+  wc.on('will-navigate', stay); wc.on('will-redirect', stay); wc.on('will-frame-navigate', stay);
+});
 
 app.whenReady().then(async () => {
   if (!gotLock) return;   // a second launch only asks the running app to show itself (second-instance); it must not start its own server, which also rewrote port.txt
-  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => cb(ALLOWED_PERMISSIONS.has(permission) && sameOrigin(details?.requestingUrl || wc.getURL())));
-  session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => ALLOWED_PERMISSIONS.has(permission) && sameOrigin(origin || wc?.getURL() || ''));
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => cb(permitted(permission, details) && sameOrigin(details?.requestingUrl || wc.getURL())));
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin, details) => (permission === 'media' ? details?.mediaType === 'audio' : ALLOWED_PERMISSIONS.has(permission)) && sameOrigin(origin || wc?.getURL() || ''));
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);   // the app has its own menus; keep the macOS app menu
   try { await startServer() } catch (e) { dialog.showErrorBox('Chart Terminal', e.message); app.quit(); return }
   try { createTray() } catch (e) { console.error('No tray:', e.message) }   // some Linux desktops have none
@@ -362,5 +376,5 @@ app.whenReady().then(async () => {
   restoreWidgets();   // widgets come back even when the app starts hidden in the tray
   for (const ev of ['display-removed', 'display-added', 'display-metrics-changed']) screen.on(ev, () => setTimeout(reflow, 400));
   app.on('activate', showMain);
-  if (app.isPackaged) setTimeout(() => checkUpdates(), 10_000);
+  if (updatesOn()) setTimeout(() => checkUpdates(), 10_000);
 });

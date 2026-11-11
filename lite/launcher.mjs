@@ -44,7 +44,7 @@ const freePort = want => new Promise((ok, fail) => {
 
 async function stop() {
   const s = readJson(F('server.json'));
-  if (!s || !alive(s.pid)) { rmSync(F('server.json'), { force: true }); return console.log('Not running.') }
+  if (!s || !alive(s.pid) || !(await answers(s.port, s.token))) { rmSync(F('server.json'), { force: true }); return console.log('Not running.') }   // a stale file may name a pid Windows gave to another program
   writeFileSync(F('stop'), '1');   // the server polls for it and exits cleanly (flushes the trade recorder)
   for (let i = 0; i < 100 && alive(s.pid); i++) await sleep(100);
   if (alive(s.pid)) { try { process.kill(s.pid) } catch {} console.log('Server did not stop in time; killed.') } else console.log('Stopped.');

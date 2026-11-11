@@ -137,7 +137,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse, listener
         res.setHeader('access-control-allow-origin', o);
         res.setHeader('access-control-expose-headers', 'retry-after');
         if (req.method === 'OPTIONS') {
-          res.writeHead(204, { 'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS', 'access-control-allow-headers': 'authorization, content-type, x-ct-client', 'access-control-max-age': '600', ...SECURITY_HEADERS }).end();
+          res.writeHead(204, { 'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS', 'access-control-allow-headers': 'authorization, content-type, x-ct-client', 'access-control-max-age': '600', ...SECURITY_HEADERS }).end();
           return;
         }
       }

@@ -8,8 +8,8 @@ HOST="${1:?usage: scripts/deploy-pi.sh user@pi-address}"
 DIR=chart-terminal
 
 echo "==> copying the source to $HOST:~/$DIR"
-tar czf - --exclude=node_modules --exclude=.git --exclude=.claude --exclude=dist --exclude=dist-lite --exclude=desktop \
-  --exclude=android --exclude=graphify-out --exclude='*.db' --exclude=.env --exclude=.env.* . \
+tar czf - --exclude=node_modules --exclude=.git --exclude=./.claude --exclude=./dist --exclude=./dist-lite --exclude=./desktop \
+  --exclude=./android --exclude=./graphify-out --exclude=./server/data --exclude=./mt5bridge/token.txt --exclude='*.db' --exclude='*.pem' --exclude='*.key' --exclude='*.jks' --exclude=.env --exclude='.env.*' . \
   | ssh "$HOST" "mkdir -p ~/$DIR && tar xzf - -C ~/$DIR"
 
 echo "==> installing Docker if needed, then building and starting (the first build takes several minutes on a Pi)"

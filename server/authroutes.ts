@@ -62,10 +62,11 @@ if (!isPublic) {
     c.res.setHeader('set-cookie', sessionCookie(createSession(c.req), c.secure));
     return { ok: true };
   }, { public: true, limit: 4096 });
-  route('POST', '/api/auth/logout', c => { if (c.session) endSession(c.session); c.res.setHeader('set-cookie', clearCookie(c.secure)) });
+  route('POST', '/api/auth/logout', c => { if (c.session) { closeClients(cl => cl.session === c.session); endSession(c.session) } c.res.setHeader('set-cookie', clearCookie(c.secure)) });
   route('POST', '/api/auth/password', c => {
     if (!checkPassword(pw(c.body, 'current'))) throw new HttpError(401, 'Current password is wrong');
     setPassword(pw(c.body));   // every cookie session and device token ends
+    closeClients(() => true);   // and so does every open socket
     if (!c.bearer) c.res.setHeader('set-cookie', sessionCookie(createSession(c.req), c.secure));
     return { ok: true };
   }, { limit: 4096 });

@@ -32,7 +32,7 @@ async function markets(): Promise<MarketRow[]> {
 
 async function bars(sym: string, tf: string, until?: number, limit = 1000): Promise<{ bars: Bar[]; base: string }> {
   const g = pickTimeframe(tf); if (!g) throw Error(`Alpaca has no bars for ${tf}`);
-  const k = keys(), n = Math.min(10000, Math.max(1, limit)), end = until ?? Math.floor(Date.now() / 1000);
+  const k = keys(), n = Math.min(10000, Math.max(1, limit)), end = Math.floor((until ?? Date.now()) / 1000);
   // Nights, weekends and holidays have no bars: look back several times further than n bars of this size.
   const start = end - n * tfSeconds(g.base) * (tfSeconds(g.base) >= 86400 ? 2 : 6);
   const q = new URLSearchParams({ timeframe: g.tf, limit: String(n), feed: 'iex', adjustment: 'raw', sort: 'desc', start: new Date(start * 1000).toISOString(), end: new Date(end * 1000).toISOString() });

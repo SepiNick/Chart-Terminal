@@ -35,7 +35,7 @@ async function markets(): Promise<MarketRow[]> {
 async function bars(sym: string, tf: string, until?: number, limit = 1000): Promise<{ bars: Bar[]; base: string }> {
   const g = pickInterval(tf); if (!g) throw Error(`Twelve Data has no bars for ${tf}`);
   const q = new URLSearchParams({ symbol: sym.includes('_') ? sym.replace('_', '/') : sym, interval: g.interval, outputsize: String(Math.min(5000, Math.max(1, limit))), order: 'desc', timezone: 'UTC' });
-  if (until) q.set('end_date', new Date(until * 1000).toISOString().slice(0, 19).replace('T', ' '));
+  if (until) q.set('end_date', new Date(until).toISOString().slice(0, 19).replace('T', ' '));
   const j = await get<{ status?: string; message?: string; values?: { datetime: string; open: string; high: string; low: string; close: string; volume?: string }[] }>(`https://api.twelvedata.com/time_series?${q}`);
   const out = (j.values ?? []).map(v => ({ time: Math.floor(Date.parse(v.datetime.length > 10 ? v.datetime.replace(' ', 'T') + 'Z' : v.datetime + 'T00:00:00Z') / 1000), open: +v.open, high: +v.high, low: +v.low, close: +v.close, volume: +(v.volume ?? 0) }));
   return { bars: out.reverse(), base: g.base };

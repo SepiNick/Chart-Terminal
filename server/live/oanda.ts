@@ -45,7 +45,7 @@ async function markets(): Promise<MarketRow[]> {
 async function bars(sym: string, tf: string, until?: number, limit = 1000): Promise<{ bars: Bar[]; base: string }> {
   const g = pickGranularity(tf); if (!g) throw Error(`OANDA has no candles for ${tf}`);
   const q = new URLSearchParams({ granularity: g.gran, price: 'M', count: String(Math.min(5000, Math.max(1, limit))) });
-  if (until) q.set('to', String(until));
+  if (until) q.set('to', String(Math.floor(until / 1000)));
   const j = await get<{ candles?: { time: string; volume: number; mid?: { o: string; h: string; l: string; c: string } }[] }>(`/v3/instruments/${encodeURIComponent(sym)}/candles?${q}`);
   const out: Bar[] = [];
   for (const c of j.candles ?? []) if (c.mid) out.push({ time: Math.floor(Date.parse(c.time) / 1000), open: +c.mid.o, high: +c.mid.h, low: +c.mid.l, close: +c.mid.c, volume: c.volume });
