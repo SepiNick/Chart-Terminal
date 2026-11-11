@@ -259,7 +259,7 @@ export class OrderFlow implements ISeriesPrimitive<Time> {
     ctx.putImageData(img, col, 0);
   }
   /** x of a moment in time, interpolated inside its bar. */
-  // ponytail: linear from the last bar, which assumes no gaps between bars (true for 24/7 crypto); weekend-gapped markets would need per-bar lookup.
+  // shortcut: linear from the last bar, which assumes no gaps between bars (true for 24/7 crypto); weekend-gapped markets would need per-bar lookup.
   private xOf(t: number): number | null {
     const ts = this.chart!.timeScale(), sec = this.host.tfSec(), last = this.host.bars().at(-1);
     const x = last && ts.timeToCoordinate(last.time as UTCTimestamp);

@@ -73,7 +73,7 @@ export const ARRAY: Record<string, Builtin> = {
   clear: (_, a, nm) => { id(a, nm).length = 0; return NaN },
   concat: (_, a, nm) => { const v = id(a, nm, 0, 'id1'); v.push(...id(a, nm, 1, 'id2')); return v },
   copy: (_, a, nm) => [...id(a, nm)],
-  // ponytail: slice returns a copy, not a live view of the source like Pine; add a view type if scripts rely on it.
+  // shortcut: slice returns a copy, not a live view of the source like Pine; add a view type if scripts rely on it.
   slice: (_, a, nm) => { const v = id(a, nm), e = num(arg(a, nm, 2, 'index_to', v.length)); return v.slice(num(arg(a, nm, 1, 'index_from', 0)), Number.isNaN(e) ? v.length : e) },
   includes: (_, a, nm) => { const x = arg(a, nm, 1, 'value'); return id(a, nm).some(y => y === x || (Number.isNaN(x) && Number.isNaN(y))) },
   indexof: (_, a, nm) => id(a, nm).indexOf(arg(a, nm, 1, 'value')),

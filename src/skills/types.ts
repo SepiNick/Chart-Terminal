@@ -1,4 +1,4 @@
-// In-app versions of the installed trading skills (claude-trading-skills, trader-skills): each skill's rules and
+// In-app versions of the installed trading skills (trading-skills, trader-skills): each skill's rules and
 // scoring rebuilt on the app's own data, no language model. A skill is plain data plus a run() function; one renderer
 // (src/skills/ui.ts) draws every form and result, so a skill is just its logic, which is what the tests check.
 import type { Bar } from '../data.ts';

@@ -172,7 +172,7 @@ export function watchPrints(id: string, sym: string, on: (ps: Print[]) => void, 
     const pass = (rows: unknown[]) => { const ps = filter(rows as CcxtTradeId[]); if (ps.length && alive) { last = Math.round(ps.at(-1)!.t * 1000); on(ps) } return ps.length };
     const backfill = async () => {
       if (!x.has.fetchTrades) return;
-      // ponytail: capped at 50 pages; exchanges that ignore `since` only return their latest trades, so a long outage may still leave a hole.
+      // shortcut: capped at 50 pages; exchanges that ignore `since` only return their latest trades, so a long outage may still leave a hole.
       for (let i = 0; i < 50 && alive; i++) {
         try { if (!pass(await x.fetchTrades(m.ccxt, last, 1000))) break } catch { break }
       }

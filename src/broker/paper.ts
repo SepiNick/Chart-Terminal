@@ -60,7 +60,7 @@ export class PaperBroker implements Broker {
       balances: [{ asset: 'USDT', free: a.cash, locked: 0 }],
       positions: Object.entries(a.pos).map(([sym, p]) => ({ sym, qty: p.qty, entry: p.avg, mark: marks[sym], upnl: marks[sym] ? (marks[sym]! - p.avg) * p.qty : undefined })),
       orders: a.orders.map(toBrokerOrder),
-      // ponytail: the newest 500 fills; the journal keeps the full history
+      // shortcut: the newest 500 fills; the journal keeps the full history
       fills: a.fills.slice(0, 500).map((f, i) => ({ id: `${f.id}.${a.fills.length - i}`, orderId: String(f.id), sym: f.sym, side: f.side, qty: f.qty, price: f.px, fee: f.fee, realized: f.realized, ts: f.ts * 1000 })),
       equity: equity(a, marks).equity,
       updated: Date.now(),

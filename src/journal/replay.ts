@@ -29,7 +29,7 @@ class Lines {
 }
 
 let timer = 0;
-const ensureTimer = () => { timer ||= window.setInterval(tick, 250) };   // ponytail: polls the replay position; a chart hook on step would be push-based
+const ensureTimer = () => { timer ||= window.setInterval(tick, 250) };   // shortcut: polls the replay position; a chart hook on step would be push-based
 
 // ---------- (2) backtest logging from Replay ----------
 interface Sim { pane: ChartPane; sym: string; acct: Account; seen: number; accountId: string; last: number; px: number; lines: Lines }

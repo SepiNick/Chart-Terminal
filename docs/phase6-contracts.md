@@ -35,7 +35,7 @@ your final report.
 - Tests next to the code (`node:test`); add new client test folders to the root `test` script. Escape every HTML
   string built from data (`esc` in `src/store.ts`). No new npm dependencies (CCXT is already in `server/`).
 - Before finishing: `npx tsc --noEmit` and `npx tsc --noEmit -p server` pass, all tests pass, commit on your branch
-  ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Don't edit `ROADMAP.md`.
+ . Don't edit `ROADMAP.md`.
   Final report: what works, what's emulated vs native per exchange, what you left out, files touched outside your area.
 
 ## 2. Ownership

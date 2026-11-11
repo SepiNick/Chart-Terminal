@@ -325,7 +325,7 @@ export function initJournal(h: JournalHost) {
   $('#jdShot').onclick = () => {
     const t = cur(), c = host.shot(); if (!t || !c) return toast('No chart to capture');
     readDialog(t);
-    // ponytail: snapshots live in localStorage (~5 MB); a ~640px JPEG is ~40 KB, so roughly a hundred fit. Move to IndexedDB if that runs out.
+    // shortcut: snapshots live in localStorage (~5 MB); a ~640px JPEG is ~40 KB, so roughly a hundred fit. Move to IndexedDB if that runs out.
     const k = Math.min(1, 640 / c.width), s = document.createElement('canvas');
     s.width = c.width * k; s.height = c.height * k; s.getContext('2d')!.drawImage(c, 0, 0, s.width, s.height);
     t.shot = s.toDataURL('image/jpeg', 0.7); save(true); openDialog(t, editing!.mode);

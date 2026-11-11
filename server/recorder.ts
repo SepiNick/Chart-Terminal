@@ -46,7 +46,7 @@ export function binanceSource(sym: string, lastId: number | undefined, on: (ps: 
   const backfill = async () => {
     filling = true;
     try {
-      // ponytail: capped at maxPages × 1000 trades per reconnect; a longer outage leaves a hole rather than hammering the API.
+      // shortcut: capped at maxPages × 1000 trades per reconnect; a longer outage leaves a hole rather than hammering the API.
       for (let i = 0; i < io.maxPages && alive && last != null; i++) {
         const r = await io.fetch(`${API}/aggTrades?symbol=${sym}&fromId=${last + 1}&limit=1000`);
         if (!r.ok) break;

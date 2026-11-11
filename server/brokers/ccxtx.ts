@@ -135,7 +135,7 @@ export function ccxtAdapter(broker: CcxtBroker, market: Market, keys: Keys): Ada
       await x.loadMarkets();
       const plain = await x.fetchOpenOrders() as CcxtOrder[];
       // Trigger orders sit in a separate list on OKX / Bybit / Binance futures.
-      // ponytail: a failing trigger-list call is ignored (exchange without that list); the plain list still shows.
+      // shortcut: a failing trigger-list call is ignored (exchange without that list); the plain list still shows.
       const trig = await (x.fetchOpenOrders(undefined, undefined, undefined, { trigger: true }) as Promise<CcxtOrder[]>).catch(() => []);
       const seen = new Set<string>();
       return [...plain, ...trig].filter(o => !seen.has(o.id) && seen.add(o.id)).map(toOrder);

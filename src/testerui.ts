@@ -416,7 +416,7 @@ const fillKey = (f: { time: number; side: string; qty: number }) => `${f.time}|$
 function forward() {
   if (serverMode) return serverForward();
   if (!fwd || !cur || cur.run.id !== fwd.scriptId || cur.p.cfg.symbol !== fwd.sym || cur.p.cfg.tf !== fwd.tf) return;
-  // ponytail: fills are keyed by time/side/size; a live-bar fill that a re-run later moves would be mirrored twice.
+  // shortcut: fills are keyed by time/side/size; a live-bar fill that a re-run later moves would be mirrored twice.
   const fresh = fillsOf(cur.run).map(f => ({ ...f, key: fillKey(f) })).filter(f => f.time >= fwd!.start && !fwd!.done.includes(f.key));
   for (const f of fresh) {
     const q = +(f.qty * fwd.qty).toFixed(8);

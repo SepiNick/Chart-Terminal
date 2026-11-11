@@ -1,4 +1,4 @@
-// [agent: brokers] Exchange TESTNET accounts on the server (docs/phase6-contracts.md, src/broker/types.ts).
+// Exchange TESTNET accounts on the server (docs/phase6-contracts.md, src/broker/types.ts).
 //   Accounts CRUD with encrypted keys, the guardian check, guarded orders, server-side emulation (trailing, OCO,
 //   brackets, missing stop kinds) and a poll loop that pushes { type: 'broker', account, state } over WS.
 // Keys never leave this module except into the adapter: not in responses, logs or error messages (scrub()).

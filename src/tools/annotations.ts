@@ -55,7 +55,7 @@ function glyphTool(id: string, name: string, icon: string, glyphs: string[]): To
 const EMOJIS = ['🚀', '📈', '📉', '💰', '💵', '💎', '🙌', '⚠️', '✅', '❌', '🔥', '🐂', '🐻', '🐳', '🎯', '⭐', '🌙', '☀️', '⚡', '💥', '🔔', '📌', '📍', '🚩', '🏁', '👀', '👍', '👎', '🤔', '😱', '😎', '🤑', '💡', '🧠', '⏰', '🔒', '🔓', '❤️', '💀', '🎉'];
 const ICONS = ['→', '←', '↑', '↓', '↗', '↘', '✓', '✗', '★', '☆', '⚑', '⚡', '☂', '✚', '●', '■', '▲', '▼', '◆', '♥', '⚠', 'ⓘ', '❓', '❗', '☀', '☾', '⌛', '⚙', '✉', '☎'];
 
-const images = new Map<string, HTMLImageElement>(); // ponytail: unbounded cache keyed by data URL, fine for a handful of images
+const images = new Map<string, HTMLImageElement>(); // shortcut: unbounded cache keyed by data URL, fine for a handful of images
 function image(src: string) {
   let im = images.get(src);
   if (!im) { im = new Image(); im.onload = () => dispatchEvent(new Event('drawings-repaint')); im.src = src; images.set(src, im) }

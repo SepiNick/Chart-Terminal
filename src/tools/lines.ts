@@ -169,6 +169,6 @@ export const LINE_TOOLS: ToolDef[] = [
   pitchfork('schiff', 'Schiff pitchfork', 'Ψ', 0, 0.5),
   pitchfork('modschiff', 'Modified Schiff pitchfork', '⋔', 0.5, 0.5),
   // Inside pitchfork, as specified: median from mid(P1,P2) toward mid(P2,P3), tines through P2/P3.
-  // ponytail: geometrically identical to Modified Schiff under this definition; diverge if a sharper spec appears.
+  // shortcut: geometrically identical to Modified Schiff under this definition; diverge if a sharper spec appears.
   pitchfork('insidepitchfork', 'Inside pitchfork', '⑂', 0.5, 0.5),
 ];

@@ -104,7 +104,7 @@ export function walkForward(evaluate: Evaluate, bars: Bar[], params: ParamSpec[]
     const best = optimize(evaluate, bars, params, base, { ...o.optimize, range: s.is })[0];
     if (!best) return;
     // OOS runs over IS+OOS so indicators are warmed up; only trades entered inside the OOS part count.
-    // ponytail: equity of a position opened in IS and closed in OOS leaks into OOS returns; split the run if that matters.
+    // shortcut: equity of a position opened in IS and closed in OOS leaks into OOS returns; split the run if that matters.
     const warm: BarRange = { from: s.is.from, to: s.oos.to }, off = s.oos.from - warm.from;
     const d = evaluate(best.inputs, warm);
     if (!cap) value = cap = d.initialCapital;

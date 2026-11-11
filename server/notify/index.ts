@@ -1,4 +1,4 @@
-// [agent: notify] Notification dispatcher (docs/phase5-contracts.md §4): popup (WebSocket), Web Push, Telegram,
+// Notification dispatcher (docs/phase5-contracts.md §4): popup (WebSocket), Web Push, Telegram,
 // Email (SMTP) and webhooks. Secrets live in core/secrets.ts and never leave the server; network senders sit in
 // `senders` so tests can replace them.
 import { randomUUID } from 'node:crypto';

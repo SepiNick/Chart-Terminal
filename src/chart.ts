@@ -407,7 +407,7 @@ export class ChartPane {
     if (a === 'del') {
       if (own.startsWith('ind:')) return this.set({ ind: this.cfg.ind.filter(x => x !== own.slice(4)) });
       if (own.startsWith('script:')) return this.set({ scripts: this.cfg.scripts!.filter(x => x.id !== own.slice(7)) });
-      // ponytail: panes we don't own (order flow, derivatives) go away until the next rebuild; their own menus turn them off for good
+      // shortcut: panes we don't own (order flow, derivatives) go away until the next rebuild; their own menus turn them off for good
       this.chart.removePane(k); this.owners.splice(k, 1);
       return this.moveDrawings(i => (i === k ? 0 : i > k ? i - 1 : i));
     }
@@ -418,7 +418,7 @@ export class ChartPane {
     if (own.startsWith('ind:') && oj.startsWith('ind:')) return this.set({ ind: swap(this.cfg.ind, own.slice(4), oj.slice(4)) });
     const sc = this.cfg.scripts ?? [], si = (o: string) => sc.find(x => x.id === o.slice(7));
     if (own.startsWith('script:') && oj.startsWith('script:') && si(own) && si(oj)) return this.set({ scripts: swap(sc, si(own)!, si(oj)!) });
-    // ponytail: mixed swaps (indicator vs script vs order flow) are live only; the config order wins on the next rebuild
+    // shortcut: mixed swaps (indicator vs script vs order flow) are live only; the config order wins on the next rebuild
     this.chart.swapPanes(k, j); [this.owners[k], this.owners[j]] = [oj, own];
     this.moveDrawings(i => (i === k ? j : i === j ? k : i));
   }

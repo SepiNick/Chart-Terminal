@@ -1,4 +1,4 @@
-// [agent: alerts] Server-side alert engine. See docs/phase5-contracts.md §5.
+// Server-side alert engine. See docs/phase5-contracts.md §5.
 //   GET /api/alerts → Alert[]          POST /api/alerts AlertInput → Alert
 //   PUT /api/alerts/:id (partial)      DELETE /api/alerts/:id
 //   GET /api/alerts/log?limit=&alert=  DELETE /api/alerts/log

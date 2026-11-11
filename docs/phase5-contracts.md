@@ -27,7 +27,7 @@ a file you don't own.
 - No new dependencies except: `web-push` and `nodemailer` (+ `@types/nodemailer`) in `server/package.json` (notify agent only).
 - Clean-room: build from behaviour/docs, never copy code from other products.
 - Before finishing: `npx tsc --noEmit` (root) and `npx tsc --noEmit -p server` both pass, your tests pass, and you commit
-  on your branch with a clear message ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+  on your branch with a clear message.
 
 ## 2. Core (already written — use, don't change)
 - `server/core/db.ts` — `db` (node:sqlite `DatabaseSync`), `migration(name, sql)` (runs once; prefix names with your

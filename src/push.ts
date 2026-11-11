@@ -1,4 +1,4 @@
-// [agent: lan] Web Push on this device (service worker + subscription). docs/phase5-contracts.md §8.
+// Web Push on this device (service worker + subscription). docs/phase5-contracts.md §8.
 import { api } from './sync.ts';
 
 export type PushState = 'unsupported' | 'insecure' | 'denied' | 'off' | 'on';

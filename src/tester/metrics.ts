@@ -109,7 +109,7 @@ export function metrics(d: TesterData, bars: Bar[], o: MetricOpts = {}): Metrics
     maxQty = Math.max(maxQty, Math.abs(qty));
     const used = notional * margin;
     if (used > 0) { marginSum += used; marginBars++; maxMargin = Math.max(maxMargin, used) }
-    // ponytail: margin calls are reported, not simulated (the engines never liquidate). Volume = 4× the shortfall, like TradingView.
+    // shortcut: margin calls are reported, not simulated (the engines never liquidate). Volume = 4× the shortfall, like TradingView.
     const short = used - eq[i];
     if (short > 0 && !inCall) { calls++; const v = (4 * short) / (b.close * margin); liq += v; liqMax = Math.max(liqMax, v) }
     inCall = short > 0;

@@ -20,7 +20,7 @@ export function compile(src: string): Program | ScriptError {
 export const isError = (x: unknown): x is ScriptError => !!x && typeof x === 'object' && 'msg' in x && 'kind' in x;
 
 // `import user/Name/1` resolves against installed Pine scripts that declare library("Name"); the editor registers them.
-// ponytail: one user and no versions, so the path's user and version parts are ignored.
+// shortcut: one user and no versions, so the path's user and version parts are ignored.
 let installed: () => string[] = () => [];
 export function setInstalledScripts(f: () => string[]) { installed = f }
 export const libraryTitle = (src: string) => /^\s*library\s*\(\s*(?:title\s*=\s*)?["']([^"']+)["']/m.exec(src)?.[1];

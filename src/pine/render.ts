@@ -130,7 +130,7 @@ function tableEl(t: PineTable): HTMLTableElement {
       Object.assign(td.style, {
         color: cell.text_color, fontSize: `${px}px`, textAlign: cell.text_halign.replace('align_', ''), verticalAlign: { align_top: 'top', align_bottom: 'bottom' }[cell.text_valign] ?? 'middle',
         background: cell.bgcolor ?? '', fontFamily: cell.font === 'monospace' || cell.font === 'font_family_monospace' ? 'monospace' : '',
-        width: cell.width ? `${cell.width}vw` : '', height: cell.height ? `${cell.height}vh` : '',   // ponytail: Pine sizes are % of the pane; viewport units are close enough
+        width: cell.width ? `${cell.width}vw` : '', height: cell.height ? `${cell.height}vh` : '',   // shortcut: Pine sizes are % of the pane; viewport units are close enough
       });
     }
   }

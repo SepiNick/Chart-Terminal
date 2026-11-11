@@ -15,7 +15,7 @@ smallest possible edit, keep it local (a few lines, clearly marked), and list it
 - No new npm dependencies.
 - Clean-room: build from behaviour/docs, never copy code from other products.
 - Before finishing: `npx tsc --noEmit` (root) and `npx tsc --noEmit -p server` pass, all tests pass, and you commit on
-  your branch with a clear message ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+  your branch with a clear message.
 - Do **not** edit `ROADMAP.md` (the integrator does). Your final report: what you built, files touched outside your
   area, what you left out and why, and how to try it in the app.
 - Shared hot files: `src/main.ts`, `src/chart.ts`, `index.html`, `src/style.css`. Only the **chart** agent owns them;

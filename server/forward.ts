@@ -46,7 +46,7 @@ export const fillKey = (f: SimpleFill) => `${f.time}|${f.side}|${+f.qty.toFixed(
  */
 export function freshFills(fills: SimpleFill[], start: number | null, done: Set<string>, startBar: number) {
   if (start == null) return { start: startBar, fresh: [] as SimpleFill[], done: new Set(fills.map(fillKey)) };
-  // ponytail: fills are keyed by time/side/size like the browser version; a live-bar fill that a re-run moves would be mirrored twice.
+  // shortcut: fills are keyed by time/side/size like the browser version; a live-bar fill that a re-run moves would be mirrored twice.
   const fresh = fills.filter(f => f.time >= start && !done.has(fillKey(f)));
   const next = new Set([...done].filter(k => +k.split('|')[0] >= start));   // keys before the start can never match again
   fresh.forEach(f => next.add(fillKey(f)));
