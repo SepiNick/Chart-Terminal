@@ -13,7 +13,7 @@
 | آیفون و دسترسی از شبکه‌ی خانه | [lan-setup.md](lan-setup.md) | HTTPS با CA محلی |
 | توسعه | [../README.md](../README.md) | `npm install`، `npm run server`، `npm run dev`، `npm test` |
 
-همه‌ی راه‌ها Node.js 24 یا بالاتر برای ساخت/اجرا از سورس می‌خواهند (`node:sqlite`)؛ بسته‌ی ویندوز Node را داخل خودش دارد. Docker و Raspberry Pi هنوز بسته‌ی رسمی ندارند (ROADMAP، مرحله‌ی ۹).
+همه‌ی راه‌ها Node.js 24 یا بالاتر برای ساخت/اجرا از سورس می‌خواهند (`node:sqlite`)؛ بسته‌ی ویندوز Node را داخل خودش دارد. Docker و Raspberry Pi: فایل‌های Docker نوشته شده‌اند و روی یک رزبری پای واقعی اجرا شده‌اند ([raspberry-pi.md](raspberry-pi.md)).
 
 ## فهرست همه‌ی فایل‌ها
 
@@ -25,6 +25,11 @@
 - [lan-setup.md](lan-setup.md): HTTPS روی شبکه‌ی خانه، نصب گواهی روی اندروید و آیفون، فایروال ویندوز.
 - [android.md](android.md): نصب به‌صورت PWA روی اندروید، اعلان‌ها، باتری، IP ثابت.
 - [android-apk.md](android-apk.md): اپ APK با دو flavor (client و standalone)، حالت Standalone برنامه، قواعد HTTP/HTTPS، ساخت و امضا.
+- [competitor-gaps.md](competitor-gaps.md): مقایسه با رقبا و شکاف‌ها.
+- [dominance.md](dominance.md): دامیننس و سهم بازار.
+- [iran-market.md](iran-market.md): بازار ایران (نوبیتکس، tgju، بورس).
+- [oauth-setup.md](oauth-setup.md): راه‌اندازی ورود با Google و Apple (سرور عمومی).
+- [phase7-plan.md](phase7-plan.md): طرح فاز ۷.
 - [multi-server.md](multi-server.md): ورود با توکن دستگاه و CORS برای کلاینت‌های origin دیگر.
 - [python.md](python.md): تب Python؛ اجرای کد پایتون خودتان روی داده‌ی نمودار (قرارداد، نمونه‌ها، نصب pandas، مدل امنیتی و محدودیت‌ها).
 - [performance.md](performance.md): اندازه‌گیری و بهینه‌سازی مصرف CPU/رم سرور.

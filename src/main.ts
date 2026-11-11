@@ -192,7 +192,7 @@ const hooks: Hooks = {
     l.onChange = () => {
       const sym = p.cfg.symbol;
       st.drawings[sym] = l.drawings; store.set('drawings', st.drawings);
-      for (const o of panes) if (o !== p && o.cfg.symbol === sym) { o.layer.drawings = l.drawings; o.layer.update() }
+      for (const o of allPanes()) if (o !== p && o.cfg.symbol === sym) { o.layer.drawings = l.drawings; o.layer.update() }
       drawSnaps.commit(sym, 'drawing');
       renderTree(); renderFloating(p.cell, drawHost, l);
     };
@@ -247,7 +247,11 @@ function buildLayout() {
 }
 /** Charts of the tabs that are not on screen. They are taken out of the page but kept alive (data, streams, drawings,
  *  zoom), so coming back to a tab shows it at once instead of building and loading its charts again. Key: that tab's layout. */
-const parked = new Map<object, { panes: ChartPane[]; cells: HTMLElement[] }>();
+const parked = new Map<object, { panes: ChartPane[]; cells: HTMLElement[]; stale?: boolean }>();
+/** Every chart that exists: the visible tab's and the parked tabs'. */
+const allPanes = () => [...panes, ...[...parked.values()].flatMap(k => k.panes)];
+/** Settings changed: parked tabs rebuild when they come back. */
+const staleParked = () => parked.forEach(k => { k.stale = true });
 function parkTab() {
   const cells = $$('#grid > .cell');
   parked.set(st.tabs[st.tab].layout, { panes, cells });
@@ -261,6 +265,7 @@ function enterTab() {
   parked.delete(st.layout);
   panes = k.panes;
   $('#grid').replaceChildren(...k.cells);
+  panes.forEach(p => { p.layer.drawings = (st.drawings[p.cfg.symbol] ??= []); p.layer.update(); if (k.stale) p.build() });   // drawings and settings may have changed while parked
   applyGridTemplate();
   document.body.classList.toggle('multi', panes.length > 1);
   renderSplitters(); saveLayout(); syncUI(); connectTickers(); decorateCells();
@@ -842,10 +847,12 @@ $('#tabs').onclick = e => {
   if (!confirm('Close this tab?')) return;
   const gone = parked.get(st.tabs[i].layout);   // a tab that is not on screen: end its charts
   gone?.panes.forEach(p => p.destroy()); parked.delete(st.tabs[i].layout);
-  if (i === st.tab) { panes.forEach(p => p.destroy()); panes = [] }
+  const wasActive = i === st.tab;
+  if (wasActive) { panes.forEach(p => p.destroy()); panes = [] }
   st.tabs.splice(i, 1);
   const next = Math.min(i < st.tab ? st.tab - 1 : st.tab, st.tabs.length - 1);
   st.tab = next; store.set('tab', next);
+  if (!wasActive) { store.set('tabs', st.tabs); renderWsTabs(); return }   // the visible tab keeps its charts
   st.layout = st.tabs[next].layout; st.layoutName = 'Unnamed'; st.maximized = false; enterTab(); renderWsTabs();
 };
 $('#tabs').ondblclick = e => {
@@ -1013,7 +1020,7 @@ function renderWatch() {
   const items = watchItems(), multi = watchView.multi, cols = 3 + (watchCols.chg ? 1 : 0);
   $('#watchT').innerHTML = `<tr><th>Symbol</th><th>Last</th>${watchCols.chg ? '<th>Chg</th>' : ''}<th>Chg%</th><th></th></tr>` + items.map(({ s, lists: own, i }) => {
     if (isSection(s)) return `<tr class="wsec" data-i="${i}"><td colspan="${cols}"><b>${esc(s.slice(3))}</b></td><td><button class="x" data-ren="${i}" title="Rename section">✎</button><button class="x" data-rm="${esc(s)}" title="Remove section (symbols stay)">×</button></td></tr>`;
-    const t = tick24[s] ?? (lastPx[s] ? { c: lastPx[s], o: NaN } : undefined), ch = t && Number.isFinite(t.o) ? ((t.c - t.o) / t.o) * 100 : null;
+    const t = tick24[s] ?? (lastPx[s] ? { c: lastPx[s], o: NaN } : undefined), ch = t && t.o > 0 ? ((t.c - t.o) / t.o) * 100 : null;
     const [ex, name] = s.includes(':') ? s.split(':') : ['', s], flag = lists[own[0]]?.flags[s];
     const dots = multi ? `<span class="wldots" title="${esc(own.map(o => lists[o].name).join(', '))}">${own.map(o => `<i style="background:${esc(lists[o].color)}"></i>`).join('')}</span>` : '';
     return `<tr class="click${s === active()?.cfg.symbol ? ' sel' : ''}" draggable="true" data-sym="${esc(s)}" data-from="${esc(own[0])}"><td>${dots}${watchCols.flag ? `<span class="wflag" data-flag="${esc(s)}" title="Flag colour" style="${flag ? `background:${esc(flag)}` : ''}"></span>` : ''}<b>${esc(name.replace(/_?USDT(\.P)?$/, '$1').replace(/_/g, '/'))}</b><span class="muted">${/_?USDT/.test(name) ? 'USDT' : ''}${ex ? ' · ' + esc(ex) : ''}</span></td>
@@ -1374,7 +1381,7 @@ function applySettings(patch: Partial<Settings>) {
   Object.assign(st.settings, patch);
   store.set('settings', st.settings);
   document.documentElement.dataset.theme = st.settings.theme;
-  panes.forEach(p => p.build());
+  panes.forEach(p => p.build()); staleParked();
   syncUI();
 }
 $('#settingsTabs').onclick = e => { const t = (e.target as HTMLElement).dataset.tab; if (t) { settingsTab = t; renderSettings() } };
@@ -1422,7 +1429,7 @@ document.addEventListener('keydown', e => {
     case 'Alt+A': return act(() => $('#alertBtn').click());
     case 'Alt+W': return act(() => addWatch(p.cfg.symbol));
     case 'Alt+Enter': return act(toggleMaximize);
-    case 'Tab': case 'Shift+Tab': return act(() => { if (panes.length > 1) hooks.onActivate(panes[(st.layout.active + (e.shiftKey ? panes.length - 1 : 1)) % panes.length]) });
+    case 'Tab': case 'Shift+Tab': if (panes.length < 2 || !((e.target as HTMLElement).closest('.cell') || e.target === document.body)) return; return act(() => { if (panes.length > 1) hooks.onActivate(panes[(st.layout.active + (e.shiftKey ? panes.length - 1 : 1)) % panes.length]) });
     case 'Shift+ArrowDown': return p.replay ? act(togglePlay) : undefined;
     case 'Shift+ArrowRight': return p.replay ? act(() => p.stepReplay()) : undefined;
     case 'Delete': case 'Backspace': return l.selected.size ? act(() => l.remove(...l.selected)) : undefined;
@@ -1517,12 +1524,12 @@ addEventListener('storage', e => {
   switch (e.key.slice(3)) {
     case 'drawings':
       st.drawings = store.get('drawings', {});
-      panes.forEach(p => { p.layer.drawings = (st.drawings[p.cfg.symbol] ??= []); p.layer.select([]); p.layer.update() });
+      allPanes().forEach(p => { p.layer.drawings = (st.drawings[p.cfg.symbol] ??= []); p.layer.select([]); p.layer.update() });
       renderTree(); break;
     case 'watchLists': lists = migrate(store.get<unknown>('watchLists', undefined), undefined, undefined); watchActive = resolveActive(lists, watchActive); saveWatchLocal(); break;
     case 'acct': st.acct = store.get('acct', st.acct); journalSync(st.acct); paper.emit(); renderTrading(); break;
     case 'alerts': if (!serverMode) { st.alerts = store.get('alerts', st.alerts); panes.forEach(p => p.tradeOverlay()); connectTickers(); renderAlerts() } break;
-    case 'settings': st.settings = loadSettings(); document.documentElement.dataset.theme = st.settings.theme; panes.forEach(p => p.build()); syncUI(); break;
+    case 'settings': st.settings = loadSettings(); document.documentElement.dataset.theme = st.settings.theme; panes.forEach(p => p.build()); staleParked(); syncUI(); break;
   }
 });
 function saveWatchLocal() { connectTickers(); renderWatch() }   // like saveWatch, without writing it back

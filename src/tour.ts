@@ -81,7 +81,7 @@ export function startTour() {
   };
   const go = (d: number) => { dir = d; i += d; if (i < 0) i = 0; if (i >= STEPS.length) return end(); show() };
   const key = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') { e.stopPropagation(); end() } else if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); go(1) } else if (e.key === 'ArrowLeft') { e.stopPropagation(); go(-1) }
+    if (e.key === 'Escape') { e.stopPropagation(); end() } else if (e.key === 'ArrowRight' || (e.key === 'Enter' && !(e.target as HTMLElement).closest('button'))) { e.preventDefault(); e.stopPropagation(); go(1) } else if (e.key === 'ArrowLeft') { e.stopPropagation(); go(-1) }
   };
   card.onclick = e => { const a = (e.target as HTMLElement).dataset.a; if (a === 'next') go(1); else if (a === 'back') go(-1); else if (a === 'skip') end() };
   addEventListener('keydown', key, true); addEventListener('resize', place);

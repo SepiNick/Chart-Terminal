@@ -205,8 +205,8 @@ export function run(prog: Program, bars: Bar[], opts: RunOpts, record?: Map<stri
         case 'max_drawdown': { let peak = -Infinity, dd = 0; for (const e of broker.equity) if (e != null) { peak = Math.max(peak, e); dd = Math.max(dd, peak - e) } return dd }
       }
     }
-    if (name in CONSTS) return CONSTS[name];
-    if (name in VARS) return VARS[name](ctx);
+    if (Object.hasOwn(CONSTS, name)) return CONSTS[name];
+    if (Object.hasOwn(VARS, name)) return VARS[name](ctx);
     const dot = name.indexOf('.');
     if (dot > 0) {
       const ns = name.slice(0, dot), rest = name.slice(dot + 1);

@@ -5,6 +5,7 @@ import { parse } from './parser.ts';
 import { generate } from './codegen.ts';
 import type { Decl } from './ast.ts';
 
+const UNSAFE = /^(constructor|__proto__|prototype|caller|callee|__define[GS]etter__|__lookup[GS]etter__)$/;   // names that reach Function / Object internals from generated JS (`constructor.constructor("…")()` runs anything)
 const makeRef = <T>(v: T) => ({ v });
 const dedupe = (list: Diagnostic[]) => {
   const seen = new Set<string>();
@@ -16,7 +17,9 @@ const dedupe = (list: Diagnostic[]) => {
 export function compile(files: Record<string, string>, opts: NtCompileOptions): NtCompileResult {
   const errors: Diagnostic[] = [], warnings: Diagnostic[] = [], decls: Decl[] = [], usings = new Set<string>();
   for (const [path, src] of Object.entries(files)) {
-    const r = parse(lex(src, path, errors), errors);
+    const toks = lex(src, path, errors);
+    for (const t of toks) if (t.t === 'id' && UNSAFE.test(t.v)) errors.push({ file: t.file, line: t.line, col: t.col, msg: `'${t.v}' is not allowed in scripts` });
+    const r = parse(toks, errors);
     decls.push(...r.decls);
     r.usings.forEach(u => usings.add(u));
   }

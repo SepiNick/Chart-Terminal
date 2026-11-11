@@ -459,7 +459,7 @@ export class ChartPane {
     const entry = { sym, unsub: () => {} };
     this.cmp.push(entry);
     fetchBars(sym, this.cfg.tf).then(b => {
-      if (!this.cmp.includes(entry)) return;
+      if (this.dead || !this.cmp.includes(entry)) return;   // the chart was closed while this loaded
       series.setData(b.map(x => ({ time: x.time as UTCTimestamp, value: x.close })));
       entry.unsub = streamBars(sym, this.cfg.tf, x => series.update({ time: x.time as UTCTimestamp, value: x.close }));
     }).catch(e => toast(`${sym}: ${(e as Error).message}`));
@@ -737,7 +737,9 @@ export class ChartPane {
   }
   private countdown() {
     const last = this.vb().at(-1); if (!last || this.replay || isPriceBased(this.cfg.type) || replayOn(this.cfg.symbol, this.cfg.tf) || parseOfTf(this.cfg.tf)) return;
-    const left = Math.max(0, Math.round(last.time + tfSeconds(this.cfg.tf) - Date.now() / 1000));
+    const mo = /^(\d+)M$/.exec(this.cfg.tf);   // calendar months are not a fixed number of seconds
+    const end = mo ? Date.UTC(new Date(last.time * 1000).getUTCFullYear(), new Date(last.time * 1000).getUTCMonth() + +mo[1], 1) / 1000 : last.time + tfSeconds(this.cfg.tf);
+    const left = Math.max(0, Math.round(end - Date.now() / 1000));
     const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), sec = left % 60;
     this.main.applyOptions({ title: left > 172800 ? `${Math.floor(left / 86400)}d ${h % 24}h` : `${h ? h + ':' : ''}${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` });
   }

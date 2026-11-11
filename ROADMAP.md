@@ -499,7 +499,7 @@
 - **Docker (`Dockerfile`، `docker-compose.yml`، `docker-compose.public.yml`، `Caddyfile`، `docs/docker.md`):** نوشته شده برای amd64 و arm64 (رزبری پای)، **ولی ساخته و اجرا نشده**، چون Docker روی این PC نیست.
 - **مانده:**
   - اجرای واقعی بسته‌ی Docker روی رزبری پای (فایل‌ها نوشته شده‌اند).
-  - ورود با Google و Apple و منطبق‌سازی داده‌ها (طرح: `docs/research/oauth-sync-design.md`).
+  - بازگشت ورود Google و Apple داخل APK/Electron (خود ورود در `server/oauth.ts` و `src/oauth.ts` هست؛ صفحه‌ی `oauth-return.html` و پسوند `CTApp/` هنوز نیست).
   - تست روی لپ‌تاپ لینوکسی، گوشی واقعی و پشت پروکسی TLS واقعی.
   - اسکن semgrep و چک XSS سمت کلاینت (۱۵۸ محل `innerHTML` خط‌به‌خط بازبینی نشده).
   - ادغام ۴۰۹ با ادغام فیلد به فیلد (فعلاً «سرور برنده است»).

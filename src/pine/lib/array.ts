@@ -43,7 +43,9 @@ function ix(arr: PineValue[], i: number, size = arr.length): number {
 const naFor = (t: unknown): PineValue => (t === 'bool' ? false : t === 'float' || t === 'int' || t === undefined || t === '' ? NaN : null);
 const mk = (t?: string): Builtin => (_, a, nm) => {
   const n = num(arg(a, nm, 0, 'size', 0)), v = arg(a, nm, 1, 'initial_value', naFor(t ?? nm.__type));
-  return Array(Number.isNaN(n) ? 0 : Math.max(0, Math.floor(n))).fill(v);
+  const len = Number.isNaN(n) ? 0 : Math.max(0, Math.floor(n));
+  if (len > 100000) throw new Error('An array can hold at most 100000 elements');   // array.new_float(2e9, 0) would exhaust the heap
+  return Array(len).fill(v);
 };
 const cmp = (a: PineValue, b: PineValue) => {
   if (typeof a === 'number' && typeof b === 'number') return Number.isNaN(a) ? 1 : Number.isNaN(b) ? -1 : a - b;

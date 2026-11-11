@@ -81,7 +81,7 @@ export class Broker {
     if (explicit != null && explicit > 0) return explicit;
     const p = this.props;
     if (p.qtyType === 'cash') return p.qtyValue / price;
-    if (p.qtyType === 'percent_of_equity') return (this.equityAt(price) * p.qtyValue / 100) / price;
+    if (p.qtyType === 'percent_of_equity') { const q = (this.equityAt(price) * p.qtyValue / 100) / price; return Number.isFinite(q) && q > 0 ? q : 0 }   // equity <= 0 must not flip the position
     return p.qtyValue;
   }
   private commission(price: number, qty: number) {

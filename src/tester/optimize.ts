@@ -25,7 +25,7 @@ export function values(p: ParamSpec): (string | number | boolean)[] {
 /** Score a run: the objective metric, or null if it has too few trades or is not a number. */
 function score(m: Metrics, o: Pick<OptimizeOptions, 'objective' | 'maximize' | 'minTrades'>) {
   const v = m[o.objective];
-  if (m.totalTrades < (o.minTrades ?? 1) || Number.isNaN(v)) return null;
+  if (m.totalTrades < (o.minTrades ?? 1) || !Number.isFinite(v)) return null;
   return o.maximize ? v : -v;
 }
 
@@ -79,7 +79,7 @@ export function optimize(evaluate: Evaluate, bars: Bar[], params: ParamSpec[], b
       popn = next;
     }
   }
-  return results.sort((a, b) => b.score - a.score);
+  return results.sort((a, b) => (a.score < b.score ? 1 : a.score > b.score ? -1 : 0));
 }
 
 /** IS/OOS segments over a range. OOS pieces are contiguous and cover the end of the range. */
@@ -107,7 +107,7 @@ export function walkForward(evaluate: Evaluate, bars: Bar[], params: ParamSpec[]
     // ponytail: equity of a position opened in IS and closed in OOS leaks into OOS returns; split the run if that matters.
     const warm: BarRange = { from: s.is.from, to: s.oos.to }, off = s.oos.from - warm.from;
     const d = evaluate(best.inputs, warm);
-    if (!k) value = cap = d.initialCapital;
+    if (!cap) value = cap = d.initialCapital;
     const eq = d.equity, trades = d.trades.filter(t => t.entryBar >= off);
     let prev = eq[off - 1] ?? d.initialCapital;
     for (let i = off; i < warm.to - warm.from; i++) { const v = eq[i] ?? prev; value *= prev ? v / prev : 1; prev = v; oosEquity.push({ bar: warm.from + i, value }) }
@@ -149,7 +149,7 @@ export function monteCarlo(trades: Trade[], cap: number, o: MonteCarloOptions): 
     if (o.skipPct) seq = seq.filter(() => rand() >= o.skipPct! / 100);
     const { p, dd } = path(seq, cap);
     finals.push(p[p.length - 1]); dds.push(dd);
-    if (Math.min(...p) <= ruin) ruined++;
+    if (p.reduce((m, x) => Math.min(m, x), Infinity) <= ruin) ruined++;
     if (paths.length < 50) paths.push(p);
   }
   const orig = path(base, cap);

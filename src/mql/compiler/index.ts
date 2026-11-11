@@ -13,6 +13,7 @@ export interface CompileOptions {
   nativeIncludes: string[];
 }
 
+const UNSAFE = /^(constructor|__proto__|prototype|caller|callee|__define[GS]etter__|__lookup[GS]etter__)$/;   // names that reach Function / Object internals from generated JS (`constructor.constructor("…")()` runs anything)
 const dedupe = (list: Diagnostic[]) => {
   const seen = new Set<string>();
   return list.filter(d => { const k = `${d.file}:${d.line}:${d.col}:${d.msg}`; return !seen.has(k) && !!seen.add(k) })
@@ -23,6 +24,7 @@ export function compile(mainPath: string, files: Record<string, string>, opts: C
   const dialect: Dialect = opts.dialect ?? (/\.mq4$/i.test(mainPath) ? 'mql4' : 'mql5');
   const pp = preprocess(mainPath, files, dialect, opts.nativeIncludes);
   const errors = pp.errors, warnings = pp.warnings;
+  if (!errors.length) for (const t of pp.toks) if (t.t === 'id' && UNSAFE.test(t.v)) errors.push({ file: t.file, line: t.line, col: t.col, msg: `'${t.v}' is not allowed in scripts` });
   let js: string | undefined;
   if (!errors.length) {
     const decls = parse(pp.toks, [...opts.builtinStructs, ...opts.builtinClasses], errors);

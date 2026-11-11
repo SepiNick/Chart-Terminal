@@ -237,7 +237,7 @@
 <dialog id="searchDlg">
   <form method="dialog">
     <h3>Symbol search <span class="muted" id="searchMode"></span></h3>
-    <div class="row"><input id="searchIn" placeholder="Symbol, or an expression like BTCUSDT/ETHUSDT" spellcheck="false" autocomplete="off"><select id="searchEx" title="Exchange / data source"><option value="binance">Binance (direct)</option><option value="fx">Forex, metals, indices &amp; stocks</option></select></div>
+    <div class="row"><input id="searchIn" aria-label="Symbol search" placeholder="Symbol, or an expression like BTCUSDT/ETHUSDT" spellcheck="false" autocomplete="off"><select id="searchEx" title="Exchange / data source"><option value="binance">Binance (direct)</option><option value="fx">Forex, metals, indices &amp; stocks</option></select></div>
     <div class="seg" id="searchTabs"></div>
     <div id="searchList"></div>
   </form>
@@ -245,14 +245,14 @@
 <dialog id="tfDlg">
   <form method="dialog" id="tfForm">
     <h3>Change interval</h3>
-    <input id="tfIn" placeholder="e.g. 15, 4h, 1D, 2W, 1M" autocomplete="off">
+    <input id="tfIn" aria-label="Interval" placeholder="e.g. 15, 4h, 1D, 2W, 1M" autocomplete="off">
     <div class="muted" id="tfHint"></div>
   </form>
 </dialog>
 <dialog id="gotoDlg">
   <form method="dialog" id="gotoForm">
     <h3>Go to</h3>
-    <input type="datetime-local" id="gotoIn">
+    <input type="datetime-local" id="gotoIn" aria-label="Go to date">
     <div class="row"><span class="grow"></span><button value="cancel" formnovalidate>Cancel</button><button value="go">Go to</button></div>
   </form>
 </dialog>
