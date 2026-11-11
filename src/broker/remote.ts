@@ -68,7 +68,6 @@ export function syncAccounts(list: BrokerAccount[], call: Api = apiTrade) {
 }
 /** Load the exchange accounts from the server (server mode only). */
 export async function loadAccounts(call: Api = apiTrade) { const list = await call<BrokerAccount[]>('/api/broker/accounts'); syncAccounts(list, call); return list }
-export const remoteAccounts = () => [...remotes.values()].map(b => b.account);
 
 // ---------- account management (ui.ts) ----------
 /** The keys go to the server in this one request and are never sent back. */

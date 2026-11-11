@@ -16,7 +16,7 @@ export const setStarters = (s: Starters) => { starters = s };
 const shared = busOk && !!globalThis.navigator?.locks;
 const subs = new Map<string, Set<Fn>>();
 const peers = new Peers();
-let owner = false, decided = !shared, others = new Set<string>(), timer = 0;
+let owner = false, others = new Set<string>(), timer = 0;
 const real = new Map<string, () => void>();   // bar streams the owner keeps open
 let tickStop: (() => void) | null = null, tickKey = '';
 
@@ -55,12 +55,11 @@ if (shared) {
   });
   // Take the lock if free; otherwise wait for it (the previous owner closed) and take over.
   const hold = () => new Promise<void>(() => {});   // never resolves: the lock is held until this page goes away
-  const become = () => { owner = true; decided = true; send({ t: 'wants', id: myId, keys: [...subs.keys()] }); reconcile(); return hold() };
+  const become = () => { owner = true; send({ t: 'wants', id: myId, keys: [...subs.keys()] }); reconcile(); return hold() };
   navigator.locks.request('ct-live', { ifAvailable: true }, lock => {
     if (lock) return become();
-    decided = true;
     void navigator.locks.request('ct-live', become);
-  }).catch(() => { decided = true });
+  }).catch(() => {});
   setInterval(() => { send({ t: 'wants', id: myId, keys: [...subs.keys()] }); reconcile() }, 5000);   // refresh: peers expire after 15 s without news
   addEventListener('pagehide', () => { send({ t: 'bye', id: myId }); real.forEach(s => s()); tickStop?.() });
 }
@@ -79,4 +78,3 @@ export function hubTickers(syms: string[], cb: (sym: string, t: any) => void, di
   return () => offs.forEach(f => f());
 }
 /** For tests and the diagnostics line: who owns the connections. */
-export const hubState = () => ({ shared, owner, decided, subs: subs.size, real: real.size, others: others.size });

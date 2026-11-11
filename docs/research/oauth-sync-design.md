@@ -257,7 +257,6 @@ Secrets and device-bound things (list in 4.1), `LOCAL_KEYS` UI state, media blob
 | `CT_APPLE_SERVICE_ID` | Apple Services ID (e.g. `com.example.chartterminal.web`); this is the OAuth `client_id`/`aud`. |
 | `CT_APPLE_TEAM_ID`, `CT_APPLE_KEY_ID` | 10-character Team ID; Key ID of the Sign in with Apple key. |
 | `CT_APPLE_PRIVATE_KEY_FILE` | path to the downloaded `AuthKey_<KEYID>.p8` (outside `CT_DATA_DIR`, mode 0400, mounted read-only in Docker). |
-| `CT_OAUTH_APP_SCHEME` | custom scheme for the Android return, default `chartterminal`. |
 | (existing) `CT_PUBLIC_URL`, `CT_REGISTRATION`, `CT_CORS_ORIGINS`, `CT_ALLOWED_HOSTS` | redirect base, signup policy, bundled-asset app origin, host guard. |
 
 Redirect URIs to register exactly: `${CT_PUBLIC_URL}/api/auth/oauth/callback/google` and `${CT_PUBLIC_URL}/api/auth/oauth/callback/apple`.

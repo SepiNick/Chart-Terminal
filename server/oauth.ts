@@ -27,7 +27,6 @@ export function _setProvidersForTest(o: Partial<Record<Name, Urls>>) {
   urls = { ...URLS, ...o }; insecure = true;
   delete jwksOf.google; delete jwksOf.apple;
 }
-export const _jwks = (n: Name) => jwks(n);
 const jwks = (n: Name) => jwksOf[n] ??= new Jwks(urls[n].jwks, async url => {
   const r = await fetchJson(url, { allowInsecure: insecure });
   if (r.status !== 200 || !Array.isArray(r.json.keys)) throw new OidcError('jwks');

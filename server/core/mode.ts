@@ -30,7 +30,6 @@ export function oauthConfig(env: Record<string, string | undefined> = process.en
   return out;
 }
 export const OAUTH: OAuthConfig = isPublic ? oauthConfig() : {};
-export const OAUTH_APP_SCHEME = /^[a-z][a-z0-9+.-]{1,31}$/.test(process.env.CT_OAUTH_APP_SCHEME ?? '') ? process.env.CT_OAUTH_APP_SCHEME! : 'chartterminal';
 
 /**
  * CT_CORS_ORIGINS: exact origins (scheme://host[:port], comma-separated) that may call this server cross-origin with a

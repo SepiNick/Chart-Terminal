@@ -220,7 +220,7 @@ function xAttrs(el: Element) {
     if (fa) { const m = attrOrig.get(el) ?? {}; m[a] ??= v; attrOrig.set(el, m); el.setAttribute(a, fa) }
   }
 }
-export function translateTree(root: Node) {
+function translateTree(root: Node) {
   if (root.nodeType === 3) { if (!(root.parentElement?.closest(SKIP))) xText(root as Text); return }
   if (root.nodeType !== 1) return;
   const el = root as Element;
