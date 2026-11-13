@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { handle, powOk, zeroBits, captchaOk } from '../src/index.js';
+import { handle, powOk, zeroBits, captchaOk, Limiter } from '../src/index.js';
 
-const kv = () => { const m = new Map(); return { m, get: async k => m.get(k) ?? null, put: async (k, v) => { m.set(k, v) } } };
+// A Durable Object namespace as the platform behaves: one Limiter, one request at a time, storage that survives between requests.
+const kv = () => {
+  const store = new Map(), storage = { get: async k => store.get(k), put: async (k, v) => { store.set(k, v) }, delete: async k => { store.delete(k) }, list: async () => new Map(store) };
+  const lim = new Limiter({ storage }); let chain = Promise.resolve();
+  return { store, idFromName: n => n, get: () => ({ fetch: (url, init) => { const run = chain.then(() => lim.fetch(new Request(url, init))); chain = run.catch(() => {}); return run } }) };
+};
 const env = (extra = {}) => ({ CHALLENGE_SECRET: 's3cret', TELEGRAM_BOT_TOKEN: '123:abc', TELEGRAM_CHAT_ID: '42', DIFFICULTY: '8', LIMITS: kv(), ...extra });
 const png = 'data:image/png;base64,' + Buffer.from('x'.repeat(30)).toString('base64');
 
@@ -32,7 +37,7 @@ test('a solved puzzle sends the report to Telegram: message, diagnostics, screen
 
 test('captcha: wrong n, tampered difficulty, forged signature, expiry and replay are refused', async () => {
   mock(ok); const e = env(), c = await getCaptcha(e), body = { description: 'something broke here' };
-  assert.equal(await powOk(c.salt, c.n + 1, c.difficulty) ? 'rare: the next n also solves it' : (await handle(post({ ...body, captcha: { ...c, n: c.n + 1 } }), e)).status, 403);   // a wrong n
+  if (!(await powOk(c.salt, c.n + 1, c.difficulty))) assert.equal((await handle(post({ ...body, captcha: { ...c, n: c.n + 1 } }), e)).status, 403);   // a wrong n (n+1 solves it too about 1 time in 2^difficulty)
   assert.equal((await handle(post({ ...body, captcha: { ...c, difficulty: 1 } }), e)).status, 403);   // easier than the server's setting
   assert.equal((await handle(post({ ...body, captcha: { ...c, sig: '0'.repeat(64) } }), e)).status, 403);
   assert.equal((await handle(post({ ...body, captcha: undefined }), e)).status, 403);
@@ -76,6 +81,21 @@ test('GitHub issue: text only, no contact, @ neutralised; its link goes to Teleg
   assert.ok(!issueBody.body.includes('secret@mail.org') && !/@someone/.test(issueBody.body) && /@​someone/.test(issueBody.body));
   const msg = calls.find(c => c.url.endsWith('/sendMessage')).init.body.get('text');
   assert.ok(msg.includes('https://github.com/o/r/issues/7') && msg.includes('Contact: secret@mail.org'));
+});
+
+test('no limiter binding, or a broken one: the report is refused, never accepted without limits', async () => {
+  mock(ok); const e = env(), c = await getCaptcha(e), body = { description: 'a real description here' };
+  assert.equal((await handle(post({ ...body, captcha: c }), { ...e, LIMITS: undefined })).status, 500);
+  const broken = { idFromName: () => 'x', get: () => ({ fetch: async () => { throw new Error('down') } }) };
+  assert.equal((await handle(post({ ...body, captcha: c }), { ...e, LIMITS: broken })).status, 503);
+  assert.equal(calls.length, 0);
+});
+
+test('parallel requests with the same puzzle: exactly one report gets through', async () => {
+  mock(ok); const e = env(), c = await getCaptcha(e);
+  const codes = await Promise.all(Array.from({ length: 12 }, () => handle(post({ description: 'the same puzzle, twelve times', captcha: c }), e).then(r => r.status)));
+  assert.equal(codes.filter(x => x === 200).length, 1);
+  assert.equal(calls.filter(x => x.url.endsWith('/sendMessage')).length, 1);
 });
 
 test('routing and CORS', async () => {

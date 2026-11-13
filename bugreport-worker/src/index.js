@@ -5,7 +5,9 @@
 // flood the bot for free. Then the report goes to your Telegram chat (text, diagnostics file, screenshots) and, if configured, into
 // a GitHub issue (text only: no contact address, no images). Limits: body size, reports per IP per hour, reports per day.
 // Secrets: TELEGRAM_BOT_TOKEN, CHALLENGE_SECRET, GITHUB_TOKEN (optional). Vars: TELEGRAM_CHAT_ID, GITHUB_REPO (optional),
-// DIFFICULTY (default 16), IP_PER_HOUR (default 5), PER_DAY (default 300). KV binding LIMITS (optional): replay guard and the limits.
+// DIFFICULTY (default 16), IP_PER_HOUR (default 5), PER_DAY (default 300). Durable Object binding LIMITS (class Limiter, required):
+// the replay guard and the counters. A Durable Object handles one request at a time, so "read the count, then raise it" cannot
+// be raced by parallel requests (a KV get + put could be). Without the binding every report is refused: no limits, no reports.
 
 const enc = new TextEncoder();
 export const MAX_BODY = 9 * 1024 * 1024, MAX_IMAGES = 3, MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -56,13 +58,24 @@ export function parseReport(o) {
   return { description, contact: text(o.contact, 200), info: text(o.info, 20000), images };
 }
 
-/** Counts one use of `key` in KV for `ttl` seconds; false when the limit is already reached. Without KV there are no limits here. */
+/** Counts one use of `key` for `ttl` seconds in the single Limiter object; false when the limit is already reached. */
 async function take(env, key, limit, ttl) {
-  if (!env.LIMITS) return true;
-  const n = Number(await env.LIMITS.get(key)) || 0;
-  if (n >= limit) return false;
-  await env.LIMITS.put(key, String(n + 1), { expirationTtl: ttl });
-  return true;
+  const r = await env.LIMITS.get(env.LIMITS.idFromName('limits')).fetch('https://limiter/take', { method: 'POST', body: JSON.stringify({ key, limit, ttl }) });
+  if (!r.ok) throw new Error('limiter unavailable');
+  return (await r.json()).ok === true;
+}
+
+/** Durable Object: counters with an expiry. Its storage calls are the only awaits in a request, so requests cannot interleave. */
+export class Limiter {
+  constructor(state) { this.state = state }
+  async fetch(request) {
+    const { key, limit, ttl } = await request.json(), now = Date.now(), st = this.state.storage;
+    const cur = await st.get(key), n = cur && cur.exp > now ? cur.n : 0;
+    if (n >= limit) return Response.json({ ok: false });
+    await st.put(key, { n: n + 1, exp: cur && cur.exp > now ? cur.exp : now + ttl * 1000 });
+    if (Math.random() < 0.02) for (const [k, v] of await st.list()) if (v.exp <= now) await st.delete(k);   // tidy up expired keys now and then
+    return Response.json({ ok: true });
+  }
 }
 
 async function telegram(env, id, r) {
@@ -116,12 +129,14 @@ export async function handle(request, env, now = Date.now()) {
   if (!(await captchaOk(o?.captcha, env, now))) return fail(403, 'Captcha failed or expired');
   const r = parseReport(o);
   if (r.error) return fail(400, r.error);
-  if (!env.TELEGRAM_BOT_TOKEN || !/^-?\d{1,20}$/.test(String(env.TELEGRAM_CHAT_ID ?? ''))) return fail(500, 'Not configured');
+  if (!env.LIMITS || !env.TELEGRAM_BOT_TOKEN || !/^-?\d{1,20}$/.test(String(env.TELEGRAM_CHAT_ID ?? ''))) return fail(500, 'Not configured');
   // one puzzle, one report; then the per-IP and per-day limits
   const ip = request.headers.get('cf-connecting-ip') ?? 'unknown', hour = Math.floor(now / 3_600_000), day = new Date(now).toISOString().slice(0, 10);
-  if (!(await take(env, `used:${o.captcha.salt}`, 1, 900))) return fail(403, 'Captcha already used');
-  if (!(await take(env, `ip:${ip}:${hour}`, num(env.IP_PER_HOUR, 5), 3600))) return fail(429, 'Too many reports from your address; try again later');
-  if (!(await take(env, `day:${day}`, num(env.PER_DAY, 300), 86400))) return fail(429, 'Too many reports today; try again tomorrow');
+  try {
+    if (!(await take(env, `used:${o.captcha.salt}`, 1, 900))) return fail(403, 'Captcha already used');
+    if (!(await take(env, `ip:${ip}:${hour}`, num(env.IP_PER_HOUR, 5), 3600))) return fail(429, 'Too many reports from your address; try again later');
+    if (!(await take(env, `day:${day}`, num(env.PER_DAY, 300), 86400))) return fail(429, 'Too many reports today; try again tomorrow');
+  } catch { return fail(503, 'Try again in a minute') }   // the counters are unavailable: refuse rather than skip the limits
   const id = `${day.replaceAll('-', '')}-${hex(crypto.getRandomValues(new Uint8Array(3)))}`;
   r.issueUrl = await issue(env, id, r);
   try { await telegram(env, id, r) } catch { return fail(502, 'Could not deliver the report') }

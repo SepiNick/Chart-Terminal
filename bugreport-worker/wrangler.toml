@@ -10,7 +10,11 @@ DIFFICULTY = "16"      # proof-of-work bits: 16 is about a second on a phone
 IP_PER_HOUR = "5"
 PER_DAY = "300"
 
-# Replay guard and the limits. Create it with `npx wrangler kv namespace create LIMITS` and paste the id.
-[[kv_namespaces]]
-binding = "LIMITS"
-id = "REPLACE_WITH_THE_KV_ID"
+# Replay guard and the limits: one Durable Object (SQLite-backed, available on the free plan). Nothing to create by hand.
+[[durable_objects.bindings]]
+name = "LIMITS"
+class_name = "Limiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Limiter"
