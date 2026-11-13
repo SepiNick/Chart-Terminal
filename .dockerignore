@@ -20,3 +20,4 @@ server/data
 **/*.jks
 mt5bridge/token.txt
 server/data
+bugreport-worker

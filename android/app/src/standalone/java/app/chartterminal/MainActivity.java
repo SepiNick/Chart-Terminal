@@ -38,6 +38,7 @@ public class MainActivity extends Activity {
     static boolean isAllowedHost(String scheme, String host) {
         if (host == null || scheme == null) return false;
         if (HOST.equals(host)) return "https".equals(scheme);
+        if (!BuildConfig.BUG_REPORT_HOST.isEmpty() && BuildConfig.BUG_REPORT_HOST.equals(host)) return "https".equals(scheme);   // the bug-report receiver
         return ("https".equals(scheme) || "wss".equals(scheme))
             && ("data-api.binance.vision".equals(host) || "data-stream.binance.vision".equals(host));
     }

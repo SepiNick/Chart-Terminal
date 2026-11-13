@@ -1,0 +1,8 @@
+{
+  "name": "chart-terminal-bugreport",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "license": "GPL-2.0-or-later",
+  "scripts": { "test": "node --test test/", "deploy": "wrangler deploy" }
+}

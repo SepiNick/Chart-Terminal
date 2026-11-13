@@ -7,7 +7,9 @@ if (ksFile.exists()) ksFile.withInputStream { ksProps.load(it) }
 android {
     namespace "app.chartterminal"
     compileSdk 35
+    buildFeatures { buildConfig true }
     defaultConfig {
+        buildConfigField "String", "BUG_REPORT_HOST", "\"${project.findProperty('bugReportHost') ?: ''}\""
         applicationId "app.chartterminal"
         minSdk 24
         targetSdk 35

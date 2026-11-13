@@ -3,7 +3,7 @@
 // folder's package.json, so the client's build-only dependencies never end up in the installer.
 import { build } from 'esbuild';
 import { execSync } from 'node:child_process';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,6 +26,9 @@ console.log('server bundle: external packages', [...ext].join(', '));
 
 // Window placement maths shared with the web client (src/winplace.ts), for the pop-out windows in main.cjs.
 await build({ entryPoints: [join(root, 'src', 'winplace.ts')], outfile: join(app, 'placement.cjs'), bundle: true, platform: 'node', format: 'cjs', target: 'node24', logLevel: 'warning' });
+
+// The bug-report receiver address (VITE_BUG_REPORT_URL, also baked into the client) for the bundled server's CSP.
+if (process.env.VITE_BUG_REPORT_URL) writeFileSync(join(app, 'bugreport.json'), JSON.stringify({ url: process.env.VITE_BUG_REPORT_URL }));
 
 mkdirSync(join(here, 'build'), { recursive: true });
 cpSync(join(root, 'public', 'icon-512.png'), join(here, 'build', 'icon.png'));

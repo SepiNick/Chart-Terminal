@@ -28,6 +28,11 @@ const freePort = want => new Promise((ok, fail) => {
 // The same port every launch keeps the same origin, so the browser storage the app keeps per origin (local settings) stays.
 const portFile = () => join(app.getPath('userData'), 'port.txt');
 
+/** The bug-report receiver baked in at build time (desktop/build.mjs), if any. */
+function bugReportEnv() {
+  try { const u = JSON.parse(readFileSync(join(APP, 'bugreport.json'), 'utf8')).url; return typeof u === 'string' ? { CT_BUG_REPORT_URL: u } : {} } catch { return {} }
+}
+
 async function startServer() {
   let saved = 0;
   try { saved = Number(readFileSync(portFile(), 'utf8')) || 0 } catch {}
@@ -37,7 +42,7 @@ async function startServer() {
   console.log(`Chart Terminal: ${origin}, data in ${app.getPath('userData')}`);
   server = utilityProcess.fork(join(APP, 'server', 'index.js'), [], {
     serviceName: 'Chart Terminal server', stdio: 'pipe',
-    env: { ...process.env, PORT: String(port), CT_DATA_DIR: join(app.getPath('userData'), 'data'), CT_DIST_DIR: join(APP, 'dist') },
+    env: { ...process.env, PORT: String(port), CT_DATA_DIR: join(app.getPath('userData'), 'data'), CT_DIST_DIR: join(APP, 'dist'), ...bugReportEnv() },
   });
   const log = [];
   for (const s of [server.stdout, server.stderr]) s?.on('data', d => { log.push(String(d)); if (log.length > 50) log.shift() });
