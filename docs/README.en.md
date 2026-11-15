@@ -23,6 +23,7 @@ Sign-in buttons ("Continue with Google / Apple / Telegram") exist only on a **pu
 
 ## All files
 
+- [community.en.md](community.en.md): Community (public server only): share analyses, comments, follow, live chat rooms, moderation, abuse limits, privacy.
 - [desktop.en.md](desktop.en.md): the Electron app (Windows, Mac, Linux), data, tray, building the installer.
 - [lite.en.md](lite.en.md): the light version without Electron, size and memory comparison, install and uninstall.
 - [headless-server.en.md](headless-server.en.md): running the server from source on a Linux laptop, systemd, firewall, backups.
@@ -41,6 +42,7 @@ Sign-in buttons ("Continue with Google / Apple / Telegram") exist only on a **pu
 - [multi-server.en.md](multi-server.en.md): device-token sign-in and CORS for clients on another origin.
 - [python.en.md](python.en.md): the Python tab; run your own Python on chart data (contract, examples, installing pandas, security model and limits).
 - [performance.en.md](performance.en.md): measuring and optimising server CPU/RAM use.
+- [development.en.md](development.en.md): development guide and code map.
 - [desktop-shell-spec.en.md](desktop-shell-spec.en.md): behavioural spec of the TradingView Desktop shell (clean-room reference).
 - [phase5-contracts.md](phase5-contracts.md) (English) / [فارسی](phase5-contracts.fa.md): phase 5 contracts (server, SQLite, sign-in, alerts, Push). Historical.
 - [phase6-contracts.md](phase6-contracts.md) (English) / [فارسی](phase6-contracts.fa.md): phase 6 contracts (broker layer, testnet). Historical.

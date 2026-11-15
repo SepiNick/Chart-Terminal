@@ -23,6 +23,7 @@
 
 ## فهرست همه‌ی فایل‌ها
 
+- [community.md](community.md): انجمن (فقط سرور عمومی): اشتراک تحلیل، نظر، دنبال کردن، اتاق‌های گفت‌وگوی زنده، مدیریت، محدودیت‌ها و حریم خصوصی.
 - [desktop.md](desktop.md): برنامه‌ی Electron (ویندوز، مک، لینوکس)، داده‌ها، tray، ساخت نصبی.
 - [lite.md](lite.md): نسخه‌ی سبک بدون Electron، مقایسه‌ی حجم و حافظه، نصب و حذف.
 - [headless-server.md](headless-server.md): اجرای سرور از سورس روی لپ‌تاپ لینوکسی، systemd، فایروال، پشتیبان‌گیری.
@@ -41,6 +42,7 @@
 - [multi-server.md](multi-server.md): ورود با توکن دستگاه و CORS برای کلاینت‌های origin دیگر.
 - [python.md](python.md): تب Python؛ اجرای کد پایتون خودتان روی داده‌ی نمودار (قرارداد، نمونه‌ها، نصب pandas، مدل امنیتی و محدودیت‌ها).
 - [performance.md](performance.md): اندازه‌گیری و بهینه‌سازی مصرف CPU/رم سرور.
+- [development.md](development.md): راهنمای توسعه و نقشه‌ی کد.
 - [desktop-shell-spec.md](desktop-shell-spec.md): مشخصات رفتاری پوسته‌ی TradingView Desktop (مرجع clean-room).
 - [phase5-contracts.md](phase5-contracts.md): قراردادهای فاز ۵ (سرور، SQLite، ورود، هشدار، Push). سند تاریخی.
 - [phase6-contracts.md](phase6-contracts.md): قراردادهای فاز ۶ (لایه‌ی بروکر، testnet). سند تاریخی.
