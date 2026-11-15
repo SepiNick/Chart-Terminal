@@ -3,7 +3,7 @@
 // of home-network servers). The report is shown to the user, who copies it where they like; nothing is sent anywhere.
 import { serverFetch } from './servers.ts';
 
-export interface ErrorEntry { at: number; kind: 'error' | 'promise' | 'console'; msg: string }
+export interface ErrorEntry { at: number; kind: 'error' | 'promise' | 'console'; msg: string; stack?: string }
 const LOG: ErrorEntry[] = [];
 const MAX = 40;
 
@@ -17,12 +17,19 @@ export function redact(s: string): string {
     .replace(/\b[A-Fa-f0-9]{32,}\b|\b[A-Za-z0-9+/_-]{40,}={0,2}(?=\s|$|["'])/g, '[redacted]');
 }
 const clip = (s: string, n = 300) => redact(String(s).replace(/\s+/g, ' ')).slice(0, n);
+/** The first frames of an error's stack, without the origin (host names) and the message line: where it happened, not who runs the app. */
+export function frames(stack: unknown, n = 5): string | undefined {
+  if (typeof stack !== 'string') return undefined;
+  const f = stack.split('\n').slice(1).map(l => l.trim()).filter(l => /^at\s/.test(l)).slice(0, n)
+    .map(l => redact(l.replace(/(?:https?|file|app):\/\/[^/\s)]*\/?/g, '').replace(/[A-Za-z]:[\\/][^\s)]*[\\/]/g, '').replace(/\/[^\s)]*\/(?=[^\s/)]+\.[a-z]+:\d)/g, '')));
+  return f.length ? f.join(' | ').slice(0, 600) : undefined;
+}
 
 /** Keep the most recent errors, for the report. Call once at start. */
 export function installErrorLog(w: Pick<Window, 'addEventListener'> & { console?: Console } = window) {
-  const add = (kind: ErrorEntry['kind'], msg: string) => { LOG.push({ at: Date.now(), kind, msg: clip(msg) }); if (LOG.length > MAX) LOG.shift() };
-  w.addEventListener('error', e => add('error', `${(e as ErrorEvent).message ?? e}`));
-  w.addEventListener('unhandledrejection', e => add('promise', String((e as PromiseRejectionEvent).reason?.message ?? (e as PromiseRejectionEvent).reason)));
+  const add = (kind: ErrorEntry['kind'], msg: string, stack?: unknown) => { LOG.push({ at: Date.now(), kind, msg: clip(msg), stack: frames(stack) }); if (LOG.length > MAX) LOG.shift() };
+  w.addEventListener('error', e => add('error', `${(e as ErrorEvent).message ?? e}`, (e as ErrorEvent).error?.stack));
+  w.addEventListener('unhandledrejection', e => add('promise', String((e as PromiseRejectionEvent).reason?.message ?? (e as PromiseRejectionEvent).reason), (e as PromiseRejectionEvent).reason?.stack));
   const c = w.console;
   if (c) { const orig = c.error.bind(c); c.error = (...a: unknown[]) => { add('console', a.map(x => (x instanceof Error ? x.message : typeof x === 'string' ? x : '')).filter(Boolean).join(' ')); orig(...a) } }
 }
@@ -52,7 +59,7 @@ export function buildReport(d: DiagInput): string {
   else for (const s of d.sources) L.push(`  ${s.ok ? 'ok  ' : 'FAIL'} ${s.source.padEnd(12)} ${String(s.ms).padStart(5)} ms  ${clip(s.detail, 140)}`);
   L.push('', `Recent errors (${d.errors.length})`);
   if (!d.errors.length) L.push('  none');
-  for (const e of d.errors.slice(-20)) L.push(`  ${new Date(e.at).toISOString().slice(11, 19)} ${e.kind.padEnd(7)} ${e.msg}`);
+  for (const e of d.errors.slice(-20)) L.push(`  ${new Date(e.at).toISOString().slice(11, 19)} ${e.kind.padEnd(7)} ${e.msg}`, ...(e.stack ? [`    at ${e.stack}`] : []));
   L.push('', 'No keys, tokens, passwords, e-mail addresses or IP addresses are included; check the text before you share it.');
   return L.join('\n');
 }

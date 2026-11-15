@@ -7,7 +7,7 @@ const version = JSON.parse(readFileSync(new URL('./package.json', import.meta.ur
 // false: the server checks that Origin matches Host (CSRF) and that Host is one it serves (DNS rebinding).
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version) },   // shown in bug reports (src/bugreport.ts)
-  build: { rollupOptions: { input: { main: 'index.html', widget: 'widget.html' } } },   // widget.html: the desktop widgets
+  build: { sourcemap: process.env.CT_SOURCEMAP === '1' ? 'hidden' : false, rollupOptions: { input: { main: 'index.html', widget: 'widget.html' } } },   // widget.html: the desktop widgets
   server: {
     proxy: {
       '/api': { target: 'http://127.0.0.1:8787', changeOrigin: false },

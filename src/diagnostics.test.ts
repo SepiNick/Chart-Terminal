@@ -59,3 +59,13 @@ test('crash gate: three a session, a minute apart, the same bug once a day; nois
   assert.ok(isNoise('ResizeObserver loop completed with undelivered notifications.') && isNoise('Script error.') && !isNoise('boom'));
   assert.ok(!crashSignature('error', 'failed token=abcdef123456').includes('abcdef123456'));
 });
+
+test('stack frames: no host names or user paths, at most 5, keeps function and file:line', async () => {
+  const { frames } = await import('./diagnostics.ts');
+  const s = 'TypeError: x is undefined\n    at Pe.draw (http://192.168.1.5:8129/assets/main-AbC123.js:12:345)\n    at f (file:///C:/Users/bob/AppData/app/dist/assets/main-AbC123.js:1:2)\n    at a\n    at b\n    at c\n    at d';
+  const f = frames(s)!;
+  assert.ok(!/192\.168|bob|http:|file:/.test(f), f);
+  assert.match(f, /Pe\.draw \(assets\/main-AbC123\.js:12:345\)/);
+  assert.equal(f.split(' | ').length, 5);
+  assert.equal(frames(undefined), undefined);
+});

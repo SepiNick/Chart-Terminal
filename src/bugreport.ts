@@ -5,7 +5,7 @@
 //   · else, connected to a server -> POST /api/bugreport (kept on that server and sent to its Telegram chat, server/bugreport.ts);
 //   · else, or whenever sending fails (no network, receiver unreachable), the report can be saved as a file the user sends by hand.
 import { dialog } from './login.ts';
-import { collectReport, crashGate, crashSignature, isNoise, redact } from './diagnostics.ts';
+import { collectReport, crashGate, crashSignature, isNoise, recentErrors, redact } from './diagnostics.ts';
 import { api, serverMode } from './sync.ts';
 import { esc, toast } from './store.ts';
 
@@ -133,7 +133,9 @@ export function installCrashReporter(app: () => App) {
     busy = true;
     toast('The app hit a problem. A crash log was captured (no passwords, keys or addresses) and is being sent to the developer. You can turn this off in the ☰ menu.', 9000);
     try {
-      const body = await payload(`Automatic crash report (${kind}): ${msg}`, '', true, [], app());
+      const top = recentErrors().at(-1)?.stack;   // where it happened: the first frames, so the report is enough to find the line
+      const body = await payload(`Automatic crash report (${kind}): ${msg}${top ? `
+at ${top.split(' | ').slice(0, 3).join(' | ')}` : ''}`, '', true, [], app());
       try {
         if (await deliver(body, () => {})) toast('Crash log sent. Thank you!', 4000);
         else { keep(body); toast('Crash log saved on this device. Use ☰ → Report a bug to send it.', 7000) }
