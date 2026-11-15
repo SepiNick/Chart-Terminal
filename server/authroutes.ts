@@ -43,7 +43,7 @@ const info = (features: Record<string, boolean>) => ({ version, serverName: SERV
 
 if (!isPublic) {
   const isLocal = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-  route('GET', '/api/auth/status', c => ({ setup: !hasPassword(), loggedIn: !!c.session, mode: 'private', registration: 'closed', oauth: { google: false, apple: false, telegram: false }, ...info({ trading: true, ai: true, ml: true, forward: true, scripts: true, python: true }) }), { public: true });
+  route('GET', '/api/auth/status', c => ({ setup: !hasPassword(), loggedIn: !!c.session, mode: 'private', registration: 'closed', oauth: { google: false, apple: false, telegram: false }, ...info({ trading: true, ai: true, ml: true, forward: true, scripts: true, python: true, social: false }) }), { public: true });
   route('POST', '/api/auth/setup', c => {
     if (hasPassword()) throw new HttpError(409, 'Already set up');
     // Loopback address AND loopback Host name: a rebinding page can't claim the server before the owner does.
@@ -83,7 +83,7 @@ if (!isPublic) {
 } else {
   const U = await import('./core/users.ts');
   const O = await import('./oauth.ts');
-  const FEATURES = { trading: false, scripts: false, brokers: false, forward: false, scriptAlerts: false, recorder: false, ai: false, ml: false, python: false, lan: false, telegram: false, email: false, webhook: false };
+  const FEATURES = { trading: false, scripts: false, brokers: false, forward: false, scriptAlerts: false, recorder: false, ai: false, ml: false, python: false, lan: false, telegram: false, email: false, webhook: false, social: true };
   const start = (c: Ctx, userId: number) => {   // always a brand-new token: a cookie sent by the client is never adopted (no session fixation)
     if (c.bearer) return;   // a token client that changed its password signs in again; it gets no cookie
     if (c.session) endSession(c.session);

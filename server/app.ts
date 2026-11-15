@@ -14,6 +14,7 @@ await import('./notify/index.ts');
 await import('./alerts/index.ts');
 if (!isPublic) { await import('./forward.ts'); await import('./recorder.ts'); await import('./dominance/record.ts') }
 await import('./share.ts');
+if (isPublic) await import('./social.ts');   // community: accounts only exist on a public server
 await import('./derivs.ts');
 if (!isPublic) { await import('./brokers/index.ts'); await import('./providers.ts'); await import('./telegramlogin.ts'); await import('./telegrambackup.ts'); await import('./bugreport.ts') }
 await import('./marketdata.ts');

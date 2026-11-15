@@ -35,6 +35,8 @@ const CLASS: Record<string, 'U-id' | 'U-list' | 'G' | 'AUTH' | 'ADMIN' | 'PUB'> 
   'GET /api/exchanges': 'G', 'GET /api/markets': 'G', 'GET /api/bars': 'G', 'GET /api/tickers': 'G', 'GET /api/trades': 'G', 'GET /api/calendar': 'G', 'GET /api/dividends': 'G', 'GET /api/diag/sources': 'G', 'GET /api/derivs/:kind': 'G',
   'GET /api/news': 'G', 'GET /api/dex': 'G', 'GET /api/coins': 'G', 'GET /api/global': 'G', 'GET /api/global/history': 'G', 'GET /api/breadth': 'G', 'GET /api/uptrend': 'G', 'GET /api/treasury': 'G', 'GET /api/us-stocks': 'G',
   'GET /api/sec/facts': 'G', 'GET /api/sec/submissions': 'G', 'GET /api/sec/cik': 'G', 'GET /api/sec/frame': 'G', 'GET /api/sec/file': 'G', 'GET /api/sec/earnings': 'G', 'GET /api/sec/tickers': 'G',
+  // Community: shared by design (every signed-in user reads every visible post); authorship, blocks and the admin role are checked per route and tested in social.test.ts.
+  ...Object.fromEntries(['GET /api/social/feed', 'POST /api/social/posts', 'DELETE /api/social/posts/:id', 'POST /api/social/posts/:id/like', 'DELETE /api/social/posts/:id/like', 'GET /api/social/posts/:id/comments', 'POST /api/social/posts/:id/comments', 'DELETE /api/social/comments/:id', 'GET /api/social/profile/:name', 'GET /api/social/blocks', 'POST /api/social/follow/:name', 'DELETE /api/social/follow/:name', 'POST /api/social/block/:name', 'DELETE /api/social/block/:name', 'POST /api/social/report', 'GET /api/social/reports', 'POST /api/social/reports/:id/resolve', 'GET /api/social/chat/:room', 'POST /api/social/chat/:room', 'DELETE /api/social/chat/messages/:id'].map(k => [k, 'G' as const])),
 };
 
 test('every registered route is classified (and no classified route is stale)', () => {
