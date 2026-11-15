@@ -7,10 +7,10 @@ import { openScreenerPro, initScreenerPro } from './screenerpro.ts';
 import { CHART_TYPES } from './charttypes.ts';
 import { canWidget, widgetItems, listWidgetItems, widgetsMenu } from './widgets.ts';
 import { initTour, startTour } from './tour.ts';
-import { openBugReport } from './bugreport.ts';
+import { autoCrashOn, installCrashReporter, openBugReport, setAutoCrash } from './bugreport.ts';
 import { TOOL_MAP } from './tools/index.ts';
 import type { Drawing } from './tools/types.ts';
-import { renderLeftToolbar, wireLeftToolbar, renderFloating, drawingMenu, openProps, copyDrawings, pasteDrawings, setTool, setZoomOut, templateFor, type DrawUIHost } from './drawui.ts';
+import { renderLeftToolbar, wireLeftToolbar, renderFloating, drawingMenu, openProps, copyDrawings, pasteDrawings, cloneDrawings, setTool, setZoomOut, templateFor, type DrawUIHost } from './drawui.ts';
 import { loadSettings, DEFAULT_SETTINGS, SETTINGS_TABS, renderSettingsForm, readSettingsInput, type Settings } from './settings.ts';
 import { History, Snapshots } from './history.ts';
 import { styleFor } from './drawings.ts';
@@ -18,7 +18,7 @@ import { sizeOf } from './tools/basic.ts';
 import { isExpr, parse } from './symmath.ts';
 import { showMenu, type MenuItem } from './menu.ts';
 import { openConnections, initConnections } from './connections.ts';
-import { exchangeOptions } from './exchangegroups.ts';
+import { exchangeOptions, groupOf } from './exchangegroups.ts'; import { searchAll, retryFailed } from './searchall.ts'; import { rank, kindLabel, toSymbol, type Kind } from './symsearch.ts';
 import { newAccount, onPrice, type Account, type Order, type OrderType, type Side } from './trading.ts';
 import { PaperBroker, fromOrder, toOrder } from './broker/paper.ts';
 import { registerBroker, activeBroker, allBrokers, setActiveBroker, onBrokers } from './broker/registry.ts';
@@ -610,6 +610,7 @@ function copyShot(c: HTMLCanvasElement) { c.toBlob(b => b && navigator.clipboard
 initI18n();
 initTour();
 installErrorLog();
+installCrashReporter(() => ({ charts: panes.length, theme: st.settings.theme, lang: document.documentElement.lang, charts_info: panes.map(p => `${p.cfg.symbol} ${p.cfg.tf} ${p.cfg.type}`).join('; ') }));
 $('#diagRun').onclick = async () => {
   const out = $<HTMLTextAreaElement>('#diagOut'), stat = $('#diagSt'), copy = $('#diagCopy'), run = $<HTMLButtonElement>('#diagRun');
   stat.textContent = 'Checking…'; run.disabled = true;
@@ -723,7 +724,7 @@ let allSymbols: string[] = [];
 fetchSymbols().then(s => (allSymbols = s.sort())).catch(() => {});
 // Search tabs of the Iranian sources: Tehran bourse instrument kinds, tgju groups, Nobitex quote currencies.
 const IR_TABS: Record<string, string[]> = { tse: ['all', 'stock', 'etf', 'bond', 'right', 'futures', 'option', 'commodity', 'index'], tgju: ['all', 'currency', 'gold', 'coin'], nobitex: ['all', 'IRT', 'USDT'], cryptocap: ['all', 'share', 'cap'], oanda: ['all', 'forex', 'metal', 'cfd'], alpaca: ['all', 'stock'], polygon: ['all', 'stock', 'etf'], twelvedata: ['all', 'forex', 'stock'] };
-let searchMode: 'symbol' | 'compare' = 'symbol', searchQuote = 'USDT', searchEx = store.get<string>('searchEx', 'binance');
+let searchMode: 'symbol' | 'compare' = 'symbol', searchQuote = 'USDT', searchEx = store.get<string>('searchEx2', 'all'), exIds: string[] = [];
 const marketCache = new Map<string, RemoteMarket[]>();
 let exchangesLoaded = false;
 async function loadExchanges() {
@@ -731,9 +732,9 @@ async function loadExchanges() {
   try {
     const ex = await fetchExchanges();
     exchangesLoaded = true;
-    $('#searchEx').innerHTML = exchangeOptions(ex);
+    exIds = ex.map(x => x.id); $('#searchEx').innerHTML = exchangeOptions(ex); if (searchEx === 'all') setTimeout(renderSearch);
     $<HTMLSelectElement>('#searchEx').value = searchEx;
-  } catch (e) { if (isStandalone()) searchEx = 'binance'; else if (searchEx !== 'binance') toast((e as Error).message, 6000) }
+  } catch (e) { if (isStandalone()) { if (searchEx !== 'binance') searchEx = 'all' } else if (searchEx !== 'binance' && searchEx !== 'all') toast((e as Error).message, 6000) }
 }
 function openSearch(initial: string, mode: 'symbol' | 'compare' = 'symbol') {
   searchMode = mode;
@@ -741,12 +742,34 @@ function openSearch(initial: string, mode: 'symbol' | 'compare' = 'symbol') {
   const i = $<HTMLInputElement>('#searchIn'); i.value = initial;
   $<HTMLSelectElement>('#searchEx').value = searchEx;
   $<HTMLDialogElement>('#searchDlg').showModal(); i.focus();
-  loadExchanges();
+  retryFailed(); loadExchanges();
   renderSearch();
+}
+// All-exchanges view: one ranked list from Binance spot, dominance, the popular exchanges, brokers and the other sources (lists load in the background).
+const SEARCH_KINDS = ['all', 'spot', 'perp', 'future', 'index', 'other'];
+let allTimer = 0;
+function renderAll(q: string, row: (s: string, d: string, i: number) => string) {
+  if (!SEARCH_KINDS.includes(searchQuote)) searchQuote = 'all';
+  $('#searchTabs').innerHTML = SEARCH_KINDS.map(x => `<button type="button" data-q="${x}" class="${x === searchQuote ? 'on' : ''}">${x === 'perp' ? 'perpetual' : x === 'future' ? 'futures' : x}</button>`).join('');
+  const out = $('#searchList');
+  if (!q) { out.innerHTML = st.recent.length ? '<div class="muted sl-h">Recent</div>' + st.recent.map((s, i) => row(s, isExpr(s) ? 'Spread' : s.includes(':') ? s.split(':')[0].toLowerCase() : '', i)).join('') : '<div class="muted sl-h">Type a symbol: every exchange is searched (BTCUSDT, BTCUSDT.P, BTC.D …)</div>'; return }
+  if (isExpr(q) || q.includes(':')) { out.innerHTML = row(q, isExpr(q) ? 'Spread' : '', 0); return }
+  const keep = out.querySelector<HTMLElement>('.sel')?.dataset.s;
+  const r = searchAll(q, {
+    ids: exIds, isCcxt: id => [0, 1, 6].includes(groupOf(id)), kind: searchQuote === 'all' ? undefined : searchQuote as Kind, binance: allSymbols,
+    extra: DOM_SYMS.map(d => ({ ex: 'cryptocap', sym: d.sym, base: d.sym.split('.')[0], quote: '', type: 'index', name: d.name })),
+    cache: marketCache, fetch: fetchMarkets,
+    tick: () => { clearTimeout(allTimer); allTimer = window.setTimeout(() => { if (searchEx === 'all' && $<HTMLDialogElement>('#searchDlg').open) renderSearch() }, 150) },
+  });
+  const desc = (e: (typeof r.list)[number]) => e.ex === 'cryptocap' ? domDesc(e.sym) : `${e.name ?? `${e.base} / ${e.quote}`} · ${kindLabel(e)} · ${e.ex}`;
+  const s0 = r.list.map(toSymbol), at = keep ? s0.indexOf(keep) : -1;
+  const note = [isStandalone() ? 'Connect a data server to search other exchanges and perpetuals' : '', r.loading ? `Searching ${r.loading} more sources…` : '', r.failed ? `${r.failed} sources unavailable` : ''].filter(Boolean);
+  out.innerHTML = (r.list.map((e, i) => row(s0[i], desc(e), i === Math.max(at, 0) ? 0 : 1)).join('') || '<div class="muted sl-h">No matches</div>') + note.map(n => `<div class="muted sl-h">${esc(n)}</div>`).join('');
 }
 async function renderSearch() {
   const q = $<HTMLInputElement>('#searchIn').value.trim().toUpperCase();
   const row = (sym: string, desc: string, i: number) => `<div class="sl${i === 0 ? ' sel' : ''}" data-s="${esc(sym)}"><b>${esc(sym)}</b><span class="muted">${esc(desc)}</span></div>`;
+  if (searchEx === 'all') return renderAll(q, row);
   if (searchEx !== 'binance') {
     const tabs = IR_TABS[searchEx] ?? (searchEx === 'fx' ? ['all', 'forex', 'metal', 'energy', 'index', 'commodity', 'stock', 'crypto'] : ['all', 'spot', 'swap', 'future']);
     if (!tabs.includes(searchQuote)) searchQuote = 'all';
@@ -758,7 +781,8 @@ async function renderSearch() {
       catch (e) { $('#searchList').innerHTML = `<div class="dn sl-h">${esc((e as Error).message)}</div>`; return }
     }
     const EX = searchEx.toUpperCase(), qq = (searchEx === 'tse' ? q.replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/\s+/g, '_') : q).replace('/', '_');
-    const list = ms.filter(m => (searchQuote === 'all' || m.type === searchQuote || m.quote === searchQuote) && (!q || m.sym.includes(qq) || (m.name ?? '').toUpperCase().includes(q)))
+    const tabbed = ms.filter(m => searchQuote === 'all' || m.type === searchQuote || m.quote === searchQuote);
+    const list = q ? rank(tabbed.map(m => ({ ex: searchEx, ...m })), q) : tabbed
       .sort((a, b) => (a.sym.startsWith(qq) ? 0 : 1) - (b.sym.startsWith(qq) ? 0 : 1) || a.sym.length - b.sym.length).slice(0, 100);
     // FX also accepts any stock ticker typed in.
     const extra = searchEx === 'fx' && q && /^[A-Z0-9.]{1,12}$/.test(q) && !list.some(m => m.sym === q) ? row(`FX:${q}`, 'Stock or other Yahoo ticker', list.length ? 1 : 0) : '';
@@ -795,8 +819,9 @@ function pickSymbol(s: string) {
   if (searchMode === 'compare') { const p = active(); if (!isExpr(s)) applyCfg(p, { compare: [...new Set([...(p.cfg.compare ?? []), s])] }, 'compare') }
   else setSymbol(s);
 }
-$('#searchIn').oninput = () => { renderSearch() };
-$('#searchEx').onchange = e => { searchEx = (e.target as HTMLSelectElement).value; store.set('searchEx', searchEx); searchQuote = ''; renderSearch() };
+let searchTimer = 0;
+$('#searchIn').oninput = () => { clearTimeout(searchTimer); searchTimer = window.setTimeout(renderSearch, searchEx === 'all' ? 80 : 0) };
+$('#searchEx').onchange = e => { searchEx = (e.target as HTMLSelectElement).value; store.set('searchEx2', searchEx); searchQuote = ''; renderSearch() };
 $('#searchIn').onkeydown = e => {
   const rows = $$('#searchList .sl'), i = rows.findIndex(r => r.classList.contains('sel'));
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const j = Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))); rows.forEach((r, k) => r.classList.toggle('sel', k === j)); rows[j]?.scrollIntoView({ block: 'nearest' }) }
@@ -1397,7 +1422,7 @@ const KEYS: [string, string][] = [
   ['Alt+I / Alt+L / Alt+P', 'Invert / Log / Percent scale'], ['Alt+A', 'Add alert'], ['Alt+W', 'Add to watchlist'], ['Alt+S', 'Copy chart image'],
   ['Ctrl+Alt+S / Ctrl+Shift+S', 'Download / copy snapshot'], ['Alt+T / H / J / V / C / F', 'Trend line / Horizontal line / ray / Vertical / Cross line / Fib'],
   ['Alt+Shift+R', 'Rectangle'], ['Shift+click', 'Measure'], ['Ctrl+Alt+H', 'Hide all drawings'], ['Ctrl+C / Ctrl+V', 'Copy / paste drawings'],
-  ['Ctrl+drag', 'Clone drawing'], ['Shift+drag', 'Move along one axis'], ['Ctrl (while drawing)', 'Invert magnet'], ['Arrow keys', 'Nudge selected drawing'],
+  ['Ctrl+drag', 'Clone drawing'], ['Ctrl+D / Ctrl+A', 'Duplicate / select all drawings'], ['Ctrl+drag (empty space)', 'Box-select drawings'], ['Shift+click drawing', 'Add / remove from selection'], ['Alt+click', 'Select one drawing of a group'], ['Shift+drag', 'Move along one axis'], ['Ctrl (while drawing)', 'Invert magnet'], ['Arrow keys', 'Nudge selected drawing'],
   ['Del / Backspace', 'Remove selected drawing'], ['Esc', 'Cursor / cancel'], ['← / →', 'Scroll one bar'], ['Ctrl+↑ / Ctrl+↓', 'Zoom in / out'],
   ['Alt+Enter', 'Maximize active chart'], ['Tab / Shift+Tab', 'Next / previous chart'], ['Shift+↓ / Shift+→', 'Replay: play-pause / step'], ['Ctrl+/', 'This list'],
 ];
@@ -1416,6 +1441,8 @@ document.addEventListener('keydown', e => {
     case 'Ctrl+Y': case 'Ctrl+Shift+Z': return act(() => history.redo());
     case 'Ctrl+C': return l.selected.size ? act(() => copyDrawings(l)) : undefined;
     case 'Ctrl+V': return act(() => pasteDrawings(l));
+    case 'Ctrl+D': return l.selected.size ? act(() => cloneDrawings(l)) : undefined;
+    case 'Ctrl+A': return l.drawings.length ? act(() => l.selectAll()) : undefined;
     case 'Ctrl+S': return act(() => $('#lySave').click());
     case 'Ctrl+K': return act(() => openSearch(''));
     case 'Ctrl+/': return act(openKeys);
@@ -1534,7 +1561,7 @@ addEventListener('storage', e => {
   }
 });
 function saveWatchLocal() { connectTickers(); renderWatch() }   // like saveWatch, without writing it back
-initConnections({ openMarkets: (ex, perp) => { searchEx = ex; store.set('searchEx', ex); searchQuote = perp ? 'swap' : 'USDT'; openSearch('') } });
+initConnections({ openMarkets: (ex, perp) => { searchEx = ex; store.set('searchEx2', ex); searchQuote = perp ? 'swap' : 'USDT'; openSearch('') } });
 $('#menuBtn').onclick = e => {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect(), click = (id: string) => () => $(id).click();
   showMenu(r.right - 220, r.bottom + 2, [
@@ -1544,6 +1571,7 @@ $('#menuBtn').onclick = e => {
     { label: 'Screener Pro…', icon: '📊', action: openScreenerPro },
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
     { label: 'Report a bug…', icon: '🐞', action: () => openBugReport({ charts: panes.length, theme: st.settings.theme, lang: document.documentElement.lang, charts_info: panes.map(p => `${p.cfg.symbol} ${p.cfg.tf} ${p.cfg.type}`).join('; ') }) },
+    { label: 'Send crash logs automatically', icon: '🛟', checked: autoCrashOn(), action: () => { setAutoCrash(!autoCrashOn()); toast(autoCrashOn() ? 'Crash logs will be sent automatically (they contain no passwords or keys)' : 'Automatic crash logs are off') } },
     { label: 'Feature tour', icon: '❓', action: startTour },
     { label: 'Licences', icon: 'ⓘ', action: () => { window.open('/licenses.html', '_blank') } },
     ...(canWidget ? [{ label: 'Desktop widgets…', icon: '🧩', action: () => void widgetsMenu(r.right - 220, r.bottom + 2, { sym: active().cfg.symbol, tf: active().cfg.tf }, sortedIds(lists).map(i => ({ id: i, name: lists[i].name }))) }] : []),

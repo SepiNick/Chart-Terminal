@@ -52,7 +52,7 @@ export async function markets(id: string): Promise<{ list: Market[]; map: Map<st
   }
   const entry = { at: Date.now(), list, map };
   marketCache.set(id, entry);
-  if (marketCache.size > 12) marketCache.delete(marketCache.keys().next().value!);   // one big market list per exchange
+  if (marketCache.size > 16)marketCache.delete(marketCache.keys().next().value!);   // one big market list per exchange
   return entry;
 }
 async function resolve(id: string, sym: string): Promise<{ x: Exchange; m: Market }> {

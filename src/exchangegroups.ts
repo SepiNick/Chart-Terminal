@@ -16,5 +16,5 @@ export function exchangeOptions(ex: { id: string; name: string }[]): string {
   const label = (x: { id: string; name: string }) => CATALOG.find(p => p.id === x.id)?.name ?? (x.name && x.name !== x.id ? x.name : x.id);
   const seen = new Set<string>(), buckets: string[][] = EX_GROUPS.map(() => []);
   for (const x of [...ex].filter(e => !UNUSABLE.has(e.id)).sort((a, b) => label(a).localeCompare(label(b)))) if (!seen.has(x.id)) { seen.add(x.id); buckets[groupOf(x.id)].push(`<option value="${esc(x.id)}">${esc(label(x))}</option>`) }
-  return buckets.map((b, i) => (b.length ? `<optgroup label="${EX_GROUPS[i]}">${b.join('')}</optgroup>` : '')).join('');
+  return '<option value="all">All exchanges</option>' + buckets.map((b, i) => (b.length ? `<optgroup label="${EX_GROUPS[i]}">${b.join('')}</optgroup>` : '')).join('');
 }
