@@ -5,7 +5,7 @@ compatibility_date = "2026-01-01"
 
 [vars]
 TELEGRAM_CHAT_ID = "REPLACE_WITH_YOUR_CHAT_ID"   # your personal chat (see README step 3)
-# GITHUB_REPO = "SepiNick/tradingview-clone"      # optional: also open an issue (needs the GITHUB_TOKEN secret)
+# GITHUB_REPO = "SepiNick/Chart-Terminal"      # optional: also open an issue (needs the GITHUB_TOKEN secret)
 DIFFICULTY = "16"      # proof-of-work bits: 16 is about a second on a phone
 IP_PER_HOUR = "5"
 PER_DAY = "300"

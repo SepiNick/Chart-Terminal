@@ -77,7 +77,7 @@ If you set `GITHUB_TOKEN` and `GITHUB_REPO`, then in addition to Telegram the Wo
 
 What does **not** go into the Issue: images (the GitHub API has no image upload for Issues) and the user's contact details. These two only arrive in Telegram. The `@` character is also neutralized so that a report cannot mention anyone.
 
-**Creating the token:** GitHub ← Settings ← Developer settings ← Personal access tokens ← **Fine-grained tokens** ← Generate. Select only the `SepiNick/tradingview-clone` repo, grant **Issues: Read and write** (and only that), and set an expiry (for example 90 days). Enter the token with `wrangler secret put GITHUB_TOKEN`; do not put it anywhere else.
+**Creating the token:** GitHub ← Settings ← Developer settings ← Personal access tokens ← **Fine-grained tokens** ← Generate. Select only the `SepiNick/Chart-Terminal` repo, grant **Issues: Read and write** (and only that), and set an expiry (for example 90 days). Enter the token with `wrangler secret put GITHUB_TOKEN`; do not put it anywhere else.
 
 ## Cost and limits (Cloudflare free plan)
 

@@ -9,8 +9,8 @@ Three main files: `Dockerfile` (amd64 and ARM64, so Raspberry Pi 4 and 5 work to
 ## Private server on a Raspberry Pi (or any Linux)
 
 ```bash
-git clone https://github.com/SepiNick/tradingview-clone.git
-cd tradingview-clone
+git clone https://github.com/SepiNick/Chart-Terminal.git
+cd Chart-Terminal
 docker compose up -d --build
 ```
 

@@ -7,7 +7,7 @@
   },
   "version": "0.1.4",
   "license": "GPL-2.0-or-later",
-  "homepage": "https://github.com/SepiNick/tradingview-clone",
+  "homepage": "https://github.com/SepiNick/Chart-Terminal",
   "description": "Chart Terminal desktop app",
   "author": "Chart Terminal",
   "main": "main.cjs",

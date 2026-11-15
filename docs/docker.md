@@ -9,8 +9,8 @@
 ## سرور خصوصی روی رزبری پای (یا هر لینوکس)
 
 ```bash
-git clone https://github.com/SepiNick/tradingview-clone.git
-cd tradingview-clone
+git clone https://github.com/SepiNick/Chart-Terminal.git
+cd Chart-Terminal
 docker compose up -d --build
 ```
 

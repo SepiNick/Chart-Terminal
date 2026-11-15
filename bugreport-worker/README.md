@@ -77,7 +77,7 @@ npx wrangler deploy
 
 چیزی که **داخل Issue نمی‌رود**: عکس‌ها (API گیت‌هاب برای Issue آپلود عکس ندارد) و راه تماس کاربر. این دو فقط در تلگرام می‌آیند. علامت `@` هم خنثی می‌شود تا گزارش نتواند کسی را منشن کند.
 
-**ساخت توکن:** GitHub ← Settings ← Developer settings ← Personal access tokens ← **Fine-grained tokens** ← Generate. فقط ریپوی `SepiNick/tradingview-clone` را انتخاب کنید، دسترسی **Issues: Read and write** (و فقط همین) بدهید، انقضا بگذارید (مثلاً ۹۰ روز). توکن را با `wrangler secret put GITHUB_TOKEN` وارد کنید؛ جای دیگری نگذارید.
+**ساخت توکن:** GitHub ← Settings ← Developer settings ← Personal access tokens ← **Fine-grained tokens** ← Generate. فقط ریپوی `SepiNick/Chart-Terminal` را انتخاب کنید، دسترسی **Issues: Read and write** (و فقط همین) بدهید، انقضا بگذارید (مثلاً ۹۰ روز). توکن را با `wrangler secret put GITHUB_TOKEN` وارد کنید؛ جای دیگری نگذارید.
 
 ## هزینه و محدودیت‌ها (برنامه‌ی رایگان Cloudflare)
 
