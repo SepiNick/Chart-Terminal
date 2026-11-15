@@ -21,26 +21,45 @@ function polite<T>(f: () => Promise<T>): Promise<T> {
   void chain.then(() => { waiting-- });
   return run;
 }
-const cache = new Map<string, { at: number; data: unknown }>();
-async function get<T>(url: string, ttl: number, kind: 'json' | 'text' = 'json'): Promise<T> {
+// Bounded by BYTES, not entries: one company-facts file is several MB and a filing document can be tens of MB, so counting
+// entries let a public visitor walking CIKs fill the server's memory. Least recently used goes first; one big answer is never kept.
+const CACHE_BYTES = (process.env.CT_MODE === 'public' ? 64 : 256) * 1024 * 1024;
+const cache = new Map<string, { at: number; size: number; data: unknown }>();
+let cacheBytes = 0;
+const inflight = new Map<string, Promise<unknown>>();   // the same URL asked twice at once is fetched once
+function remember(url: string, size: number, data: unknown) {
+  const old = cache.get(url); if (old) { cacheBytes -= old.size; cache.delete(url) }
+  if (size > CACHE_BYTES / 4) return;
+  cache.set(url, { at: deps.now(), size, data }); cacheBytes += size;
+  for (const [k, v] of cache) { if (cacheBytes <= CACHE_BYTES) break; cache.delete(k); cacheBytes -= v.size }
+}
+export const cacheStats = () => ({ entries: cache.size, bytes: cacheBytes });
+function get<T>(url: string, ttl: number, kind: 'json' | 'text' = 'json'): Promise<T> {
   const c = cache.get(url);
-  if (c && deps.now() - c.at < ttl) return c.data as T;
-  try {
-    const data = await polite(async () => {
-      const r = await deps.fetch(url);
-      if (r.status === 404) throw new HttpError(404, 'SEC has no data for this request');
-      if (!r.ok) throw new HttpError(502, `SEC returned ${r.status}`);
-      let buf = Buffer.from(await r.arrayBuffer());
-      if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf);
-      return kind === 'json' ? JSON.parse(buf.toString('utf8')) : buf.toString('utf8');
-    });
-    cache.set(url, { at: deps.now(), data });
-    if (cache.size > 400) cache.delete(cache.keys().next().value!);
-    return data as T;
-  } catch (e) {
-    if (c && !(e instanceof HttpError && e.status === 404)) return c.data as T;
-    throw e instanceof HttpError ? e : new HttpError(502, `SEC unreachable: ${(e as Error).message}`);
-  }
+  if (c && deps.now() - c.at < ttl) { cache.delete(url); cache.set(url, c); return Promise.resolve(c.data as T) }   // re-insert = most recently used
+  const pending = inflight.get(url);
+  if (pending) return pending as Promise<T>;
+  const p = (async () => {
+    try {
+      let size = 0;
+      const data = await polite(async () => {
+        const r = await deps.fetch(url);
+        if (r.status === 404) throw new HttpError(404, 'SEC has no data for this request');
+        if (!r.ok) throw new HttpError(502, `SEC returned ${r.status}`);
+        let buf = Buffer.from(await r.arrayBuffer());
+        if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf);
+        size = buf.length;
+        return kind === 'json' ? JSON.parse(buf.toString('utf8')) : buf.toString('utf8');
+      });
+      remember(url, size, data);
+      return data as T;
+    } catch (e) {
+      if (c && !(e instanceof HttpError && e.status === 404)) return c.data as T;   // stale copy on upstream failure
+      throw e instanceof HttpError ? e : new HttpError(502, `SEC unreachable: ${(e as Error).message}`);
+    } finally { inflight.delete(url) }
+  })();
+  inflight.set(url, p);
+  return p;
 }
 const H = 3600_000;
 export async function tickers() {

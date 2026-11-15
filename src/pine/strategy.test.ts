@@ -48,3 +48,12 @@ test('limit entry waits for price', () => {
   assert.equal(br.open[0].price, 9.5);
   assert.equal(br.open[0].bar, 2);
 });
+
+test('trailing stop: a rising segment does not stop out against its own high; the stop follows the best price per entry', () => {
+  const bars = [bar(0, 100, 100, 100, 100), bar(1, 100, 110, 99, 108), bar(2, 108, 109, 106, 107)];
+  const br = run(bars, (b, i) => { if (i === 0) b.entry(i, 'L', 'long', {}); if (i <= 1) b.exit(i, 'X', { fromEntry: 'L', trailPrice: 101, trailOffset: 3 }) }, { mintick: 1 });
+  assert.equal(br.trades.length, 1);
+  assert.equal(br.trades[0].entryPrice, 100);
+  assert.equal(br.trades[0].exitPrice, 107);   // best 110 - 3 ticks, hit on the way down in bar 2 (the old code exited at 99 in bar 1)
+  assert.equal(br.trades[0].exitBar, 2);
+});

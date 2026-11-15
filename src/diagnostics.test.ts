@@ -44,3 +44,18 @@ test('report: sections, failures visible, no secrets from any field', () => {
   assert.ok(!t.includes('192.168.1.5'), 'a home-network address is redacted');
   assert.match(buildReport({ now: 0, browser: { ua: '', language: '', tz: '', online: false }, app: { origin: '', lang: 'en', theme: 'light', charts: 1 }, server: { error: 'Failed to fetch' }, sources: { error: 'x' }, errors: [] }), /OFFLINE[\s\S]*not reachable: Failed to fetch[\s\S]*could not ask/);
 });
+
+test('crash gate: three a session, a minute apart, the same bug once a day; noise is ignored', async () => {
+  const { crashGate, crashSignature, isNoise } = await import('./diagnostics.ts');
+  const seen: Record<string, number> = {}, gate = crashGate(seen);
+  const a = crashSignature('error', 'x is not a function at line 12'), a2 = crashSignature('error', 'x is not a function at line 99');
+  assert.equal(a, a2, 'numbers do not make a new bug');
+  assert.equal(gate(a, 1_000), true);
+  assert.equal(gate('b', 1_500), false, 'too soon after the last one');
+  assert.equal(gate(a, 100_000), false, 'same bug again');
+  assert.equal(gate('b', 100_000), true);
+  assert.equal(gate('c', 200_000), true);
+  assert.equal(gate('d', 300_000), false, 'three per session');
+  assert.ok(isNoise('ResizeObserver loop completed with undelivered notifications.') && isNoise('Script error.') && !isNoise('boom'));
+  assert.ok(!crashSignature('error', 'failed token=abcdef123456').includes('abcdef123456'));
+});

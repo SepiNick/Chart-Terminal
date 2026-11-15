@@ -40,6 +40,8 @@ export function compile(mainPath: string, files: Record<string, string>, opts: C
   return { ok: errs.length === 0, js: errs.length ? undefined : js, errors: errs, warnings: dedupe(warnings), dialect };
 }
 
+/** Browser globals a script must never reach: its code runs with these names bound to undefined (defence in depth next to the compiler's name checks). */
+const HIDDEN_GLOBALS = ['window', 'self', 'globalThis', 'document', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'localStorage', 'sessionStorage', 'indexedDB', 'navigator', 'location', 'history', 'importScripts', 'postMessage', 'open', 'parent', 'top', 'frames', 'opener', 'Notification', 'BroadcastChannel'];
 export function instantiate(js: string, rt: Rt): CompiledProgram {
-  return new Function('rt', 'MqlArray', 'ref', 'MqlError', js)(rt, MqlArray, makeRef, MqlError) as CompiledProgram;
+  return new Function('rt', 'MqlArray', 'ref', 'MqlError', ...HIDDEN_GLOBALS, js)(rt, MqlArray, makeRef, MqlError) as CompiledProgram;
 }

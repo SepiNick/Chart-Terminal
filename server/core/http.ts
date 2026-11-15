@@ -68,11 +68,11 @@ const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js
 const SECURITY_HEADERS: Record<string, string> = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY', ...(isPublic ? { 'permissions-policy': 'camera=(), geolocation=(), payment=(), usb=(), microphone=(self)' } : {}) };
 
 /** Serve the built app (dist/) with an SPA fallback, for phones/other devices that don't go through Vite. */
-// The page needs 'unsafe-eval' (the MQL/Ninja/Pine compilers use new Function) and inline styles; everything else is same-origin
+// The page needs 'unsafe-eval' (the MQL/Ninja/Pine compilers use new Function) and style="…" attributes (no inline <style> blocks); everything else is same-origin
 // except the Binance public market-data hosts the client reads directly. Applied to the HTML only.
 // CT_BUG_REPORT_URL: the bug-report receiver (bugreport-worker/), so the page may post reports to it.
 const BUG_ORIGIN = (() => { try { const u = new URL(process.env.CT_BUG_REPORT_URL ?? ''); return u.protocol === 'https:' ? ` ${u.origin}` : '' } catch { return '' } })();
-const CSP = "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://data-api.binance.vision wss://data-stream.binance.vision" + BUG_ORIGIN + "; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://data-api.binance.vision wss://data-stream.binance.vision" + BUG_ORIGIN + "; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 function serveStatic(c: Ctx): boolean {
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return false;
   let p: string; try { p = normalize(decodeURIComponent(c.url.pathname)) } catch { throw new HttpError(400, 'Bad path') }

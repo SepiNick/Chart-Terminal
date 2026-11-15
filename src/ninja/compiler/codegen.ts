@@ -69,6 +69,9 @@ const PD_CONST: Record<string, Record<string, unknown>> = {
 };
 
 const PRELUDE = `'use strict';
+// Loop budget: a runaway loop (while(true), a bad step) ends the run with an error instead of freezing the tab. Counted over the whole run.
+let __n = 0;
+const __t = () => { if (++__n > 3e8) throw new Error('Script stopped: loop budget exceeded (an endless loop?)'); return true };
 const __nc = Symbol('noctor');
 const __exc = (n, m) => { const e = new Error(m == null ? '' : String(m)); e.name = n; return e };
 const __throw = e => { throw e };
@@ -1272,15 +1275,15 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       case 'block': return `${p}${block(s.body, ind)}\n`;
       case 'empty': return '';
       case 'if': return `${p}if ${cond(s.c)} ${body(s.a, ind)}${s.b ? ` else ${s.b.k === 'if' ? stmt(s.b, ind).trimStart().replace(/\n$/, '') : body(s.b, ind)}` : ''}\n`;
-      case 'while': { ctx.brk.push(null); const r = `${p}while ${cond(s.c)} ${body(s.body, ind)}\n`; ctx.brk.pop(); return r }
-      case 'do': { ctx.brk.push(null); const b = body(s.body, ind); ctx.brk.pop(); return `${p}do ${b} while ${cond(s.c)};\n` }
+      case 'while': { ctx.brk.push(null); const r = `${p}while (__t() && ${cond(s.c)}) ${body(s.body, ind)}\n`; ctx.brk.pop(); return r }
+      case 'do': { ctx.brk.push(null); const b = body(s.body, ind); ctx.brk.pop(); return `${p}do ${b} while (__t() && ${cond(s.c)});\n` }
       case 'for': {
         ctx.scopes.push(new Map());
         const i0 = s.init[0];
         const init = i0?.k === 'vars' ? 'let ' + declItems(i0).map(([js, v]) => `${js} = ${v}`).join(', ') : s.init.map(x => x.k === 'expr' ? ex(x.e).c : '').join(', ');
-        const c = s.c ? ex(s.c).c : '', step = s.step.map(x => ex(x).c).join(', ');
+        const c = s.c ? ex(s.c).c : 'true', step = s.step.map(x => ex(x).c).join(', ');
         ctx.brk.push(null);
-        const r = `${p}for (${init}; ${c}; ${step}) ${body(s.body, ind)}\n`;
+        const r = `${p}for (${init}; __t() && (${c}); ${step}) ${body(s.body, ind)}\n`;
         ctx.brk.pop();
         ctx.scopes.pop();
         return r;

@@ -34,7 +34,7 @@ const visible = () => $('#s-accts')?.classList.contains('on');
 
 export function initAccountsUI() {
   injectStyle();
-  const s = document.createElement('style'); s.textContent = CSS; document.head.append(s);
+  const s = new CSSStyleSheet(); s.replaceSync(CSS); document.adoptedStyleSheets = [...document.adoptedStyleSheets, s];   // a constructed sheet: allowed without 'unsafe-inline' in the CSP
   onBrokers(() => { unsub(); unsub = activeBroker()?.onChange(() => renderAccounts()) ?? (() => {}); renderAccounts() });
   $('#s-accts').onclick = onClick;
   if (serverMode && gate('trading').on) loadAccounts().catch(e => toast(`Exchange accounts: ${(e as Error).message}`));

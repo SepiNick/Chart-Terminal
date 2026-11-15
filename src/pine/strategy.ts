@@ -30,7 +30,7 @@ export interface Trade {
 interface Order {
   kind: 'entry' | 'close' | 'exit' | 'order';
   id: string; dir?: Dir; qty?: number; qtyPercent?: number; limit?: number; stop?: number;
-  fromEntry?: string; trail?: { points?: number; offset: number; activation?: number; active?: boolean; best?: number };
+  fromEntry?: string; trail?: { points?: number; offset: number; activation?: number; active?: boolean; best?: Map<Entry, number> };
   comment: string; placedBar: number;
 }
 export interface FillEvent { bar: number; time: number; price: number; qty: number; side: 'buy' | 'sell'; id: string; comment: string }
@@ -69,7 +69,7 @@ export class Broker {
   exit(bar: number, id: string, o: { fromEntry?: string; qty?: number; qtyPercent?: number; limit?: number; stop?: number; profit?: number; loss?: number; trailPoints?: number; trailOffset?: number; trailPrice?: number; comment?: string }) {
     const prev = this.orders.find(x => x.kind === 'exit' && x.id === id && x.fromEntry === o.fromEntry);
     this.orders = this.orders.filter(x => x !== prev);
-    const trail = o.trailOffset != null && (o.trailPoints != null || o.trailPrice != null) ? { points: o.trailPoints, offset: o.trailOffset, activation: o.trailPrice, best: prev?.trail?.best } : undefined; // keep the trail's high-water mark
+    const trail = o.trailOffset != null && (o.trailPoints != null || o.trailPrice != null) ? { points: o.trailPoints, offset: o.trailOffset, activation: o.trailPrice, best: prev?.trail?.best ?? new Map() } : undefined; // keep the trail's high-water mark
     // profit/loss are in ticks from the entry price; resolved per entry at fill time
     this.orders.push({ kind: 'exit', id, fromEntry: o.fromEntry, qty: o.qty, qtyPercent: o.qtyPercent, limit: o.limit, stop: o.stop, trail, comment: o.comment ?? '', placedBar: bar,
       ...(o.profit != null || o.loss != null ? { profitTicks: o.profit, lossTicks: o.loss } as object : {}) });
@@ -164,27 +164,33 @@ export class Broker {
           const stp = o.stop != null && (buy ? hi >= o.stop : lo <= o.stop) ? (buy ? Math.max(a, o.stop) : Math.min(a, o.stop)) : null;
           const px = lim ?? stp;
           if (px != null && (o.limit == null || o.stop == null || lim != null)) { this.fillEntry(bar, o, px); this.orders.splice(this.orders.indexOf(o), 1) }
-        } else if (o.kind === 'exit') this.tryExit(bar, o, a, lo, hi);
+        } else if (o.kind === 'exit') this.tryExit(bar, o, a, z, lo, hi);
       }
     }
     this.equity[bar] = this.equityAt(b.close);
   }
-  private tryExit(bar: number, o: Order & { profitTicks?: number; lossTicks?: number }, from: number, lo: number, hi: number) {
+  private tryExit(bar: number, o: Order & { profitTicks?: number; lossTicks?: number }, from: number, to: number, lo: number, hi: number) {
     const entries = this.open.filter(e => !o.fromEntry || e.id === o.fromEntry);
     if (!entries.length) return;
     for (const e of entries) {
       const long = e.dir === 'long', t = this.props.mintick;
       const tp = o.limit ?? (o.profitTicks != null ? e.price + (long ? 1 : -1) * o.profitTicks * t : undefined);
       let sl = o.stop ?? (o.lossTicks != null ? e.price - (long ? 1 : -1) * o.lossTicks * t : undefined);
+      // The trail's high-water mark is kept per entry (two open entries must not share one) and moves along the path: the stop
+      // is checked against the mark reached at the segment's START, so a rising segment cannot stop out against its own high.
+      const pick = long ? Math.max : Math.min;
+      let markAfter: number | undefined;
       if (o.trail) {
         const act = o.trail.activation ?? (o.trail.points != null ? e.price + (long ? 1 : -1) * o.trail.points * t : e.price);
-        o.trail.best = long ? Math.max(o.trail.best ?? -Infinity, hi) : Math.min(o.trail.best ?? Infinity, lo);
-        if (long ? o.trail.best >= act : o.trail.best <= act) {
-          const ts = o.trail.best - (long ? 1 : -1) * o.trail.offset * t;
+        const best = pick(o.trail.best!.get(e) ?? e.price, e.bar < bar ? from : e.price);   // an entry filled this bar starts at its fill price
+        markAfter = pick(best, to);
+        if (long ? best >= act : best <= act) {
+          const ts = best - (long ? 1 : -1) * o.trail.offset * t;
           sl = sl == null ? ts : long ? Math.max(sl, ts) : Math.min(sl, ts);
         }
       }
       const slHit = sl != null && (long ? lo <= sl : hi >= sl), tpHit = tp != null && (long ? hi >= tp : lo <= tp);
+      if (markAfter != null) o.trail!.best!.set(e, markAfter);
       if (!slHit && !tpHit) continue;
       // Within one segment the path is monotonic: whichever level is nearer the segment start is hit first.
       const px = slHit && tpHit ? (Math.abs(from - sl!) < Math.abs(from - tp!) ? sl! : tp!) : slHit ? (long ? Math.min(from, sl!) : Math.max(from, sl!)) : (long ? Math.max(from, tp!) : Math.min(from, tp!));

@@ -80,3 +80,21 @@ export async function collectReport(app: { charts: number; theme: string; lang: 
   }
   return buildReport(d);
 }
+
+/** What an automatic crash report is about: the kind plus the message with numbers and addresses blanked, so the same bug has the same signature. */
+export const crashSignature = (kind: string, msg: string) => `${kind}:${redact(msg).replace(/\d+/g, '#').replace(/\s+/g, ' ').slice(0, 120)}`;
+/** Messages that are browser noise, not an app crash (a resize loop, an error from another origin that carries no information). */
+export const isNoise = (msg: string) => !msg.trim() || /^Script error\.?$/i.test(msg) || /ResizeObserver loop/i.test(msg) || /^Non-Error promise rejection captured$/i.test(msg);
+/**
+ * Decides whether an automatic crash report may be sent now: at most `max` per session, `gapMs` apart, and the same bug (signature) not again
+ * within `repeatMs`. `seen` is the caller's persisted map signature → last sent time; the gate updates it when it says yes.
+ */
+export function crashGate(seen: Record<string, number>, o = { max: 3, gapMs: 60_000, repeatMs: 24 * 3600_000 }) {
+  let sent = 0, last = -Infinity;
+  return (sig: string, now: number): boolean => {
+    if (sent >= o.max || now - last < o.gapMs || now - (seen[sig] ?? -Infinity) < o.repeatMs) return false;
+    sent++; last = now; seen[sig] = now;
+    for (const k of Object.keys(seen)) if (now - seen[k] > o.repeatMs) delete seen[k];
+    return true;
+  };
+}

@@ -44,7 +44,9 @@ export function compile(files: Record<string, string>, opts: NtCompileOptions): 
   return { ok: !errs.length, js: errs.length ? undefined : js, classes, errors: errs, warnings: dedupe(warnings) };
 }
 
+/** Browser globals a script must never reach: its code runs with these names bound to undefined (defence in depth next to the compiler's name checks). */
+const HIDDEN_GLOBALS = ['window', 'self', 'globalThis', 'document', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'localStorage', 'sessionStorage', 'indexedDB', 'navigator', 'location', 'history', 'importScripts', 'postMessage', 'open', 'parent', 'top', 'frames', 'opener', 'Notification', 'BroadcastChannel'];
 /** Runs the compiled body: returns every compiled class by simple name. */
 export function instantiate(js: string, rt: Rt): Record<string, Function> {
-  return new Function('rt', 'ref', js)(rt, makeRef) as Record<string, Function>;
+  return new Function('rt', 'ref', ...HIDDEN_GLOBALS, js)(rt, makeRef) as Record<string, Function>;
 }

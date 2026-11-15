@@ -45,3 +45,22 @@ test('optimizer: an infinite score (one lucky trade, no loss) is not ranked', ()
   const res = optimize(evaluate, bars, [{ name: 'p', min: 1, max: 3, step: 1, def: 1 } as never], {}, { objective: 'profitFactor', maximize: true, maxRuns: 10, range: { from: 0, to: 29 } } as never);
   assert.equal(res.length, 0);
 });
+
+test('NinjaScript / MQL: an endless loop stops with an error instead of freezing', async () => {
+  const { compileNinja, runNinjaScript } = await import('./ninja/engine.ts');
+  const { NEW_NT_INDICATOR } = await import('./ninja/templates.ts');
+  const src = NEW_NT_INDICATOR.replace('protected override void OnBarUpdate()\n        {', 'protected override void OnBarUpdate()\n        {\n            while (true) { }');
+  assert.notEqual(src, NEW_NT_INDICATOR);
+  const cr = compileNinja({ 'MyBands.cs': src });
+  assert.ok(cr.ok, cr.errors.map(e => e.msg).join('; '));
+  const r = runNinjaScript(cr, 'MyBands', bars.map(b => ({ ...b, volume: 1 })), { symbol: 'ES', tfSec: 3600, tickSize: 0.25, pointValue: 50, initialCapital: 1e5, commissionPerContract: 0, inputs: {} });
+  assert.match(r.result.error ?? '', /loop budget/);
+  const m = mql('t.mq5', { 't.mq5': 'int OnInit(){ for(;;){} return 0; }' }, MQL_OPTS);
+  assert.ok(m.ok && /__t\(\)/.test(m.js ?? ''));
+});
+
+test('NinjaScript / MQL: compiled code runs with the browser globals hidden', async () => {
+  const { instantiate } = await import('./mql/compiler/index.ts');
+  const probe = instantiate('return { t: [typeof fetch, typeof window, typeof globalThis, typeof localStorage] };', {} as never) as unknown as { t: string[] };
+  assert.deepEqual(probe.t, ['undefined', 'undefined', 'undefined', 'undefined']);
+});

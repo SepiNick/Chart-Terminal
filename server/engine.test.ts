@@ -7,7 +7,8 @@ const { NEW_MQL5_EA } = await import('../src/mql/templates.ts');
 
 const bars = Array.from({ length: 60 }, (_, i) => { const c = 100 + Math.sin(i / 3) * 5; return { time: 1_700_000_000 + i * 60, open: c - 0.5, high: c + 1, low: c - 1, close: c, volume: 10 } });
 const pine = { lang: 'pine' as const, files: { 't.pine': 'strategy("t")\nif bar_index % 6 == 0\n    strategy.entry("L", strategy.long)\nif bar_index % 6 == 3\n    strategy.close("L")' }, main: 't.pine', prec: 2 };
-const hung = { lang: 'mql5' as const, files: { 'H.mq5': NEW_MQL5_EA.replace(/void\s+OnTick\s*\(\s*\)\s*\{/, 'void OnTick() { while(true) {}') }, main: 'H.mq5', prec: 2 };
+// A hang the loop budget cannot see (exponential recursion, no loop): only the 3 s watchdog stops it. (An endless loop ends on the script's own budget.)
+const hung = { lang: 'mql5' as const, files: { 'H.mq5': NEW_MQL5_EA.replace(/void\s+OnTick\s*\(\s*\)\s*\{/, 'int F(int n) { if(n <= 0) return 1; return F(n - 1) + F(n - 1); } void OnTick() { F(60);') }, main: 'H.mq5', prec: 2 };
 const keyOn = (slot: number) => { for (let i = 0; ; i++) if (E.slotOf(`k${i}`) === slot) return `k${i}` };
 const req = (key: string, source: typeof pine | typeof hung) => ({ key, source, sym: 'BTCUSDT', tf: '1m', inputs: {} });
 
@@ -23,7 +24,7 @@ test('two keys run in parallel; a hung script only kills its own worker', async 
   t.after(() => E.engineStop());
   E.engineOpts.timeoutMs = 3000;
   const a = keyOn(0), b = keyOn(1);
-  assert.match(hung.files['H.mq5'], /while\(true\)/);
+  assert.match(hung.files['H.mq5'], /F\(60\)/);
   const fills = await E.engineFills(req(b, pine), bars);
   assert.ok(fills.length >= 4);
   const tidB = E.engineThreads()[1];

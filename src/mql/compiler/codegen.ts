@@ -39,6 +39,9 @@ const SERIES: Record<string, string> = { Open: 'double', High: 'double', Low: 'd
 const SIZES: Record<string, number> = { bool: 1, char: 1, uchar: 1, short: 2, ushort: 2, int: 4, uint: 4, color: 4, float: 4, long: 8, ulong: 8, datetime: 8, double: 8, string: 12 };
 
 const PRELUDE = `'use strict';
+// Loop budget: a runaway loop (while(true), a bad step) ends the run with an error instead of freezing the tab. Counted over the whole run.
+let __n = 0;
+const __t = () => { if (++__n > 3e8) throw new Error('Script stopped: loop budget exceeded (an endless loop?)'); return true };
 const __i64 = x => Math.trunc(x) || 0;
 const __s = x => x == null ? '' : String(x);
 const __div = (a, b) => { if (b == 0) throw new MqlError('zero divide', 4013); return Math.trunc(a / b) };
@@ -736,8 +739,8 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
       case 'block': return `${p}${block(s.body, ind)}\n`;
       case 'empty': return '';
       case 'if': return `${p}if ${paren(s.c)} ${body(s.a, ind)}${s.b ? ` else ${body(s.b, ind)}` : ''}\n`;
-      case 'while': return `${p}while ${paren(s.c)} ${body(s.body, ind)}\n`;
-      case 'do': return `${p}do ${body(s.body, ind)} while ${paren(s.c)};\n`;
+      case 'while': return `${p}while (__t() && ${paren(s.c)}) ${body(s.body, ind)}\n`;
+      case 'do': return `${p}do ${body(s.body, ind)} while (__t() && ${paren(s.c)});\n`;
       case 'for': {
         ctx.scopes.push(new Map());
         let init = '';
@@ -746,7 +749,7 @@ export function generate(decls: Decl[], o: GenOptions, errors: Diagnostic[], war
           return `${declareLocal(d.name, ty, d.pos).js} = ${v}`;
         }).join(', ');
         else if (s.init?.k === 'expr') init = ex(s.init.e).c;
-        const r = `${p}for (${init}; ${s.c ? ex(s.c).c : ''}; ${s.step ? ex(s.step).c : ''}) ${body(s.body, ind)}\n`;
+        const r = `${p}for (${init}; __t() && (${s.c ? ex(s.c).c : 'true'}); ${s.step ? ex(s.step).c : ''}) ${body(s.body, ind)}\n`;
         ctx.scopes.pop();
         return r;
       }

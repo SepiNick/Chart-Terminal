@@ -107,6 +107,12 @@ function createWindow(main = true, o = {}) {
     openOutside(url);
     return { action: 'deny' };
   });
+  // A dead renderer (out of memory, GPU crash) leaves a white window: reload it and tell the page, which then sends a crash log.
+  w.webContents.on('render-process-gone', (_e, d) => {
+    if (d.reason === 'clean-exit' || d.reason === 'killed' || w.isDestroyed()) return;
+    w.webContents.once('did-finish-load', () => w.webContents.executeJavaScript(`dispatchEvent(new CustomEvent('ct-renderer-gone', { detail: ${JSON.stringify(`window process ended: ${d.reason} (code ${d.exitCode})`)} }))`).catch(() => {}));
+    w.reload();
+  });
   w.loadURL(origin + (o.path ?? ''));
   return w;
 }
