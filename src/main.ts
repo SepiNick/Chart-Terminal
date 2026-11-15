@@ -49,6 +49,7 @@ import './market/domhook.ts';
 import { APPROX_NOTE, DOM_SYMS, asDomSym, isDomSym, isShare } from './market/dominance.ts';
 import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
 import { initSkills, renderSkills } from './skills/ui.ts';
+import { initCommunity, renderCommunity } from './social/ui.ts';
 import { initAi, refreshAi } from './ai/panel.ts';
 import { SHOW_AI } from './flags.ts';
 import { registerServiceWorker } from './push.ts';
@@ -948,6 +949,7 @@ function showSide(name: string) {
   if (st.side === 'journal') renderJournal();
   if (st.side === 'accts') renderAccounts();   // accounts
   if (st.side === 'skills') renderSkills();
+  if (st.side === 'community') void renderCommunity();
   if (SHOW_AI && st.side === 'ai') void refreshAi();
   domSync();
 }
@@ -1220,6 +1222,11 @@ function renderDataWindow() {
 }
 
 initMarket({ setSymbol: s => setSymbol(s), addWatch, symbol: () => active().cfg.symbol, refreshCharts: () => panes.forEach(p => p.tradeOverlay()) });
+initCommunity({
+  symbol: () => active().cfg.symbol, tf: () => active().cfg.tf,
+  shot: () => active()?.chart?.takeScreenshot() ?? null,
+  show: (sym, tf) => { setSymbol(sym); if (tf && tf !== active().cfg.tf) active().set({ tf }) },
+});
 initSkills({
   bars: (sym, tf) => fetchBars(sym, tf),
   account: () => {
@@ -1568,6 +1575,7 @@ $('#menuBtn').onclick = e => {
     { label: 'Settings', icon: '⚙', action: click('#settingsBtn') },
     { label: 'New tab', icon: '＋', action: click('#tabAdd') },
     { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
+    { label: 'Community…', icon: '💬', action: () => { if (st.side !== 'community') showSide('community') } },
     { label: 'Screener Pro…', icon: '📊', action: openScreenerPro },
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
     { label: 'Report a bug…', icon: '🐞', action: () => openBugReport({ charts: panes.length, theme: st.settings.theme, lang: document.documentElement.lang, charts_info: panes.map(p => `${p.cfg.symbol} ${p.cfg.tf} ${p.cfg.type}`).join('; ') }) },
