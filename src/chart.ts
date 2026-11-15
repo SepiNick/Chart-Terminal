@@ -163,7 +163,7 @@ export class ChartPane {
     this.chartEl.addEventListener('dblclick', e => { const k = this.paneAt(e.clientY); if (k > 0 && !e.defaultPrevented) this.paneAction(k, e.ctrlKey ? 'collapse' : 'max') });
     this.legendEl.addEventListener('contextmenu', e => { const k = (e.target as HTMLElement).closest<HTMLElement>('[data-ind]')?.dataset.ind; if (k) { e.preventDefault(); this.indMenu(k, e.clientX, e.clientY) } });
     cell.addEventListener('mousedown', () => hooks.onActivate(this), true);
-    this.rtBtn.onclick = () => this.chart.timeScale().scrollToRealTime();
+    this.rtBtn.onclick = () => this.chart?.timeScale().scrollToRealTime();
     this.quickEl.onclick = e => { const s = (e.target as HTMLElement).closest<HTMLElement>('[data-side]')?.dataset.side; if (s) hooks.quickOrder(this, s as Side) };
     this.legendEl.onclick = e => {
       const el = e.target as HTMLElement, k = el.closest<HTMLElement>('[data-ind]')?.dataset.ind; if (!k) return;
@@ -372,20 +372,22 @@ export class ChartPane {
   }
 
   // ---------- panes: buttons, maximize/collapse, drawings that live in a pane ----------
-  paneAt(clientY: number) { return this.chart.panes().findIndex(p => { const b = p.getHTMLElement()?.getBoundingClientRect(); return !!b && clientY >= b.top && clientY < b.bottom }) }
+  /** The chart's panes, or none: the mouse reaches the cell before the first build() and a rebuild disposes the old chart, so this must not throw. */
+  private livePanes() { try { return this.chart?.panes() ?? [] } catch { return [] } }
+  paneAt(clientY: number) { return this.livePanes().findIndex(p => { const b = p.getHTMLElement()?.getBoundingClientRect(); return !!b && clientY >= b.top && clientY < b.bottom }) }
   paneLabels(): string[] {
-    return this.chart.panes().map((_, i) => {
+    return this.livePanes().map((_, i) => {
       const o = this.owners[i] ?? '';
       return !i ? 'Main pane' : o.startsWith('ind:') ? indicatorDef(o.slice(4))?.name ?? o : o.startsWith('script:') ? this.scriptRuns.find(r => r.id === o.slice(7))?.name ?? 'Script' : `Pane ${i + 1}`;
     });
   }
   private applyStretch() {
-    const ps = this.chart.panes(), max = this.paneMax != null && this.paneMax < ps.length ? this.paneMax : null;
+    const ps = this.livePanes(), max = this.paneMax != null && this.paneMax < ps.length ? this.paneMax : null;
     ps.forEach((p, i) => p.setStretchFactor(max != null ? (i === max ? 1 : 1e-3) : this.collapsed.has(i) ? 0.12 : i ? 1 : 3.5));
   }
   /** Indicator panes get a small button group at their top right on hover. */
   private paneButtons(e: MouseEvent) {
-    const k = this.paneAt(e.clientY), panes = this.chart.panes();
+    const k = this.paneAt(e.clientY), panes = this.livePanes();
     if (k < 1) { this.pbEl.hidden = true; return }
     const b = panes[k].getHTMLElement()!.getBoundingClientRect(), c = this.cell.getBoundingClientRect();
     this.pbEl.style.top = `${b.top - c.top + 4}px`;
@@ -399,7 +401,7 @@ export class ChartPane {
     }
   }
   paneAction(k: number, a: string) {
-    const n = this.chart.panes().length, own = this.owners[k] ?? '';
+    const n = this.livePanes().length, own = this.owners[k] ?? '';
     this.pbEl.hidden = true;
     if (k < 1 || k >= n) return;
     if (a === 'max') { this.paneMax = this.paneMax === k ? null : k; this.collapsed.delete(k); return this.applyStretch() }
