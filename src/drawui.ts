@@ -2,6 +2,7 @@
 import { ALL_TOOLS, CURSORS, GROUPS, TOOL_MAP, groupSections, type CursorMode } from './tools/index.ts';
 import type { Drawing, GroupId, Style, ToolDef } from './tools/types.ts';
 import { iconSvg } from './tools/icons.ts';
+import { freshCopies, offsetCopies } from './tools/select.ts';
 import type { LabelH, LabelV } from './tools/labels.ts';
 import { styleFor, type DrawingLayer, type Magnet } from './drawings.ts';
 import { showMenu, type MenuItem } from './menu.ts';
@@ -226,7 +227,7 @@ let zoomOut = (_h: DrawUIHost) => {};
 export function setZoomOut(fn: (h: DrawUIHost) => void) { zoomOut = fn }
 
 // ---------- floating toolbar ----------
-const WIDTHS = [1, 2, 3, 4], DASHES = ['solid', 'dashed', 'dotted'] as const;
+const WIDTHS = [1, 2, 3, 4, 5, 6, 8, 10], DASHES = ['solid', 'dashed', 'dotted'] as const;
 const floatCtx = new WeakMap<HTMLElement, { cell: HTMLElement; host: DrawUIHost; l: DrawingLayer }>();
 export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLayer) {
   let bar = cell.querySelector<HTMLElement>('.ftb');
@@ -238,6 +239,7 @@ export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLa
       l.selected.forEach(d => {
         if (k === 'color') { d.style.color = i.value; d.style.textColor = i.value }
         else if (k === 'fill') { d.style.fillColor = i.value; if (!d.style.fillAlpha) d.style.fillAlpha = 0.2 }
+        else if (k === 'alpha') d.style.fillAlpha = +i.value;
         else if (k === 'width') d.style.width = +i.value;
         else if (k === 'dash') d.style.dash = i.value as Style['dash'];
       });
@@ -270,6 +272,7 @@ export function renderFloating(cell: HTMLElement, host: DrawUIHost, l: DrawingLa
   bar.innerHTML = `<button data-act="tpl" title="Template">▤</button>
     <label title="Line color" class="sw"><input type="color" data-k="color" value="${esc(d.style.color)}"></label>
     <label title="Fill color" class="sw fillsw"><input type="color" data-k="fill" value="${esc(d.style.fillColor)}"></label>
+    <input type="range" data-k="alpha" class="alpha" min="0" max="1" step="0.05" title="Fill opacity" value="${Math.min(1, Math.max(0, Number.isFinite(+d.style.fillAlpha) ? +d.style.fillAlpha : 0))}">
     <select data-k="width" title="Width">${WIDTHS.map(w => `<option ${w === d.style.width ? 'selected' : ''} value="${w}">${w}px</option>`).join('')}</select>
     <select data-k="dash" title="Style">${DASHES.map(s => `<option ${s === d.style.dash ? 'selected' : ''}>${s}</option>`).join('')}</select>
     <button data-act="props" title="Settings">⚙</button>
@@ -319,11 +322,12 @@ function textPanel(anchor: HTMLElement, d: Drawing, l: DrawingLayer, cell: HTMLE
   });
   text.focus();
 }
-function cloneDrawings(l: DrawingLayer, offsetBars = 3) {
-  const copies = [...l.selected].map(d => ({ ...structuredClone(d), id: Date.now() + Math.random(), locked: false }));
-  const g = l.geo();
-  copies.forEach(c => (c.pts = c.pts.map(p => ({ t: g.timeAt(g.logical(p.t) + offsetBars), p: p.p }))));
-  l.drawings.push(...copies); l.select(copies); l.onChange();
+/** Deep copies with fresh integer ids (never reusing an existing one), unlocked. */
+const screenAnchored = (type: string) => TOOL_MAP.get(type)?.screenAnchored;
+export function cloneDrawings(l: DrawingLayer, offsetBars = 3) {
+  const copies = freshCopies([...l.selected], l.drawings);
+  offsetCopies(copies, offsetBars, l.geo(), screenAnchored);
+  l.drawings.push(...copies); l.select(copies, false, true); l.onChange();
 }
 
 // ---------- templates ----------
@@ -377,12 +381,13 @@ export function drawingMenu(x: number, y: number, d: Drawing, l: DrawingLayer, h
 }
 
 // ---------- copy / paste ----------
-let clipboard: Drawing[] = [];
-export function copyDrawings(l: DrawingLayer) { clipboard = structuredClone([...l.selected]); if (clipboard.length) toast(`Copied ${clipboard.length} drawing(s)`) }
+let clipboard: Drawing[] = [], pasteN = 0;
+export function copyDrawings(l: DrawingLayer) { pasteN = 0; clipboard = structuredClone([...l.selected]); if (clipboard.length) toast(`Copied ${clipboard.length} drawing(s)`) }
 export function pasteDrawings(l: DrawingLayer) {
   if (!clipboard.length) return;
-  const copies = structuredClone(clipboard).map(d => ({ ...d, id: Date.now() + Math.random() }));
-  l.drawings.push(...copies); l.select(copies); l.onChange();
+  const copies = freshCopies(clipboard, l.drawings);   // each paste lands further right so copies never hide the original
+  offsetCopies(copies, 2 * ++pasteN, l.geo(), screenAnchored);
+  l.drawings.push(...copies); l.select(copies, false, true); l.onChange();
 }
 
 // ---------- properties dialog ----------

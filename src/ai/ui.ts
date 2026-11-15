@@ -8,7 +8,7 @@ import type { Drawing, Pt, Style } from '../tools/types.ts';
 import { toast } from '../store.ts';
 import { analyze } from './analyze.ts';
 
-const AUTO_GROUP = 'Auto analysis', HTF_GROUP = 'Higher-timeframe levels';
+import { AUTO_GROUP, HTF_GROUP } from '../tools/select.ts';
 const UP = '#089981', DOWN = '#f23645', NEUTRAL = '#2962ff';
 let seq = 0;
 

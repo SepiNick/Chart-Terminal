@@ -6,6 +6,7 @@ import { TOOL_MAP, type CursorMode } from './tools/index.ts';
 import { nearestOHLC } from './tools/math.ts';
 import { logicalX } from './logicalx.ts';
 import { labelAt, type LabelH, type LabelV } from './tools/labels.ts';
+import { nextId, expandGroups, rectSelect, hitRadius, movable, moveGroup, lockAxis } from './tools/select.ts';
 
 export type { Drawing, Pt } from './tools/types.ts';
 export type Magnet = 'off' | 'weak' | 'strong';
@@ -49,7 +50,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   private draft: { d: Drawing; raw: Pt[]; placed: number; def: ToolDef } | null = null;
   private freehand = false;
-  private drag: { hit: Hit; k: number; x: number; y: number; orig: Pt[]; moved: boolean } | null = null;
+  private drag: { hit: Hit; k: number; x: number; y: number; orig: Pt[]; moved: boolean; origs?: Map<Drawing, Pt[]>; shiftOff?: boolean } | null = null;
+  private marquee: { x0: number; y0: number; x1: number; y1: number; k: number; add: boolean } | null = null;   // Ctrl+drag on empty space
   private measure: { a: Pt; b: Pt; done: boolean } | null = null;
   private zoomBox: { x0: number; y0: number; x1: number; y1: number } | null = null;
   private mouse: XY | null = null;
@@ -65,6 +67,15 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     this.baseMode = host.chart.options().crosshair.mode;
     for (const ev of ['mousedown', 'mousemove', 'mouseup', 'dblclick', 'contextmenu', 'mouseleave'] as const)
       el.addEventListener(ev, e => this.onMouse(e), true);
+    // Touch drives the same handlers; onMouse only stops the event when it takes over, otherwise the chart still pans/zooms.
+    const kinds = { touchstart: 'mousedown', touchmove: 'mousemove', touchend: 'mouseup', touchcancel: 'mouseup' } as const;
+    for (const ev of Object.keys(kinds) as (keyof typeof kinds)[])
+      el.addEventListener(ev, (e: TouchEvent) => {
+        const t = e.changedTouches[0];
+        if (!t || (ev === 'touchstart' && e.touches.length > 1)) return;
+        this.onMouse({ type: kinds[ev], button: 0, clientX: t.clientX, clientY: t.clientY, shiftKey: false, ctrlKey: false, altKey: false,
+          stopPropagation: () => e.stopPropagation(), preventDefault: () => { if (e.cancelable) e.preventDefault() } } as unknown as MouseEvent);
+      }, { capture: true, passive: false });
     addEventListener('drawings-repaint', () => this.update()); // e.g. an image finished loading
   }
   attached({ requestUpdate }: { requestUpdate: () => void }) { this.requestUpdate = requestUpdate }
@@ -87,7 +98,10 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   paneOf(d: Drawing): number { const k = d.pane ?? 0, p = this.host.chart.panes()[k]; return k && p?.getSeries().length ? k : 0 }
 
   get primary(): Drawing | null { return [...this.selected].at(-1) ?? null }
-  select(ds: Drawing[], add = false) { if (!add) this.selected.clear(); ds.forEach(d => this.selected.add(d)); this.onSelect(); this.update() }
+  /** Selecting a member of a named group selects the whole group (Alt+click picks one). */
+  select(ds: Drawing[], add = false, single = false) { if (!add) this.selected.clear(); (single ? ds : expandGroups(ds, this.drawings)).forEach(d => this.selected.add(d)); this.onSelect(); this.update() }
+  selectAll() { this.select(this.drawings.filter(d => !d.hidden && !d.locked && isVisible(d, this.host.tfSec()))) }
+  private get coarse() { return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches }
   setTool(t: string) { this.tool = t; this.draft = null; this.freehand = false; this.zoomBox = null; this.applyCursor(); this.update() }
   setCursor(c: CursorMode) { this.cursor = c; this.setTool('cursor') }
   add(d: Drawing) { this.drawings.push(d); this.select([d]); this.onChange() }
@@ -204,17 +218,27 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         const hit = this.findHit(x, y, k);
         if (this.cursor === 'eraser') { if (hit) { stop(); this.remove(hit.d) } return }
         if (e.shiftKey && !hit && !k) { stop(); const p = this.toPt(x, y, g, undefined, e); this.measure = { a: p, b: p, done: false }; return }
+        if (!hit && e.ctrlKey) { stop(); this.marquee = { x0: x, y0: y, x1: x, y1: y, k, add: e.shiftKey }; return }   // rubber-band select; plain drag still pans the chart
         if (!hit) { if (this.selected.size) this.select([]); return }
+        const shiftOff = e.shiftKey && hit.handle < 0 && this.selected.has(hit.d);   // Shift+click removes it on release, unless the press turns into a drag
         if (e.ctrlKey && !e.altKey && this.selected.has(hit.d) && hit.handle < 0) { // Ctrl+drag clones
-          const c = structuredClone(hit.d); c.id = Date.now(); c.locked = false;
+          const c = structuredClone(hit.d); c.id = nextId(this.drawings); c.locked = false; delete c.group;
           this.drawings.push(c); hit.d = c;
           this.select([c]);
-        } else this.select([hit.d], e.ctrlKey);
-        if (!hit.d.locked) { stop(); this.drag = { hit, k, x, y, orig: hit.d.pts.map(p => ({ ...p })), moved: false } }
+        } else if (!this.selected.has(hit.d)) this.select([hit.d], e.ctrlKey || e.shiftKey, e.altKey);
+        if (hit.d.locked && shiftOff) { stop(); this.selected.delete(hit.d); this.onSelect(); this.update(); return }
+        if (!hit.d.locked) {
+          stop();
+          this.drag = { hit, k, x, y, orig: hit.d.pts.map(p => ({ ...p })), moved: false, shiftOff };
+          // Body drag of one member of a multi-selection moves them all (locked ones stay put).
+          if (hit.handle < 0 && this.selected.size > 1 && this.selected.has(hit.d))
+            this.drag.origs = movable(this.selected);
+        }
         return;
       }
       case 'mousemove': {
         if (this.zoomBox) { stop(); this.zoomBox.x1 = x; this.zoomBox.y1 = y; this.update(); return }
+        if (this.marquee) { stop(); this.marquee.x1 = x; this.marquee.y1 = y; this.update(); return }
         if (this.drag) { stop(); this.dragTo(x, y, g, e); return }
         if (this.measure && !this.measure.done) { this.measure.b = this.toPt(x, y, g, undefined, e); this.update(); return }
         if (this.draft) {
@@ -230,13 +254,21 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       }
       case 'mouseup': {
         if (this.zoomBox) { stop(); this.applyZoom(g); return }
+        if (this.marquee) {
+          stop(); const m = this.marquee; this.marquee = null;
+          const items = this.drawings.filter(d => !d.hidden && !d.locked && isVisible(d, g.tfSec) && this.paneOf(d) === m.k).map(d => ({ d, pts: this.handlesOf(d) }));
+          this.select(rectSelect(items, [m.x0, m.y0], [m.x1, m.y1]), m.add); return;
+        }
         if (this.measure && !this.measure.done) {
           this.measure.done = true;
           if (this.tool === 'measure') { this.setTool('cursor'); this.onToolDone() }
           this.update(); return;
         }
         if (this.freehand && this.draft) { stop(); this.freehand = false; this.finishDraft(g); return }
-        if (this.drag) { const moved = this.drag.moved; this.drag = null; if (moved) this.onChange() }
+        if (this.drag) {
+          const { moved, shiftOff, hit } = this.drag; this.drag = null;
+          if (moved) this.onChange(); else if (shiftOff) { this.selected.delete(hit.d); this.onSelect(); this.update() }
+        }
         return;
       }
       case 'dblclick': { const hit = inPane && this.findHit(x, y, k); if (hit) { stop(); this.onEdit(hit.d) } return }
@@ -246,7 +278,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
   }
   private startDraft(def: ToolDef, pt: Pt, pane = 0) {
     const raw = def.points === 1 || def.points === 0 ? [pt] : [pt, { ...pt }];
-    const d: Drawing = { id: Date.now(), type: def.id, pts: raw.slice(), style: styleFor(def, this.color, this.templates(def.id)), ...(pane ? { pane } : {}) };
+    const d: Drawing = { id: nextId(this.drawings), type: def.id, pts: raw.slice(), style: styleFor(def, this.color, this.templates(def.id)), ...(pane ? { pane } : {}) };
     this.draft = { d, raw, placed: 1, def };
   }
   private rebuildDraft(g: Geo) {
@@ -277,8 +309,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (!dr.moved && Math.hypot(dx, dy) < 2) return;
     dr.moved = true;
     if (dr.hit.handle < 0) {
-      if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0 }   // axis-locked move
-      d.pts = dr.orig.map(p => this.shift(p, dx, dy, g, def));
+      [dx, dy] = lockAxis(dx, dy, e.shiftKey);   // Shift+drag: axis-locked move
+      if (dr.origs) {
+        const geoOf = (s: Drawing) => (this.paneOf(s) === dr.k ? g : this.geo(this.paneOf(s)));   // each drawing uses its own pane's scale
+        for (const [s, pts] of moveGroup(dr.origs, dx, dy, (s, p, ddx, ddy) => this.shift(p, ddx, ddy, geoOf(s), TOOL_MAP.get(s.type)), s => this.paneOf(s) === dr.k)) s.pts = pts;
+      } else d.pts = dr.orig.map(p => this.shift(p, dx, dy, g, def));
     } else {
       d.pts = dr.orig.map(p => ({ ...p }));
       const pt = this.toPt(x, y, g, def, e);
@@ -307,12 +342,12 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     const g = this.geo(k);
     for (const d of this.selected) {
       if (!isVisible(d, g.tfSec) || this.hideAll || this.paneOf(d) !== k) continue;
-      const h = this.handlesOf(d, g).findIndex(([hx, hy]) => Math.hypot(hx - x, hy - y) < 7);
+      const h = this.handlesOf(d, g).findIndex(([hx, hy]) => Math.hypot(hx - x, hy - y) < hitRadius(this.coarse).handle);
       if (h >= 0) return { d, handle: h };
     }
     for (const d of [...this.drawings].reverse()) {
       const shapes = this.paneOf(d) === k && this.hits.get(d);
-      if (shapes && hitShapes(shapes, x, y)) return { d, handle: -1 };
+      if (shapes && hitShapes(shapes, x, y, hitRadius(this.coarse).stroke)) return { d, handle: -1 };
     }
     return null;
   }
@@ -331,6 +366,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
       if (this.zoomBox) {
         const z = this.zoomBox;
         ctx.fillStyle = rgba('#2962ff', 0.12); ctx.strokeStyle = '#2962ff'; ctx.setLineDash([4, 3]);
+        ctx.fillRect(Math.min(z.x0, z.x1), Math.min(z.y0, z.y1), Math.abs(z.x1 - z.x0), Math.abs(z.y1 - z.y0));
+        ctx.strokeRect(Math.min(z.x0, z.x1), Math.min(z.y0, z.y1), Math.abs(z.x1 - z.x0), Math.abs(z.y1 - z.y0));
+        ctx.setLineDash([]);
+      }
+      if (this.marquee && this.marquee.k === 0) {
+        const z = this.marquee;
+        ctx.fillStyle = rgba('#2962ff', 0.08); ctx.strokeStyle = '#2962ff'; ctx.setLineDash([4, 3]);
         ctx.fillRect(Math.min(z.x0, z.x1), Math.min(z.y0, z.y1), Math.abs(z.x1 - z.x0), Math.abs(z.y1 - z.y0));
         ctx.strokeRect(Math.min(z.x0, z.x1), Math.min(z.y0, z.y1), Math.abs(z.x1 - z.x0), Math.abs(z.y1 - z.y0));
         ctx.setLineDash([]);
