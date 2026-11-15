@@ -91,7 +91,9 @@ export async function collectReport(app: { charts: number; theme: string; lang: 
 /** What an automatic crash report is about: the kind plus the message with numbers and addresses blanked, so the same bug has the same signature. */
 export const crashSignature = (kind: string, msg: string) => `${kind}:${redact(msg).replace(/\d+/g, '#').replace(/\s+/g, ' ').slice(0, 120)}`;
 /** Messages that are browser noise, not an app crash (a resize loop, an error from another origin that carries no information). */
-export const isNoise = (msg: string) => !msg.trim() || /^Script error\.?$/i.test(msg) || /ResizeObserver loop/i.test(msg) || /^Non-Error promise rejection captured$/i.test(msg);
+/** The charting library throws "Object is disposed" from a resize that was already queued when a chart was removed (a rebuild): harmless, and not worth a crash report. */
+const libraryResizeRace = (msg: string, stack?: string) => /Object is disposed/i.test(msg) && /resizeCanvasElement/.test(stack ?? '');
+export const isNoise = (msg: string, stack?: string) => libraryResizeRace(msg, stack) || !msg.trim() || /^Script error\.?$/i.test(msg) || /ResizeObserver loop/i.test(msg) || /^Non-Error promise rejection captured$/i.test(msg);
 /**
  * Decides whether an automatic crash report may be sent now: at most `max` per session, `gapMs` apart, and the same bug (signature) not again
  * within `repeatMs`. `seen` is the caller's persisted map signature → last sent time; the gate updates it when it says yes.

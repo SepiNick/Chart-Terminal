@@ -57,6 +57,8 @@ test('crash gate: three a session, a minute apart, the same bug once a day; nois
   assert.equal(gate('c', 200_000), true);
   assert.equal(gate('d', 300_000), false, 'three per session');
   assert.ok(isNoise('ResizeObserver loop completed with undelivered notifications.') && isNoise('Script error.') && !isNoise('boom'));
+  assert.ok(isNoise('Uncaught Error: Object is disposed', 'at h.get (assets/data-X.js:1:3115) | at h.resizeCanvasElement (assets/data-X.js:1:3609)'), 'the library resize race is noise');
+  assert.ok(!isNoise('Uncaught Error: Object is disposed', 'at Foo.draw (assets/main-X.js:1:2)'), 'the same message from our own code still reports');
   assert.ok(!crashSignature('error', 'failed token=abcdef123456').includes('abcdef123456'));
 });
 

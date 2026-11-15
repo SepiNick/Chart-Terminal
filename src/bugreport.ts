@@ -128,12 +128,12 @@ export function installCrashReporter(app: () => App) {
   let busy = false;
   const report = async (kind: string, msg: string) => {
     msg = redact(String(msg)).replace(/\s+/g, ' ').slice(0, 300);
-    if (!autoCrashOn() || busy || isNoise(msg) || !gate(crashSignature(kind, msg), Date.now())) return;
+    const top = recentErrors().at(-1)?.stack;   // where it happened: the first frames, so the report is enough to find the line
+    if (!autoCrashOn() || busy || isNoise(msg, top) || !gate(crashSignature(kind, msg), Date.now())) return;
     ls.set(SEEN_KEY, JSON.stringify(seen));
     busy = true;
     toast('The app hit a problem. A crash log was captured (no passwords, keys or addresses) and is being sent to the developer. You can turn this off in the ☰ menu.', 9000);
     try {
-      const top = recentErrors().at(-1)?.stack;   // where it happened: the first frames, so the report is enough to find the line
       const body = await payload(`Automatic crash report (${kind}): ${msg}${top ? `
 at ${top.split(' | ').slice(0, 3).join(' | ')}` : ''}`, '', true, [], app());
       try {
