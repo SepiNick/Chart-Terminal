@@ -21,3 +21,4 @@ server/data
 mt5bridge/token.txt
 server/data
 bugreport-worker
+dist-release
