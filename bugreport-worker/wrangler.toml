@@ -4,7 +4,7 @@ main = "src/index.js"
 compatibility_date = "2026-01-01"
 
 [vars]
-TELEGRAM_CHAT_ID = "REPLACE_WITH_YOUR_CHAT_ID"   # your personal chat (see README step 3)
+TELEGRAM_CHAT_ID = "797683860"   # your personal chat (see README step 3)
 # GITHUB_REPO = "SepiNick/Chart-Terminal"      # optional: also open an issue (needs the GITHUB_TOKEN secret)
 DIFFICULTY = "16"      # proof-of-work bits: 16 is about a second on a phone
 IP_PER_HOUR = "5"
@@ -17,4 +17,4 @@ class_name = "Limiter"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["Limiter"
+new_sqlite_classes = ["Limiter"]
