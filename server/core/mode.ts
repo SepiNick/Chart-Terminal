@@ -20,12 +20,13 @@ export const REGISTRATION: 'invite' | 'open' | 'closed' = (['invite', 'open', 'c
  * Sign in with Google / Apple (docs/research/oauth-sync-design.md §5.1). A provider is enabled only when ALL its variables are set;
  * a partly set provider throws (a typo must not silently disable it); nothing set = off. Public servers only (private ones never read this).
  */
-export interface OAuthConfig { google?: { clientId: string; secret: string }; apple?: { serviceId: string; teamId: string; keyId: string; keyFile: string } }
+export interface OAuthConfig { telegram?: { clientId: string; secret: string; botUsername?: string }; google?: { clientId: string; secret: string }; apple?: { serviceId: string; teamId: string; keyId: string; keyFile: string } }
 export function oauthConfig(env: Record<string, string | undefined> = process.env): OAuthConfig {
   const v = (k: string) => (env[k] ?? '').trim();
   const group = (names: string[]) => { const set = names.filter(n => v(n)); if (set.length && set.length < names.length) throw Error(`OAuth: ${names.filter(n => !v(n)).join(', ')} missing (set all of ${names.join(', ')} or none)`); return set.length === names.length };
   const out: OAuthConfig = {};
   if (group(['CT_GOOGLE_CLIENT_ID', 'CT_GOOGLE_CLIENT_SECRET'])) out.google = { clientId: v('CT_GOOGLE_CLIENT_ID'), secret: v('CT_GOOGLE_CLIENT_SECRET') };
+  if (group(['CT_TELEGRAM_CLIENT_ID', 'CT_TELEGRAM_CLIENT_SECRET'])) out.telegram = { clientId: v('CT_TELEGRAM_CLIENT_ID'), secret: v('CT_TELEGRAM_CLIENT_SECRET'), ...(/^[A-Za-z0-9_]{5,32}$/.test(v('CT_TELEGRAM_BOT_USERNAME')) ? { botUsername: v('CT_TELEGRAM_BOT_USERNAME') } : {}) };   // OpenID Connect at oauth.telegram.org (BotFather "Web Login" client id + secret)
   if (group(['CT_APPLE_SERVICE_ID', 'CT_APPLE_TEAM_ID', 'CT_APPLE_KEY_ID', 'CT_APPLE_PRIVATE_KEY_FILE'])) out.apple = { serviceId: v('CT_APPLE_SERVICE_ID'), teamId: v('CT_APPLE_TEAM_ID'), keyId: v('CT_APPLE_KEY_ID'), keyFile: v('CT_APPLE_PRIVATE_KEY_FILE') };
   return out;
 }

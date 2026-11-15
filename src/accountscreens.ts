@@ -5,7 +5,7 @@ import { esc } from './store.ts';
 import { authPost, screen, val } from './login.ts';
 import { checkName, checkPassword, codesOf, formatRecoveryCodes } from './authrules.ts';
 import { parseStatus, type ServerStatus } from './servers.ts';
-import { oauthSignup } from './oauthapi.ts';
+import { oauthSignup, type Provider } from './oauthapi.ts';
 import { oauthAvailable, startOAuth, takeFlash } from './oauth.ts';
 
 type User = ServerStatus['user'];
@@ -13,8 +13,8 @@ const head = (st: Pick<ServerStatus, 'mode' | 'serverName'>) => `<h2>${esc(st.se
 const NAME = '<input name="name" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false">';
 
 /** "Continue with Google / Apple" buttons; only for providers the server reports as configured. */
-const oauthButtons = (st: ServerStatus) => !oauthAvailable() || !(st.oauth.google || st.oauth.apple) ? '' :
-  `<hr style="width:100%;border:0;border-top:1px solid var(--line)">${st.oauth.google ? '<button type="button" data-go="oauth:google">Continue with Google</button>' : ''}${st.oauth.apple ? '<button type="button" data-go="oauth:apple">Continue with Apple</button>' : ''}`;
+const oauthButtons = (st: ServerStatus) => !(st.oauth.google || st.oauth.apple || st.oauth.telegram) ? '' : !oauthAvailable() ? '<p class="muted">Sign-in with Google / Apple / Telegram works only in the browser at the server’s own address. Use your password here.</p>' :
+  `<hr style="width:100%;border:0;border-top:1px solid var(--line)">${st.oauth.google ? '<button type="button" data-go="oauth:google">Continue with Google</button>' : ''}${st.oauth.apple ? '<button type="button" data-go="oauth:apple">Continue with Apple</button>' : ''}${st.oauth.telegram ? '<button type="button" data-go="oauth:telegram">Continue with Telegram</button><p class="muted">Telegram needs a VPN where it is blocked.</p>' : ''}`;
 
 export async function accountScreen(st: ServerStatus): Promise<User> {
   let view = 'login', user: User, msg = takeFlash();
@@ -51,7 +51,7 @@ export async function accountScreen(st: ServerStatus): Promise<User> {
       }, '<div class="row"><button type="button" data-go="login">Back to sign in</button></div>', 'Set new password');
     }
     if (n === 'done') break;
-    if (n.startsWith('oauth:')) { try { await startOAuth(n.slice(6) as 'google' | 'apple') } catch (e) { msg = (e as Error).message } continue }
+    if (n.startsWith('oauth:')) { try { await startOAuth(n.slice(6) as Provider) } catch (e) { msg = (e as Error).message } continue }
     view = n;
   }
   return user;
@@ -93,8 +93,8 @@ export function mustChangeScreen(name: string): Promise<string> {
 /** After Google / Apple confirmed an identity that has no account yet: choose a username (and the invite code in invite mode). */
 export async function oauthSignupScreen(s: { ticket: string; verifier: string }): Promise<void> {
   const st = parseStatus(await api<unknown>('/api/auth/status').catch(() => null));
-  await screen(`<h2>Choose a username</h2><p>Your Google / Apple sign-in is confirmed. Pick the username for your new account.</p>
-    <p class="muted">Already have an account here? Cancel, sign in with your password, then link Google or Apple under Account -> Sign-in methods.</p>
+  await screen(`<h2>Choose a username</h2><p>Your sign-in is confirmed. Pick the username for your new account.</p>
+    <p class="muted">Already have an account here? Cancel, sign in with your password, then link Google, Apple or Telegram under Account -> Sign-in methods.</p>
     ${NAME}${st?.registration === 'invite' ? '<input name="invite" placeholder="Invite code" autocomplete="off" autocapitalize="none" spellcheck="false">' : ''}`, async f => {
     const name = checkName(val(f, 'name')), invite = (f.elements.namedItem('invite') as HTMLInputElement | null)?.value ?? '';
     const needInvite = st?.registration === 'invite';

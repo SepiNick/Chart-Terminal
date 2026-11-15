@@ -70,7 +70,7 @@ async function newAccount(name: string, user = { sub: sub(), email: `${name}@exa
 
 test('status advertises the providers; start builds a provider URL from constants and CT_PUBLIC_URL only', async () => {
   const c = client(b.base);
-  assert.deepEqual((await c.json('GET', '/api/auth/status')).body.oauth, { google: true, apple: true });
+  assert.deepEqual((await c.json('GET', '/api/auth/status')).body.oauth, { google: true, apple: true, telegram: false });
   const p = pair(), s = await c.json('POST', '/api/auth/oauth/start', { provider: 'google', intent: 'login', challenge: p.challenge, ret: 'web' });
   const u = new URL(s.body.url);
   assert.equal(u.origin + u.pathname, mock.urls.authorize);

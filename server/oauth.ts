@@ -12,20 +12,21 @@ import { OAUTH, clientIp, publicUrl } from './core/mode.ts';
 import { Jwks, OidcError, appleClientSecret, b64u, fetchJson, verifyIdToken, type Jwk } from './core/oidc.ts';
 import * as U from './core/users.ts';
 
-type Name = 'google' | 'apple';
+type Name = 'google' | 'apple' | 'telegram';
 interface Urls { authorize: string; token: string; jwks: string }
 const URLS: Record<Name, Urls> = {
   google: { authorize: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token', jwks: 'https://www.googleapis.com/oauth2/v3/certs' },
   apple: { authorize: 'https://appleid.apple.com/auth/authorize', token: 'https://appleid.apple.com/auth/token', jwks: 'https://appleid.apple.com/auth/keys' },
+  telegram: { authorize: 'https://oauth.telegram.org/auth', token: 'https://oauth.telegram.org/token', jwks: 'https://oauth.telegram.org/.well-known/jwks.json' },
 };
-const ISSUERS: Record<Name, string[]> = { google: ['https://accounts.google.com', 'accounts.google.com'], apple: ['https://appleid.apple.com'] };
+const ISSUERS: Record<Name, string[]> = { google: ['https://accounts.google.com', 'accounts.google.com'], apple: ['https://appleid.apple.com'], telegram: ['https://oauth.telegram.org'] };
 let urls = URLS, insecure = false;
 const jwksOf: Partial<Record<Name, Jwks>> = {};
 /** Test hook: point the providers at a local mock. Refused unless CT_NO_AUTOSTART=1, so production cannot be redirected by an env var. */
 export function _setProvidersForTest(o: Partial<Record<Name, Urls>>) {
   if (process.env.CT_NO_AUTOSTART !== '1') throw Error('test only');
   urls = { ...URLS, ...o }; insecure = true;
-  delete jwksOf.google; delete jwksOf.apple;
+  delete jwksOf.google; delete jwksOf.apple; delete jwksOf.telegram;
 }
 const jwks = (n: Name) => jwksOf[n] ??= new Jwks(urls[n].jwks, async url => {
   const r = await fetchJson(url, { allowInsecure: insecure });
@@ -39,10 +40,10 @@ if (OAUTH.apple) {
   try { const pem = readFileSync(OAUTH.apple.keyFile, 'utf8'); if (createPrivateKey(pem).asymmetricKeyType !== 'ec') throw Error('not an EC key'); applePem = pem }
   catch { console.warn('[oauth] Sign in with Apple is disabled: CT_APPLE_PRIVATE_KEY_FILE is missing or is not a valid .p8 key') }
 }
-const enabled = (n: string): n is Name => (n === 'google' && !!OAUTH.google) || (n === 'apple' && !!OAUTH.apple && !!applePem);
-export const oauthStatus = () => ({ google: enabled('google'), apple: enabled('apple') });
-const clientId = (n: Name) => (n === 'google' ? OAUTH.google!.clientId : OAUTH.apple!.serviceId);
-const clientSecret = (n: Name) => (n === 'google' ? OAUTH.google!.secret : appleClientSecret({ teamId: OAUTH.apple!.teamId, keyId: OAUTH.apple!.keyId, serviceId: OAUTH.apple!.serviceId, pem: applePem }));
+const enabled = (n: string): n is Name => (n === 'google' && !!OAUTH.google) || (n === 'apple' && !!OAUTH.apple && !!applePem) || (n === 'telegram' && !!OAUTH.telegram);
+export const oauthStatus = () => ({ google: enabled('google'), apple: enabled('apple'), telegram: enabled('telegram') });
+const clientId = (n: Name) => (n === 'google' ? OAUTH.google!.clientId : n === 'telegram' ? OAUTH.telegram!.clientId : OAUTH.apple!.serviceId);
+const clientSecret = (n: Name) => (n === 'google' ? OAUTH.google!.secret : n === 'telegram' ? OAUTH.telegram!.secret : appleClientSecret({ teamId: OAUTH.apple!.teamId, keyId: OAUTH.apple!.keyId, serviceId: OAUTH.apple!.serviceId, pem: applePem }));
 const redirectUri = (n: Name) => new URL(`/api/auth/oauth/callback/${n}`, publicUrl()!).toString();   // never client-supplied
 
 const GENERIC = 'Sign-in failed. Please try again';
@@ -76,16 +77,17 @@ async function callback(c: Ctx, name: string, p: URLSearchParams) {
   if (!code || tokenCalls >= 8) return failed(code ? 'busy' : 'nocode');
   tokenCalls++;
   try {
-    const form: Record<string, string> = { grant_type: 'authorization_code', code, redirect_uri: redirectUri(name), client_id: clientId(name), client_secret: clientSecret(name) };
-    if (name === 'google') form.code_verifier = st.p_verifier;   // Apple: protection is state + nonce + the client binding; PKCE is not relied upon there
-    const t = await fetchJson(urls[name].token, { method: 'POST', form, allowInsecure: insecure });
+    const tg = name === 'telegram';   // Telegram: client auth is HTTP Basic (the secret never goes in the body); slower from behind a VPN, so 8 s
+    const form: Record<string, string> = { grant_type: 'authorization_code', code, redirect_uri: redirectUri(name), client_id: clientId(name), ...(tg ? {} : { client_secret: clientSecret(name) }) };
+    if (name !== 'apple') form.code_verifier = st.p_verifier;   // Apple: protection is state + nonce + the client binding; PKCE is not relied upon there
+    const t = await fetchJson(urls[name].token, { method: 'POST', form, allowInsecure: insecure, ...(tg ? { timeoutMs: 8000, headers: { authorization: 'Basic ' + Buffer.from(`${clientId(name)}:${clientSecret(name)}`).toString('base64') } } : {}) });
     if (t.status !== 200 || typeof t.json.id_token !== 'string') throw new OidcError('token');
     // access_token / refresh_token are used for at_hash at most and never stored.
-    const claims = await verifyIdToken(t.json.id_token, jwks(name), { iss: ISSUERS[name], aud: clientId(name), nonce: st.nonce, accessToken: typeof t.json.access_token === 'string' ? t.json.access_token : undefined });
+    const claims = await verifyIdToken(t.json.id_token, jwks(name), { iss: ISSUERS[name], aud: clientId(name), nonce: st.nonce, nonceOptional: tg, accessToken: typeof t.json.access_token === 'string' ? t.json.access_token : undefined });
     // Apple's one-time `user` (name) form field is ignored on purpose: unauthenticated form data must not influence identity.
     const oc = U.oauthCodeNew({ kind: st.intent, userId: st.user_id, id: { provider: name, subject: claims.sub, email: claims.email, relay: claims.relay }, challenge: st.c_challenge, device: st.device });
     return redirect(c, target(st, { code: oc }));
-  } catch (e) { return failed(e instanceof OidcError ? e.code : 'error') }
+  } catch (e) { const code = e instanceof OidcError ? e.code : 'error'; return failed(code, code === 'network' && name === 'telegram' ? 'unreachable' : 'failed') }   // telegram.org is blocked in some countries: say so
   finally { tokenCalls-- }
 }
 
@@ -124,12 +126,14 @@ export function mountOAuth({ device, body, issue, start }: Deps) {
     const state = U.oauthStateNew({ provider: name, nonce, pVerifier, challenge, intent, userId, ret, port: port as number | null, device: label });
     const q = new URLSearchParams({ response_type: 'code', client_id: clientId(name), redirect_uri: redirectUri(name), state, nonce });
     if (name === 'google') { q.set('scope', 'openid email'); q.set('code_challenge', b64u(createHash('sha256').update(pVerifier).digest())); q.set('code_challenge_method', 'S256'); q.set('prompt', 'select_account') }
+    else if (name === 'telegram') { q.set('scope', 'openid'); q.set('code_challenge', b64u(createHash('sha256').update(pVerifier).digest())); q.set('code_challenge_method', 'S256') }   // no profile / phone / bot_access: only the stable id is needed
     else { q.set('scope', 'email'); q.set('response_mode', 'form_post') }
     U.audit(userId, ip, `oauth start ${name} ${intent}`);
     return { url: `${urls[name].authorize}?${q}` };
   }, { public: true, limit: 4096 });
 
   route('GET', '/api/auth/oauth/callback/google', c => callback(c, 'google', c.url.searchParams), { public: true });
+  route('GET', '/api/auth/oauth/callback/telegram', c => callback(c, 'telegram', c.url.searchParams), { public: true });
   route('POST', '/api/auth/oauth/callback/apple', c => {
     const ok = /^application\/x-www-form-urlencoded\b/i.test(String(c.req.headers['content-type'] ?? ''));
     return callback(c, 'apple', ok ? new URLSearchParams((c.body as Buffer).toString('utf8')) : new URLSearchParams());
@@ -179,7 +183,7 @@ export function mountOAuth({ device, body, issue, start }: Deps) {
   route('GET', '/api/auth/identities', c => ({ identities: U.identitiesOf(c.user.id), hasPassword: U.accountHasPassword(c.user.id) }));
   route('DELETE', '/api/auth/identities/:provider', async c => {
     const p = c.params.provider;
-    if ((p !== 'google' && p !== 'apple') || !U.identityOf(c.user.id, p)) throw new HttpError(404, 'Not found');   // only ever the caller's own rows
+    if ((p !== 'google' && p !== 'apple' && p !== 'telegram') || !U.identityOf(c.user.id, p)) throw new HttpError(404, 'Not found');   // only ever the caller's own rows
     await stepUp(c, body(c));
     const r = U.identityUnlink(c.user.id, p);
     if (r === 'last') throw new HttpError(409, 'This is your only way to sign in. Set a password first', { code: 'last_method' });

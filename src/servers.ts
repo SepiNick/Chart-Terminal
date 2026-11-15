@@ -7,7 +7,7 @@ export interface Features { trading: boolean; ai: boolean; ml: boolean; forward:
 export interface ServerStatus {
   setup: boolean; loggedIn: boolean; mode: 'public' | 'private'; registration: 'invite' | 'open' | 'closed';
   version?: string; serverName?: string; features: Features; user?: { name: string; role?: string; mustChange?: boolean; id?: string | number };
-  oauth: { google: boolean; apple: boolean };   // sign-in providers the server has configured (buttons are hidden otherwise)
+  oauth: { google: boolean; apple: boolean; telegram: boolean };   // sign-in providers the server has configured (buttons are hidden otherwise)
 }
 export interface Server { id: string; name: string; baseUrl: string; token?: string; mode?: 'public' | 'private'; serverName?: string; features?: Features }
 type Kv = Pick<Storage, 'getItem' | 'setItem'>;
@@ -78,7 +78,7 @@ export function parseStatus(j: unknown): ServerStatus | null {
     serverName: typeof o.serverName === 'string' && o.serverName ? o.serverName.slice(0, 60) : undefined,
     features: { trading: flag(f.trading ?? f.brokers), ai: flag(f.ai), ml: flag(f.ml), forward: flag(f.forward), scripts: flag(f.scripts ?? f.scriptAlerts), python: flag(f.python) },
     user: u && typeof u.name === 'string' ? { name: u.name, role: typeof u.role === 'string' ? u.role : undefined, mustChange: !!u.mustChange, id: typeof u.id === 'string' || typeof u.id === 'number' ? u.id : undefined } : undefined,
-    oauth: { google: (o.oauth as Record<string, unknown> | undefined)?.google === true, apple: (o.oauth as Record<string, unknown> | undefined)?.apple === true },
+    oauth: { google: (o.oauth as Record<string, unknown> | undefined)?.google === true, apple: (o.oauth as Record<string, unknown> | undefined)?.apple === true, telegram: (o.oauth as Record<string, unknown> | undefined)?.telegram === true },
   };
 }
 

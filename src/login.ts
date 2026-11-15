@@ -22,7 +22,7 @@ const CSS = `
 .ct-banner button{border:0;background:none;color:inherit;padding:0 0 0 6px}
 #standaloneChip{left:56px;max-width:calc(100vw - 64px);display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px}#standaloneChip button{padding:0;text-decoration:underline;color:var(--accent)}`;
 let styled = false;
-export function injectStyle() { if (styled) return; styled = true; const s = document.createElement('style'); s.textContent = CSS; document.head.append(s) }
+export function injectStyle() { if (styled) return; styled = true; const s = new CSSStyleSheet(); s.replaceSync(CSS); document.adoptedStyleSheets = [...document.adoptedStyleSheets, s] }
 
 const isThisPc = () => ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 

@@ -43,7 +43,7 @@ const info = (features: Record<string, boolean>) => ({ version, serverName: SERV
 
 if (!isPublic) {
   const isLocal = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-  route('GET', '/api/auth/status', c => ({ setup: !hasPassword(), loggedIn: !!c.session, mode: 'private', registration: 'closed', oauth: { google: false, apple: false }, ...info({ trading: true, ai: true, ml: true, forward: true, scripts: true, python: true }) }), { public: true });
+  route('GET', '/api/auth/status', c => ({ setup: !hasPassword(), loggedIn: !!c.session, mode: 'private', registration: 'closed', oauth: { google: false, apple: false, telegram: false }, ...info({ trading: true, ai: true, ml: true, forward: true, scripts: true, python: true }) }), { public: true });
   route('POST', '/api/auth/setup', c => {
     if (hasPassword()) throw new HttpError(409, 'Already set up');
     // Loopback address AND loopback Host name: a rebinding page can't claim the server before the owner does.

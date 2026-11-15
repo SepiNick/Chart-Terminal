@@ -23,7 +23,7 @@ const A = await signup(b, 'alice-a'), Bu = await signup(b, 'bob-b');
 const CLASS: Record<string, 'U-id' | 'U-list' | 'G' | 'AUTH' | 'ADMIN' | 'PUB'> = {
   'GET /api/health': 'PUB', 'GET /api/auth/status': 'AUTH', 'POST /api/auth/register': 'AUTH', 'POST /api/auth/login': 'AUTH', 'POST /api/auth/logout': 'AUTH',
   'POST /api/auth/password': 'AUTH', 'POST /api/auth/recover': 'AUTH', 'POST /api/auth/recovery-codes': 'AUTH', 'GET /api/auth/devices': 'U-list', 'DELETE /api/auth/devices/:id': 'U-id', 'GET /api/auth/sessions': 'U-list', 'DELETE /api/auth/sessions/:id': 'U-id',
-  'POST /api/auth/oauth/start': 'AUTH', 'GET /api/auth/oauth/callback/google': 'AUTH', 'POST /api/auth/oauth/callback/apple': 'AUTH', 'POST /api/auth/oauth/exchange': 'AUTH', 'POST /api/auth/oauth/signup': 'AUTH', 'POST /api/auth/password/set': 'AUTH',
+  'POST /api/auth/oauth/start': 'AUTH', 'GET /api/auth/oauth/callback/google': 'AUTH', 'GET /api/auth/oauth/callback/telegram': 'AUTH','POST /api/auth/oauth/callback/apple': 'AUTH', 'POST /api/auth/oauth/exchange': 'AUTH', 'POST /api/auth/oauth/signup': 'AUTH', 'POST /api/auth/password/set': 'AUTH',
   'GET /api/auth/identities': 'U-list', 'DELETE /api/auth/identities/:provider': 'U-id',
   'POST /api/state/batch': 'U-list', 'GET /api/restore': 'U-list', 'POST /api/restore': 'U-list', 'GET /api/restore/:id': 'U-id', 'DELETE /api/restore/:id': 'U-id', 'POST /api/restore/:id/apply': 'U-id',
   'POST /api/admin/invites': 'ADMIN', 'POST /api/admin/users': 'ADMIN',

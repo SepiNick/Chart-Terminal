@@ -6,14 +6,14 @@ import { parseStatus } from './servers.ts';
 import { identities, unlinkIdentity, type Provider } from './oauthapi.ts';
 import { oauthAvailable, startOAuth } from './oauth.ts';
 
-const NAMES: Record<Provider, string> = { google: 'Google', apple: 'Apple' };
+const NAMES: Record<Provider, string> = { google: 'Google', apple: 'Apple', telegram: 'Telegram' };
 export async function signInMethods() {
   let ids, st;
   try { [ids, st] = await Promise.all([identities(), api<unknown>('/api/auth/status').then(parseStatus)]) } catch (e) { return toast((e as Error).message) }
   const count = (ids.hasPassword ? 1 : 0) + ids.list.length;
   const can = (p: Provider) => oauthAvailable() && !!st?.oauth[p];
   dialog('Sign-in methods', `<table><tr><td>Password</td><td>${ids.hasPassword ? 'set' : 'not set'}</td><td></td></tr>
-    ${(['google', 'apple'] as Provider[]).map(p => { const i = ids.list.find(x => x.provider === p); return `<tr><td>${NAMES[p]}</td><td>${i ? esc(i.relay ? 'Hidden email (Apple)' : i.email ?? 'linked') : 'not linked'}</td><td>${
+    ${(['google', 'apple', 'telegram'] as Provider[]).map(p => { const i = ids.list.find(x => x.provider === p); return `<tr><td>${NAMES[p]}</td><td>${i ? esc(i.relay ? 'Hidden email (Apple)' : i.email ?? 'linked') : 'not linked'}</td><td>${
       i ? `<button type="button" data-un="${p}"${count <= 1 ? ' disabled title="Your only sign-in method"' : ''}>Unlink</button>` : can(p) ? `<button type="button" data-ln="${p}">Link</button>` : ''}</td></tr>` }).join('')}</table>
     ${count <= 1 ? '<p class="muted">You cannot remove your last sign-in method. Link another one first.</p>' : ''}
     ${ids.hasPassword ? '<div class="form"><label>Password (to confirm)</label><input type="password" name="pw" autocomplete="current-password"></div>' : ''}

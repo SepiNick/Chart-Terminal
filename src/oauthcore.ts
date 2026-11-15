@@ -9,9 +9,9 @@ export function parseOAuthFragment(hash: string): Returned {
   if (raw === null && err === null) return { found: false };
   if (raw !== null && CODE_RE.test(raw)) return { found: true, code: raw };
   const e = err ?? 'failed';
-  return { found: true, error: ['denied', 'expired', 'failed'].includes(e) ? e : 'failed' };
+  return { found: true, error: ['denied', 'expired', 'failed', 'unreachable'].includes(e) ? e : 'failed' };
 }
-export const ERROR_TEXT: Record<string, string> = { denied: 'Sign-in was cancelled.', expired: 'Sign-in took too long. Try again.', failed: 'Sign-in failed. Try again or use your password.' };
+export const ERROR_TEXT: Record<string, string> = { denied: 'Sign-in was cancelled.', expired: 'Sign-in took too long. Try again.', failed: 'Sign-in failed. Try again or use your password.', unreachable: 'The server could not reach Telegram (oauth.telegram.org). Telegram is blocked in some countries: turn on your VPN (on the server too) and try again, or sign in with your password.' };
 /** Parse and, when it is ours, replace the URL by path + query without the fragment (no history entry keeps the code). */
 export function takeFragment(loc: { hash: string; pathname: string; search: string }, hist: { replaceState(s: unknown, t: string, u: string): void }): Returned | null {
   const r = parseOAuthFragment(loc.hash);

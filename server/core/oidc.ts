@@ -14,14 +14,14 @@ const json = (part: string): Record<string, unknown> => {
 };
 
 // ---------- hardened fetch ----------
-export interface FetchOpts { method?: 'GET' | 'POST'; form?: Record<string, string>; allowInsecure?: boolean; timeoutMs?: number }
+export interface FetchOpts { method?: 'GET' | 'POST'; form?: Record<string, string>; headers?: Record<string, string>; allowInsecure?: boolean; timeoutMs?: number }
 /** HTTPS only (http only when the test hook allows it), no redirects, 5 s, body <= 64 KB, JSON only. */
 export async function fetchJson(url: string, o: FetchOpts = {}): Promise<{ status: number; json: Record<string, unknown>; maxAge: number | null }> {
   const u = new URL(url);
   if (u.protocol !== 'https:' && !(o.allowInsecure && u.protocol === 'http:')) fail('insecure_url');
   let r: Response;
   try {
-    r = await fetch(u, { method: o.method ?? 'GET', redirect: 'error', signal: AbortSignal.timeout(o.timeoutMs ?? 5000), headers: { accept: 'application/json', ...(o.form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) }, body: o.form ? new URLSearchParams(o.form).toString() : undefined });
+    r = await fetch(u, { method: o.method ?? 'GET', redirect: 'error', signal: AbortSignal.timeout(o.timeoutMs ?? 5000), headers: { accept: 'application/json', ...o.headers, ...(o.form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) }, body: o.form ? new URLSearchParams(o.form).toString() : undefined });
   } catch { return fail('network') }
   if (!/^application\/json\b/i.test(r.headers.get('content-type') ?? '')) { await r.body?.cancel().catch(() => {}); fail('bad_content_type') }
   const chunks: Buffer[] = []; let n = 0;
@@ -63,7 +63,7 @@ export class Jwks {
 }
 
 // ---------- ID token ----------
-export interface Expect { iss: string[]; aud: string; nonce: string; accessToken?: string; now?: number }
+export interface Expect { iss: string[]; aud: string; nonce: string; nonceOptional?: boolean; accessToken?: string; now?: number }
 export interface Claims { sub: string; email?: string; relay: boolean; iss: string }
 /** Verify an RS256 ID token. Throws OidcError(<fixed code>) on any problem; returns only the claims we use. */
 export async function verifyIdToken(token: string, jwks: { get(kid: string): Promise<Jwk | null> }, x: Expect): Promise<Claims> {
@@ -85,7 +85,8 @@ export async function verifyIdToken(token: string, jwks: { get(kid: string): Pro
   if (!(aud === x.aud || (Array.isArray(aud) && aud.includes(x.aud) && p.azp === x.aud))) fail('aud');
   if (typeof p.exp !== 'number' || p.exp + 60 <= now) fail('exp');
   if (typeof p.iat !== 'number' || p.iat > now + 60 || p.iat < now - 600) fail('iat');
-  if (typeof p.nonce !== 'string' || !eq(p.nonce, x.nonce)) fail('nonce');
+  // nonceOptional (Telegram documents no nonce for its code flow): a missing claim is tolerated, a present one must still match.
+  if (!(x.nonceOptional && p.nonce === undefined) && (typeof p.nonce !== 'string' || !eq(p.nonce, x.nonce))) fail('nonce');
   if (typeof p.sub !== 'string' || !p.sub || p.sub.length > 255) fail('sub');
   if (p.at_hash !== undefined) {
     if (typeof p.at_hash !== 'string' || !x.accessToken) fail('at_hash');

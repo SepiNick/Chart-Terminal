@@ -3,7 +3,7 @@
 import { api } from './sync.ts';
 import { authPost } from './login.ts';
 
-export type Provider = 'google' | 'apple';
+export type Provider = 'google' | 'apple' | 'telegram';
 export type Intent = 'login' | 'link' | 'reauth';
 export type User = { name: string; role?: string; mustChange?: boolean; id?: string | number };
 export type ExchangeResult = { user?: User } | { signup: true; ticket: string; hint?: string } | { linked: string };

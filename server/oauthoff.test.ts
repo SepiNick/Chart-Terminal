@@ -14,7 +14,7 @@ const { Jwks } = await import('./core/oidc.ts');
 
 test('a provider that is off answers 404 everywhere and status says so; the other one is on', async () => {
   const c = client(b.base);
-  assert.deepEqual((await c.json('GET', '/api/auth/status')).body.oauth, { google: true, apple: false });
+  assert.deepEqual((await c.json('GET', '/api/auth/status')).body.oauth, { google: true, apple: false, telegram: false });
   const ch = 'A'.repeat(43);
   assert.equal((await c.json('POST', '/api/auth/oauth/start', { provider: 'apple', intent: 'login', challenge: ch, ret: 'web' })).status, 404);
   assert.equal((await c.json('POST', '/api/auth/oauth/start', { provider: 'google', intent: 'login', challenge: ch, ret: 'web' })).status, 200);

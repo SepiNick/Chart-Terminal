@@ -8,6 +8,7 @@ test('fragment parsing: web code, app code, errors, foreign hashes', () => {
   assert.deepEqual(parseOAuthFragment('#code=' + CODE), { found: true, code: CODE });
   assert.deepEqual(parseOAuthFragment('#error=denied'), { found: true, error: 'denied' });
   assert.deepEqual(parseOAuthFragment('#error=<script>'), { found: true, error: 'failed' });
+  assert.deepEqual(parseOAuthFragment('#error=unreachable'), { found: true, error: 'unreachable' });
   assert.deepEqual(parseOAuthFragment('#oauth=short'), { found: true, error: 'failed' });
   assert.deepEqual(parseOAuthFragment('#oauth=' + CODE + '";alert(1)//'), { found: true, error: 'failed' });
   for (const h of ['', '#', '#chart', '#sym=BTC']) assert.equal(parseOAuthFragment(h).found, false);

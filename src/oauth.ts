@@ -18,7 +18,7 @@ export const oauthAvailable = () => isSameOrigin(syncServer());
 
 /** Leave for the provider. Resolves never on success (the page navigates away); throws a readable error when it cannot start. */
 export async function startOAuth(provider: Provider, intent: Intent = 'login', password?: string): Promise<never> {
-  if (iosStandalone()) throw Error('Open this site in Safari to sign in with Google or Apple, or use your password.');
+  if (iosStandalone()) throw Error('Open this site in Safari to sign in with Google, Apple or Telegram, or use your password.');
   const { verifier, challenge } = await makePkce();
   savePending(localStorage, { verifier, server: syncServer().id, intent });
   const { url } = await oauthStart({ provider, intent, challenge, ret: inApp() ? 'app' : 'web', ...(password ? { password } : {}) });
@@ -36,7 +36,7 @@ export async function finishOAuth(r: Returned): Promise<{ ticket: string; verifi
   try {
     const j = await oauthExchange(r.code, p.verifier);
     if ('signup' in j) return { ticket: j.ticket, verifier: p.verifier };
-    if ('linked' in j) notice = `${j.linked === 'apple' ? 'Apple' : 'Google'} account linked`;
+    if ('linked' in j) notice = `${({ apple: 'Apple', telegram: 'Telegram' } as Record<string, string>)[j.linked] ?? 'Google'} account linked`;
   } catch (e) { flash = (e as Error).message || ERROR_TEXT.failed }
   return null;
 }
