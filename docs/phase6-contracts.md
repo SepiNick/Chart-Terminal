@@ -1,3 +1,5 @@
+[English](phase6-contracts.md) · [فارسی](phase6-contracts.fa.md)
+
 # Phase 6 — exchanges on testnet: contracts for parallel work
 
 Phase 6 = one broker layer for every account (our paper account + exchange **testnets**), more order types, order

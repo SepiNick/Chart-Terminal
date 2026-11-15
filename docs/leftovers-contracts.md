@@ -1,3 +1,5 @@
+[English](leftovers-contracts.md) · [فارسی](leftovers-contracts.fa.md)
+
 # Leftovers — contracts for parallel work
 
 Everything the ROADMAP lists as "not yet", "مانده" or "محدودیت" in phases 2–10 that does not belong to a future

@@ -1,3 +1,5 @@
+[English](oauth-sync-design.md) · [فارسی](oauth-sync-design.fa.md)
+
 # Sign in with Google / Apple + "match" of device data and account data
 
 Status: design only (nothing implemented). Scope: public servers (`CT_MODE=public`). Private servers keep the single password.

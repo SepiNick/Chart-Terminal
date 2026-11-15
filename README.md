@@ -1,3 +1,5 @@
+[English](README.en.md) · [فارسی](README.md)
+
 # Chart Terminal
 
 نسخه‌ای از TradingView که از صفر ساخته شده. نقشه‌ی راه و یافته‌های بررسی برنامه در [ROADMAP.md](ROADMAP.md) آمده است. نصب و اجرا روی ویندوز، لینوکس، اندروید و سرور: [docs/README.md](docs/README.md).

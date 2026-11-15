@@ -1,3 +1,5 @@
+[English](phase5-contracts.md) · [فارسی](phase5-contracts.fa.md)
+
 # Phase 5 — contracts for parallel work
 
 Phase 5 = local server with SQLite, login and multi-device sync, server-side alerts and notifications, server-side

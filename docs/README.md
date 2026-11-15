@@ -1,3 +1,5 @@
+[English](README.en.md) · [فارسی](README.md)
+
 # راهنمای مستندات
 
 ## نصب و اجرا: کدام راه برای من؟
@@ -15,12 +17,16 @@
 
 همه‌ی راه‌ها Node.js 24 یا بالاتر برای ساخت/اجرا از سورس می‌خواهند (`node:sqlite`)؛ بسته‌ی ویندوز Node را داخل خودش دارد. Docker و Raspberry Pi: فایل‌های Docker نوشته شده‌اند و روی یک رزبری پای واقعی اجرا شده‌اند ([raspberry-pi.md](raspberry-pi.md)).
 
+## ورود با حساب (SSO)
+
+دکمه‌های «Continue with Google / Apple / Telegram» فقط روی **سرور عمومی** هستند و مالک سرور هر کدام را با متغیرهای محیطی روشن می‌کند: [oauth-setup.md](oauth-setup.md) (Google و Apple) و [telegram-login-setup.md](telegram-login-setup.md) (تلگرام). سرور خصوصی یک رمز دارد (و اختیاری تأیید با ربات تلگرام)؛ برنامه‌ی standalone حساب ندارد.
+
 ## فهرست همه‌ی فایل‌ها
 
 - [desktop.md](desktop.md): برنامه‌ی Electron (ویندوز، مک، لینوکس)، داده‌ها، tray، ساخت نصبی.
 - [lite.md](lite.md): نسخه‌ی سبک بدون Electron، مقایسه‌ی حجم و حافظه، نصب و حذف.
 - [headless-server.md](headless-server.md): اجرای سرور از سورس روی لپ‌تاپ لینوکسی، systemd، فایروال، پشتیبان‌گیری.
-- [bug-report.md](bug-report.md): گزارش باگ داخل برنامه (توضیح، عکس، اطلاعات تشخیصی) و مقصد آن.
+- [bug-report.md](bug-report.md): گزارش باگ داخل برنامه (توضیح، عکس، اطلاعات تشخیصی)، لاگ خودکار کرش و مقصد آن.
 - [raspberry-pi.md](raspberry-pi.md): سرور شخصی روی رزبری پای با یک دستور، اضافه کردن به برنامه‌ها و ربات تلگرام (اعلان و ورود با تلگرام).
 - [docker.md](docker.md): اجرا با Docker روی رزبری پای، لینوکس یا VPS (سرور خصوصی و عمومی با Caddy؛ ساخته‌نشده و تست‌نشده)
 - [lan-setup.md](lan-setup.md): HTTPS روی شبکه‌ی خانه، نصب گواهی روی اندروید و آیفون، فایروال ویندوز.
@@ -30,6 +36,7 @@
 - [dominance.md](dominance.md): دامیننس و سهم بازار.
 - [iran-market.md](iran-market.md): بازار ایران (نوبیتکس، tgju، بورس).
 - [oauth-setup.md](oauth-setup.md): راه‌اندازی ورود با Google و Apple (سرور عمومی).
+- [telegram-login-setup.md](telegram-login-setup.md): راه‌اندازی ورود با تلگرام (سرور عمومی).
 - [phase7-plan.md](phase7-plan.md): طرح فاز ۷.
 - [multi-server.md](multi-server.md): ورود با توکن دستگاه و CORS برای کلاینت‌های origin دیگر.
 - [python.md](python.md): تب Python؛ اجرای کد پایتون خودتان روی داده‌ی نمودار (قرارداد، نمونه‌ها، نصب pandas، مدل امنیتی و محدودیت‌ها).

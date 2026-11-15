@@ -1,3 +1,5 @@
+[فارسی](06-atas-vs-ninjatrader-metatrader.md) · [English](06-atas-vs-ninjatrader-metatrader.en.md)
+
 # ATAS در برابر NinjaTrader، MetaTrader 5 و Chart Terminal
 
 تاریخ بررسی: 2026-10-17. منبع‌ها پایین صفحه آمده‌اند. بیشتر منبع‌های ATAS سایت خود سازنده یا وبلاگ‌های وابسته‌اند، پس عددهای تبلیغاتی (مثل «۴۰۰ نوع footprint») را تقریبی بدانید. مواردی که خودم تأیید نکرده‌ام با (؟) علامت خورده‌اند.

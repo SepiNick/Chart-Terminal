@@ -1,3 +1,5 @@
+[فارسی](android-apk.md) · [English](android-apk.en.md)
+
 # اپ اندروید (APK) برای Chart Terminal
 
 دو نسخه (product flavor) داریم که کنار هم نصب می‌شوند (applicationId جدا) و خروجی‌شان نام جدا دارد:

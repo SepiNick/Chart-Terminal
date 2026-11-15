@@ -1,3 +1,5 @@
+[English](oauth-setup.en.md) · [فارسی](oauth-setup.md)
+
 # راه‌اندازی ورود با Google و Apple (راهنمای مالک سرور)
 
 این سند فقط برای **سرور عمومی** (`CT_MODE=public`) است. سرور خصوصی همان رمز تکی خودش را نگه می‌دارد و دکمه‌ی ورود با Google/Apple ندارد.
@@ -88,3 +90,5 @@ callback گوگل `code` و `state` را در query دارد (هر دو یک‌�
 - `redirect_uri_mismatch` در Google: آدرس ثبت‌شده با `${CT_PUBLIC_URL}/api/auth/oauth/callback/google` یکی نیست (http/https، اسلش آخر، پورت).
 - بعد از ورود پیام «Sign-in failed»: علت دقیق در جدول `audit` به شکل `oauth fail:<کد>` ثبت می‌شود (`nonce`, `aud`, `iss`, `exp`, `signature`, `token`, `network` ...). متن توکن هیچ‌وقت ثبت نمی‌شود.
 - سرور به Google/Apple نمی‌رسد (`network`): خروجی VPS را بررسی کنید؛ ورود با رمز همیشه در دسترس می‌ماند.
+
+> ورود با تلگرام: [telegram-login-setup.md](telegram-login-setup.md)

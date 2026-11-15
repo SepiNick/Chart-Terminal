@@ -1,3 +1,5 @@
+[English](headless-server.en.md) · [فارسی](headless-server.md)
+
 # اجرای سرور روی لپ‌تاپ لینوکسی (بدون مرورگر)
 
 هدف: یک لپ‌تاپ همیشه‌روشن که سرور Chart Terminal را اجرا می‌کند و گوشی (راهنما: [android.md](android.md)) از طریق Wi-Fi خانه به آن وصل می‌شود. نیازها: Node 24 یا جدیدتر، `openssl`، `git`.

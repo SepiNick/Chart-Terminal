@@ -1,3 +1,5 @@
+[فارسی](desktop-shell-spec.md) · [English](desktop-shell-spec.en.md)
+
 # مشخصات رفتاری پوسته‌ی دسکتاپ TradingView 3.4.1
 
 > **روش clean-room:** این سند فقط *رفتار* را توصیف می‌کند. هیچ کدی از TradingView در آن یا در پروژه کپی نشده است.

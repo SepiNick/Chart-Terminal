@@ -1,3 +1,5 @@
+[فارسی](02-indicators-pine-strategy.md) · [English](02-indicators-pine-strategy.en.md)
+
 # ۰۲ — اندیکاتورها، Pine Script و Strategy Tester
 
 > هدف: مستندسازیِ **رفتار** قابلیت‌های TradingView برای بازسازی clean-room. هیچ کد یا متن طولانی از TradingView کپی نشده؛ همه‌چیز بازنویسی شده است.

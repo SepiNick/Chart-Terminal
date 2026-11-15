@@ -1,3 +1,5 @@
+[English](multiuser-design.md) · [فارسی](multiuser-design.fa.md)
+
 # Multi-user design: PUBLIC and PRIVATE server modes
 
 Status: design only (nothing implemented). Written against the code as of 2026-11-04.

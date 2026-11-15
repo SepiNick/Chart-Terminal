@@ -1,3 +1,5 @@
+[فارسی](04-calendars-news-screeners-data.md) · [English](04-calendars-news-screeners-data.en.md)
+
 # ۰۴ — محصولات داده‌ی بازار: تقویم‌ها، اخبار، اسکرینرها، هیت‌مپ‌ها، بنیادی، اجتماعی + منابع داده
 
 > هدف: مستندسازی **رفتار** امکانات TradingView برای بازسازی clean-room. هیچ کد یا متن طولانی از TradingView کپی نشده؛ همه‌چیز بازنویسی شده است.

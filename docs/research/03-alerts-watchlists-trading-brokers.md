@@ -1,3 +1,5 @@
+[فارسی](03-alerts-watchlists-trading-brokers.md) · [English](03-alerts-watchlists-trading-brokers.en.md)
+
 # پژوهش ۰۳ — Alerts، Watchlists، Trading Panel و Brokers
 
 > هدف: مستندسازی **رفتار** امکانات TradingView برای بازسازی clean-room. هیچ کد یا متن طولانی از TradingView کپی نشده؛ همه‌چیز بازنویسی شده است.

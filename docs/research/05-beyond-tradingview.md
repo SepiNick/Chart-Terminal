@@ -1,3 +1,5 @@
+[فارسی](05-beyond-tradingview.md) · [English](05-beyond-tradingview.en.md)
+
 # ۰۵ — فراتر از TradingView: قابلیت‌هایی که رقبا دارند و TradingView ندارد (یا ضعیف دارد)
 
 > تاریخ تحقیق: ۲۰۲۶-۱۰-۱۳ · دامنه: ترمینال تحلیل/معامله‌ی وب، اول کریپتو (Binance / Bybit / OKX / KuCoin / Nobitex)، بعداً فارکس از طریق MT5، کاربر در ایران.

@@ -1,3 +1,5 @@
+[English](01-charting-core.en.md) · [فارسی](01-charting-core.md)
+
 # ۰۱ — هسته‌ی چارت (Charting Core) در TradingView
 
 > هدف: مستندسازیِ **رفتار** قابلیت‌ها برای بازسازی clean-room. هیچ کد یا متن طولانی از TradingView کپی نشده؛ همه‌چیز بازنویسی شده است.

@@ -1,3 +1,5 @@
+[English](SIGNING.md) · [فارسی](SIGNING.fa.md)
+
 # Signing the Windows installer
 
 An unsigned installer makes Windows SmartScreen warn "unknown publisher". Signing needs a certificate issued to you or your company; nobody can generate one that Windows trusts for you.
