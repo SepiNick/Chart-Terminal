@@ -132,7 +132,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        web = new WebView(this);
+        web = new WebView(this); if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) WebView.setWebContentsDebuggingEnabled(true);
         web.setBackgroundColor(Color.parseColor("#131722"));
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
@@ -159,7 +159,7 @@ public class MainActivity extends Activity {
                 return text(403, "Blocked");
             }
         });
-        web.setWebChromeClient(new WebChromeClient() {
+        web.setWebChromeClient(new JsDialogs() {
             @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
                 if (chooser != null) chooser.onReceiveValue(null);
                 chooser = cb;

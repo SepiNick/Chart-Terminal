@@ -174,7 +174,7 @@ public class MainActivity extends Activity {
     private void showWeb(String o) {
         origin = o;
         FrameLayout root = new FrameLayout(this);
-        web = new WebView(this);
+        web = new WebView(this); if ((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) WebView.setWebContentsDebuggingEnabled(true);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -182,6 +182,7 @@ public class MainActivity extends Activity {
         fixScale(s);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         CookieManager.getInstance().setAcceptCookie(true);
+        web.setWebChromeClient(new JsDialogs());
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 Uri u = r.getUrl();

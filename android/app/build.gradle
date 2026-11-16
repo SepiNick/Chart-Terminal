@@ -33,6 +33,7 @@ android {
         }
     }
     buildTypes {
+        debug { if (ksFile.exists()) signingConfig signingConfigs.release }   // same key as release, so debug installs update in place and keep app data
         release {
             minifyEnabled true
             shrinkResources true
