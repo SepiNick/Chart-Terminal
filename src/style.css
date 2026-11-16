@@ -214,19 +214,6 @@ kbd{font:11px ui-monospace,Consolas,monospace;background:var(--bg);border:1px so
 .dom-hint{font-size:10px}
 @container (max-width:230px){#domLadder .trd,#domTape th:nth-child(4),#domTape td:nth-child(4){display:none}}
 #rail [data-chart]{display:none}
-@media (max-width:900px){
-  /* phone: one page at a time. Side page (watchlist first) OR chart; the drawing tools sit under the chart, the page switcher is the bottom bar */
-  html,body{height:100dvh}
-  body{overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
-  #body,#body.no-panel{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto auto}
-  #center{grid-row:1}#tools{grid-row:2}#panel{grid-row:1;border-left:0}#rail{grid-row:3}
-  #tools,#rail{flex-direction:row;overflow-x:auto;overflow-y:hidden;border:0;border-top:1px solid var(--line)}
-  #body:not(.no-panel) :is(#center,#tools){display:none}
-  #body.no-panel #panel{display:none}
-  #rail [data-chart]{display:block}#body.no-panel #rail [data-chart]{background:var(--accent);color:#fff}
-  #bottom.collapsed #bTabs>:not(.grow):not(#bToggle){display:none}
-  #bottom{height:min(var(--bottom-h,220px),45dvh)}#bottom.collapsed{height:auto}
-}
 /* journal workspace */
 #jw{position:fixed;inset:0;z-index:40;background:var(--bg);display:grid;grid-template-columns:210px 1fr}#jw[hidden]{display:none}
 #jwNav{border-right:1px solid var(--line);padding:10px 8px;overflow:auto;display:flex;flex-direction:column;gap:2px;background:var(--panel)}
@@ -344,7 +331,7 @@ html.fa .sl > b { direction: ltr; unicode-bidi: plaintext }
 .wldot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
 .wldots{display:inline-flex;gap:2px;margin-inline-end:5px;vertical-align:middle}.wldots i{width:7px;height:7px;border-radius:50%;display:inline-block}
 #toast button{margin-inline-start:6px}
-@media (max-width:900px){.wltab{min-height:36px;padding:4px 12px}}
+html:not([data-ui=desktop]) .wltab{min-height:36px;padding:4px 12px}
 /* ---- multi-monitor: pop-out windows (src/popout.ts) ---- */
 .po-ph{display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;color:var(--muted);flex:1}
 .po-ph.on{display:flex}.po-ph.on ~ *{display:none!important}
@@ -484,30 +471,4 @@ button.cm-dir.on.long{background:var(--up);color:#fff}button.cm-dir.on.short{bac
 .cm-msgs{display:flex;flex-direction:column;gap:4px;min-height:200px;max-height:55vh;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px;background:var(--bg)}.cm-msg{padding:3px 6px;border-radius:6px}.cm-msg.mine{background:var(--panel)}
 .cm-send{align-items:flex-end}.cm-send textarea{flex:1}.cm-err{color:var(--down)}.cm-empty,.cm-gate{text-align:center;padding:12px}.cm-stats{display:flex;gap:12px}
 #cmMore{text-align:center}#cmNew{align-self:center}
-@media (max-width:900px){#s-community button,#s-community select{min-height:36px}#s-community input,#s-community textarea{font-size:16px}.cm-msgs{max-height:none;flex:1}}
-
-/* ---- phone layout, in the spirit of the TradingView mobile app: one clean top row, the chart as large as possible, a labelled bottom bar ---- */
-@media (max-width:900px){
-  /* top: symbol, timeframe strip, indicators, alert, menu. Everything else lives under ☰ (see main.ts) */
-  #tabs:not(:has(.tab:nth-of-type(2))){display:none}
-  #top{flex-wrap:nowrap;overflow-x:auto;gap:6px;padding:6px 8px;scrollbar-width:none}#top::-webkit-scrollbar{display:none}
-  #top > *{flex:0 0 auto}
-  #top :is(#cmpBtn,#typeBtn,#tplBtn,#replayBtn,#ofBtn,#undoBtn,#redoBtn,#layoutBtn,#syncBtn,#layoutsBtn,#srvBtn,#fullBtn,#monBtn,.sep,.grow){display:none}
-  #top #symBtn{max-width:36vw;overflow:hidden;text-overflow:ellipsis;font-weight:600}
-  #top #tfs{display:flex;gap:2px}
-  #top button{min-height:38px;padding:0 10px}
-  #indBtn,#alertBtn{font-size:0}#indBtn::before{content:'ƒx';font-size:16px}#alertBtn::before{content:'⏰';font-size:16px}
-  #menuBtn{margin-left:auto;font-size:20px;min-width:42px}
-  /* chart: no quick buy/sell over the legend, the time-range strip stays small */
-  .cell .quick{display:none}
-  /* bottom bar: Chart, Watchlist, Alerts, Community, More */
-  #rail{justify-content:space-around;gap:0;padding:0;overflow:visible}
-  #rail > *{display:none!important}
-  #rail > :is([data-chart],[data-side=watch],[data-side=alerts],[data-side=community],#railMore){display:flex!important}
-  #rail button{flex:1 1 0;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:54px;border-radius:0;font-size:20px;line-height:1;background:none;border:0;color:var(--muted)}
-  #rail button::after{content:attr(data-l);font-size:11px;font-weight:500}
-  #rail button.on,#body.no-panel #rail [data-chart]{color:var(--accent);background:none}
-  #body:not(.no-panel) #rail [data-chart]{color:var(--muted)}
-  #rail [data-chart]{display:flex!important}
-}
-@media (min-width:901px){#railMore{display:none}}
+html:not([data-ui=desktop]) :is(#s-community button,#s-community select){min-height:36px}html:not([data-ui=desktop]) :is(#s-community input,#s-community textarea){font-size:16px}html:not([data-ui=desktop]) .cm-msgs{max-height:none;flex:1}

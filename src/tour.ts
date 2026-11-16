@@ -1,3 +1,4 @@
+import { uiMode } from './phone/mode.ts';
 // First-run feature tour: a spotlight on one part of the screen at a time, with a short explanation, Back / Next / Skip.
 // It runs once per device (device-local key `tourDone`) and can be replayed from the ☰ menu ("Feature tour"). Steps whose
 // target is not on screen (a phone shows one page at a time, the desktop-only items) are skipped; `page` brings the right
@@ -6,7 +7,7 @@ import { store } from './store.ts';
 import { isPopout } from './popout.ts';
 
 interface Step { sel?: string; title: string; body: string; page?: 'chart' | 'side' }
-const STEPS: Step[] = [
+const DESK_STEPS: Step[] = [
   { title: 'Welcome to Chart Terminal', body: 'A two-minute tour of what is here. You can skip it any time, and replay it from the ☰ menu › Feature tour.' },
   { sel: '#symBtn', page: 'chart', title: 'Symbol', body: 'Tap to search any coin, forex pair or stock. On the chart you can also just start typing a symbol.' },
   { sel: '#tfs', page: 'chart', title: 'Timeframes', body: 'Switch between 1 minute and 1 week candles. The ▾ button next to them lists every interval, and you can type your own.' },
@@ -26,7 +27,17 @@ const STEPS: Step[] = [
   { title: 'You are ready', body: 'Start with the watchlist: pick a symbol, add an indicator, draw a line. Everything is saved automatically.' },
 ];
 
-const phone = () => matchMedia('(max-width:900px)').matches;
+const PHONE_STEPS: Step[] = [
+  { title: 'Welcome to Chart Terminal', body: 'A short tour of the phone layout. You can skip it any time, and replay it from ☰ › Feature tour.' },
+  { sel: '#pTop .p-sym', page: 'chart', title: 'Symbol', body: 'Tap the symbol to search any coin, forex pair or stock. The live price and change are right under it.' },
+  { sel: '#pTop .p-tf', page: 'chart', title: 'Timeframe', body: 'Tap to pick the candle interval, from 1 minute to 1 month, or type your own.' },
+  { sel: '#pTop [data-a=ind]', page: 'chart', title: 'Indicators and chart', body: 'The ƒx button opens indicators, chart type, replay, layouts and chart settings. Alerts and the ☰ menu are next to it.' },
+  { sel: '#penFab', page: 'chart', title: 'Drawing tools', body: 'Tap the pen to choose a tool, then touch the chart. Tap a drawing to edit it, or press and hold for its menu.' },
+  { sel: '#grid', page: 'chart', title: 'The chart', body: 'Drag to move, pinch to zoom, drag the price scale to stretch. Press and hold for the chart menu.' },
+  { sel: '#pTabs', title: 'Navigation', body: 'Chart, Watchlist, Alerts, Community and More (trading, screener, positions, Pine, journal and the AI assistant).' },
+  { title: 'You are ready', body: 'Start with the watchlist: pick a symbol, add an indicator, draw a line. Everything is saved automatically.' },
+];
+const phone = () => uiMode() === 'phone';
 const rectOf = (sel?: string) => { const el = sel ? document.querySelector<HTMLElement>(sel) : null; if (!el) return null; const r = el.getBoundingClientRect(); return r.width > 2 && r.height > 2 ? { el, r } : null };
 const click = (sel: string) => document.querySelector<HTMLElement>(sel)?.click();
 function bringPage(p?: 'chart' | 'side') {
@@ -39,7 +50,8 @@ let root: HTMLElement | null = null;
 export function startTour() {
   if (root || isPopout) return;
   let i = 0, dir = 1;
-  root = document.createElement('div');
+  const STEPS = phone() ? PHONE_STEPS : DESK_STEPS;
+  root =document.createElement('div');
   root.id = 'tour'; root.setAttribute('role', 'dialog'); root.setAttribute('aria-modal', 'true'); root.setAttribute('aria-label', 'Feature tour');
   root.innerHTML = '<div class="tr-hl"></div><div class="tr-card" tabindex="-1"><b class="tr-t"></b><p class="tr-b"></p><div class="tr-n"></div><div class="tr-btns"><button data-a="skip" class="x">Skip</button><span class="grow"></span><button data-a="back">Back</button><button data-a="next" class="on">Next</button></div></div>';
   document.body.append(root);

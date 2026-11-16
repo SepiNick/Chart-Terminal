@@ -194,6 +194,9 @@ export const FA: Record<string, string> = {
   'This browser cannot list screens: pop-outs open where it puts them': 'این مرورگر نمی‌تواند صفحه‌ها را فهرست کند؛ پنجره‌ها هر جا مرورگر بگذارد باز می‌شوند',
   'Pop-up blocked. Allow pop-ups for this site (icon at the right of the address bar), then try again.': 'پنجره‌ی بازشو مسدود شد. بازشو را برای این سایت مجاز کنید (آیکون سمت راست نوار آدرس) و دوباره امتحان کنید.',
   'Main window closed.': 'پنجره‌ی اصلی بسته شد.', 'Keep open': 'باز بماند', 'Close this window': 'بستن این پنجره', 'Running on its own': 'مستقل کار می‌کند',
+  // phone shell (src/phone/shell.ts)
+  'Interface': 'نمای برنامه', 'Auto': 'خودکار', 'Phone': 'موبایل', 'Tablet': 'تبلت', 'Desktop': 'دسکتاپ', 'Templates': 'قالب‌ها', 'Layout': 'چیدمان', 'Replay': 'بازپخش', 'Redo': 'جلو',
+  'Saved layouts': 'چیدمان‌های ذخیره‌شده', 'More': 'بیشتر', 'Community': 'انجمن', 'Screener Pro…': 'اسکرینر حرفه‌ای…', 'Main': 'اصلی',
   'Chart': 'نمودار', 'DOM / Time & Sales': 'DOM / ریز معاملات', 'Positions & orders': 'پوزیشن‌ها و سفارش‌ها', 'Pine / Python editor': 'ویرایشگر Pine / Python',
 };
 

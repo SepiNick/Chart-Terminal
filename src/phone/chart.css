@@ -1,1 +1,45 @@
-/* phone layout: the chart screen (legend, tools, time range, pickers). Only applies on narrow screens. */
+/* phone chart screen (legend, drawing tools, time range, chart type). Keyed on html[data-ui="phone"]; see src/phone/mode.ts. */
+#penFab,#toolBar,#typeChip{display:none}
+html[data-ui="phone"] :is(#penFab,#typeChip){display:grid}
+html[data-ui="phone"] #toolBar{display:flex}
+html[data-ui="phone"] #toolBar[hidden]{display:none}
+
+/* the page itself never scrolls or bounces; the chart owns every touch on it */
+html[data-ui="phone"],html[data-ui="phone"] body{overscroll-behavior:none;max-width:100%;overflow-x:hidden}
+html[data-ui="phone"] :is(#center,#grid,#bottomBar){min-width:0;max-width:100%}
+html[data-ui="phone"] #center{position:relative}
+html[data-ui="phone"] .cell{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+/* the keyboard hides the tab bar instead of pushing the chart around */
+html[data-ui="phone"] body:has(input:focus,textarea:focus,select:focus) #rail{display:none}
+
+/* legend: two compact lines (symbol . tf . exchange / OHLC change), indicators as small chips */
+html[data-ui="phone"] .cell .legend{top:4px;left:6px;font-size:10.5px;line-height:1.35;letter-spacing:-.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:calc(100% - 64px)}
+html[data-ui="phone"] .cell .legend .n{margin-left:3px}
+html[data-ui="phone"] .legend .ind{display:flex;float:left;margin:2px 4px 0 0;padding:0 8px;min-height:24px;align-items:center;border-radius:12px;background:color-mix(in srgb,var(--panel) 85%,transparent);border:1px solid var(--line);font-size:10px;pointer-events:auto}
+html[data-ui="phone"] .legend .ind .n{margin:0}
+html[data-ui="phone"] .legend .ind>span:not(.n),html[data-ui="phone"] .legend .ind .ia{display:none}
+html[data-ui="phone"] .cell .quick{display:none!important}
+
+/* drawing tools: the row under the chart is replaced by a round pen button + bottom sheet */
+html[data-ui="phone"] #tools{display:none!important}
+html[data-ui="phone"] #penFab{place-items:center;position:absolute;left:8px;top:45%;z-index:6;width:44px;height:44px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:20px;box-shadow:0 2px 8px #0005}
+html[data-ui="phone"] #penFab.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+html[data-ui="phone"] #toolBar{align-items:center;gap:6px;position:absolute;left:50%;bottom:calc(52px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:7;max-width:calc(100% - 80px);padding:4px 6px 4px 12px;border-radius:24px;background:var(--panel);border:1px solid var(--line);box-shadow:0 2px 8px #0005;white-space:nowrap}
+html[data-ui="phone"] #toolBar b{font-size:12px;overflow:hidden;text-overflow:ellipsis}
+html[data-ui="phone"] #toolBar button{min-height:44px;padding:0 14px;border-radius:22px;border:0;background:var(--line);color:var(--text)}
+html[data-ui="phone"] #toolBar button[data-a=done]{background:var(--accent);color:#fff}
+html[data-ui="phone"] .tsh h4{margin:12px 8px 6px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+html[data-ui="phone"] .tsh .g{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+html[data-ui="phone"] .tsh .sheet-i{flex-direction:column;justify-content:center;gap:4px;min-height:64px;padding:6px 4px;border:1px solid var(--line);font-size:11px;text-align:center;line-height:1.2}
+html[data-ui="phone"] .tsh .sheet-i svg{width:24px;height:24px}
+
+/* time range strip: one slim scrolling row, chart type first */
+html[data-ui="phone"] #bottomBar{flex-wrap:nowrap;overflow-x:auto;gap:0;padding:0 4px;scrollbar-width:none}
+html[data-ui="phone"] #bottomBar::-webkit-scrollbar{display:none}
+html[data-ui="phone"] #bottomBar>*{flex:none}
+html[data-ui="phone"] #bottomBar :is(#clock,.sep,.grow){display:none}
+html[data-ui="phone"] #bottomBar #ranges{display:flex}
+html[data-ui="phone"] #bottomBar button{min-height:44px;min-width:44px;padding:0 10px}
+/* landscape phone: every pixel of height goes to the chart (range strip and chart type live in the ƒx sheet / the interval sheet) */
+@media (orientation:landscape) and (max-height:500px){html[data-ui="phone"] #bottomBar{display:none}}
+html[data-ui="phone"] #bottomBar #typeChip{place-items:center;color:var(--accent);font-weight:600;border:0;background:none;border-right:1px solid var(--line);margin-right:4px}

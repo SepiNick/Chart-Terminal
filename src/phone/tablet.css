@@ -1,0 +1,104 @@
+/* Tablet UI: html[data-ui="tablet"] (src/phone/mode.ts). Landscape = persistent split view [switcher | side page | drawing tools | chart];
+   portrait = chart + slide-over drawer (switcher + side page) opened by #tSideBtn or an edge swipe (src/phone/tablet.ts). 44px touch targets, no hover-only UI.
+   Selectors are deliberately specific (and a few !important) so they also beat the older max-width:900px phone block while that still exists. */
+#tSideBtn,#tBd{display:none}
+html[data-ui=tablet] body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);overscroll-behavior:none}
+html[data-ui=tablet],html[data-ui=tablet] body{height:100dvh;max-width:100%;overflow:hidden}
+html[data-ui=tablet] #tabs:not(:has(.tab:nth-of-type(2))){display:none}
+
+/* ---- top toolbar: one scrolling row, 44px targets ---- */
+html[data-ui=tablet] #top{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;gap:4px;padding:6px 10px;max-width:100%;scrollbar-width:none}
+html[data-ui=tablet] #top::-webkit-scrollbar{display:none}
+html[data-ui=tablet] #top>*{flex:0 0 auto}
+html[data-ui=tablet] #top>.grow{flex:1 0 8px}
+html[data-ui=tablet] #top :is(button,label){min-height:44px;min-width:44px;padding:0 10px;display:inline-flex;align-items:center;justify-content:center;gap:4px;font-size:14px}
+html[data-ui=tablet] #top #tSideBtn{display:inline-flex;font-size:20px}
+html[data-ui=tablet] #top :is(#cmpBtn,#typeBtn,#tplBtn,#replayBtn,#ofBtn,#undoBtn,#redoBtn,#layoutBtn,#syncBtn,#layoutsBtn,#srvBtn,#fullBtn,#indBtn,#alertBtn,#menuBtn){display:inline-flex}
+html[data-ui=tablet] #top :is(.sep){display:block;height:24px}
+html[data-ui=tablet] #top #monBtn,html[data-ui=tablet] #top #tfNow{display:none}
+html[data-ui=tablet] #top #symBtn{max-width:220px;min-width:110px;justify-content:flex-start;font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+html[data-ui=tablet] #top #symPx{display:inline;font-size:15px;font-weight:600;padding:0 6px}
+html[data-ui=tablet] #top #tfs{display:flex!important}
+html[data-ui=tablet] #top #tfMore{display:inline-flex!important}
+html[data-ui=tablet] #top #tfs button{min-width:44px;padding:0 8px;font-size:13px;margin:0}
+html[data-ui=tablet] #top #layoutName{display:none}
+html[data-ui=tablet] #top :is(#layoutsBtn,#indBtn,#alertBtn,#replayBtn,#ofBtn){font-size:0}
+html[data-ui=tablet] #top :is(#layoutsBtn,#indBtn,#alertBtn,#replayBtn,#ofBtn)::before{font-size:18px}
+html[data-ui=tablet] #top #layoutsBtn::before{content:'💾'}
+html[data-ui=tablet] #top #indBtn::before{content:'ƒx'}
+html[data-ui=tablet] #top #alertBtn::before{content:'⏰'}
+html[data-ui=tablet] #top #replayBtn::before{content:'⏪'}
+html[data-ui=tablet] #top #ofBtn::before{content:'▦'}
+html[data-ui=tablet] #top #menuBtn{font-size:22px;position:sticky;right:0;z-index:2;background:var(--panel)}
+html[data-ui=tablet] #top :is(#syncBtn,#srvBtn,#fullBtn){display:none}   /* also in the ☰ menu */
+html[data-ui=tablet] #replayBar{flex-wrap:wrap}
+html[data-ui=tablet] #replayBar :is(button,select,input){min-height:44px}
+
+/* ---- landscape: split view [rail | side page | tools | chart] ---- */
+html[data-ui=tablet] #body,html[data-ui=tablet] #body.no-panel{display:grid;grid-template-columns:68px clamp(320px,var(--panel-w,360px),380px) 56px minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0}
+html[data-ui=tablet] #body.no-panel{grid-template-columns:68px 0 56px minmax(0,1fr)}
+html[data-ui=tablet] #rail{grid-column:1;grid-row:1}
+html[data-ui=tablet] #panel{grid-column:2;grid-row:1;border-left:0;border-right:1px solid var(--line);display:flex!important}
+html[data-ui=tablet] #body.no-panel #panel{display:none!important}
+html[data-ui=tablet] #tools{grid-column:3;grid-row:1;display:flex!important;border-right:0;border-left:1px solid var(--line);flex-direction:column;overflow-y:auto;overflow-x:hidden}
+html[data-ui=tablet] #center{grid-column:4;grid-row:1;display:flex!important;position:relative;min-width:0}
+html[data-ui=tablet] #pResize{display:none}
+html[data-ui=tablet] #penFab{display:none!important}
+html[data-ui=tablet] #body > *{min-width:0}
+
+/* switcher: icon over label, 5 pages + More */
+html[data-ui=tablet] #rail{flex-direction:column;justify-content:flex-start;gap:2px;padding:6px 4px;overflow-y:auto;overflow-x:hidden;border-right:1px solid var(--line);border-left:0}
+html[data-ui=tablet] #rail>:not(.pri){display:none!important}
+html[data-ui=tablet] #rail>button.pri:not([hidden]){display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:100%;min-height:62px;height:auto;border-radius:10px;font-size:22px;line-height:1;border:0;background:none;color:var(--muted)}
+html[data-ui=tablet] #rail>button.pri::after{content:attr(data-l);font-size:11px;font-weight:500}
+html[data-ui=tablet] #rail>button.pri.on{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+html[data-ui=tablet] #rail [data-chart]{display:none!important}
+
+/* drawing tools: vertical bar, 44px */
+html[data-ui=tablet] #tools{padding:4px 5px;gap:2px}
+html[data-ui=tablet] #tools button{width:44px;height:44px;min-height:44px;flex:none;border-radius:8px}
+html[data-ui=tablet] #tools button svg{width:24px;height:24px}
+html[data-ui=tablet] #tools input[type=color]{width:44px;height:36px}
+
+/* chart: the chart owns touches; legend actions need no hover */
+html[data-ui=tablet] .cell{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+html[data-ui=tablet] .legend .ind .ia{display:inline-flex}
+html[data-ui=tablet] .legend .ia button{min-width:32px;min-height:32px}
+html[data-ui=tablet] #bottomBar button{min-height:40px;min-width:40px}
+
+/* ---- touch-sized lists and controls in the side pages and menus ---- */
+html[data-ui=tablet] #panel :is(button,select,input:not([type=checkbox]):not([type=radio]),textarea){min-height:40px;font-size:15px}
+html[data-ui=tablet] #panel :is(td,th){padding-top:10px;padding-bottom:10px}
+html[data-ui=tablet] #panel h3 .x{min-width:44px;min-height:44px;font-size:18px}
+html[data-ui=tablet] #panel .tabs button,html[data-ui=tablet] #wlTabs button{min-height:44px}
+html[data-ui=tablet] .ctx{min-width:240px;max-height:80dvh}
+html[data-ui=tablet] .ctx-i{min-height:44px;padding:0 14px;font-size:15px}
+html[data-ui=tablet] .tfly .ctx-i{height:44px}
+html[data-ui=tablet] #tools button.fly{min-width:24px}
+html[data-ui=tablet] .ctx-i .star{padding:10px;margin:-6px -6px -6px 6px}
+html[data-ui=tablet] .ctx-i:hover{background:none;color:inherit}
+html[data-ui=tablet] .ctx-i:active{background:var(--accent);color:#fff}
+html[data-ui=tablet] input,html[data-ui=tablet] textarea,html[data-ui=tablet] select{font-size:16px}
+
+/* dialogs and sheets: centred, 560px */
+html[data-ui=tablet] dialog{width:min(560px,94vw)!important;max-height:90dvh;overflow:auto;border-radius:14px;padding:18px}
+html[data-ui=tablet] dialog :is(button,select,input:not([type=checkbox]):not([type=radio])){min-height:44px}
+html[data-ui=tablet] .sheet-bd{align-items:center;justify-content:center}
+html[data-ui=tablet] .sheet{width:min(560px,94vw);max-height:84dvh;border-radius:14px;border:1px solid var(--line);padding-bottom:0}
+html[data-ui=tablet] .sheet-grip{display:none}
+
+/* ---- portrait: chart + slide-over drawer (rail + side page) ---- */
+@media (orientation:portrait){
+  html[data-ui=tablet] #body,html[data-ui=tablet] #body.no-panel{grid-template-columns:56px minmax(0,1fr)}
+  html[data-ui=tablet] #tools{grid-column:1}
+  html[data-ui=tablet] #center{grid-column:2}
+  html[data-ui=tablet] #rail,html[data-ui=tablet] #panel{position:fixed;top:var(--bt,96px);bottom:0;z-index:70;background:var(--panel);transition:transform .22s ease;box-shadow:6px 0 24px #0005;padding-bottom:env(safe-area-inset-bottom)}
+  html[data-ui=tablet] #rail{left:0;width:68px;transform:translateX(-120%)}
+  html[data-ui=tablet] #panel{left:68px;width:min(380px,calc(100vw - 68px - 48px));transform:translateX(calc(-100% - 100px));display:flex!important;border-right:1px solid var(--line)}
+  html[data-ui=tablet] #body.no-panel #panel{display:flex!important}
+  html[data-ui=tablet] body.tdrawer #rail,html[data-ui=tablet] body.tdrawer #panel{transform:none}
+  html[data-ui=tablet] #tBd{display:block;position:fixed;inset:0;z-index:65;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .2s}
+  html[data-ui=tablet] body.tdrawer #tBd{opacity:1;pointer-events:auto}
+  html[data-ui=tablet] #top #tfs button{padding:0 6px}
+  html[data-ui=tablet] #top :is(#undoBtn,#redoBtn,#ofBtn,#cmpBtn,.sep){display:none}
+}

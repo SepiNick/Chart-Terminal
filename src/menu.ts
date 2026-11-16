@@ -1,6 +1,8 @@
 // Small popup menu used for context menus and toolbar flyouts.
 import { esc } from './store.ts';
 import { place, type Anchor } from './menuplace.ts';
+import { uiMode } from './phone/mode.ts';
+import { sheetMenu } from './phone/sheet.ts';
 
 /** head: a section title row. iconHtml: trusted markup from our own icon set (never data). selected: highlighted row (tool flyouts). */
 export interface MenuItem { label?: string; icon?: string; iconHtml?: string; hint?: string; checked?: boolean; selected?: boolean; disabled?: boolean; sep?: boolean; head?: string; action?: () => void; sub?: MenuItem[] }
@@ -32,6 +34,8 @@ document.addEventListener('keydown', e => {
 });
 
 export function showMenu(x: number, y: number, items: MenuItem[], level = 0, anchor?: Anchor): HTMLElement {
+  // phone: every popup menu is a bottom sheet (submenus open inside it), whatever opened it
+  if (level === 0 && uiMode() === 'phone') { const t = items[0]?.head; return sheetMenu(t ?? '', t !== undefined ? items.slice(1) : items).el }
   if (level === 0) { const was = opener; closeMenus(); opener = was ?? (document.activeElement as HTMLElement | null) }
   else open.splice(level).forEach(m => m.remove());
   if (level === 0 && !opener) opener = document.activeElement as HTMLElement | null;
@@ -54,6 +58,7 @@ export function showMenu(x: number, y: number, items: MenuItem[], level = 0, anc
   m.addEventListener('click', e => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('.ctx-i'); if (!el) return;
     const it = items[+el.dataset.i!];
+    if (it.sub && !it.disabled && matchMedia('(hover:none)').matches) { const b = el.getBoundingClientRect(); showMenu(b.right, b.top, it.sub, level + 1, { left: m.getBoundingClientRect().left, bottom: b.bottom }); return }   // touch: no hover, so a tap opens the submenu
     if (it.disabled || it.sub) return;
     closeMenus(true); it.action?.();
   });

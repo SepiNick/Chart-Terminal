@@ -1,0 +1,54 @@
+/* Phone shell (src/phone/shell.ts). Everything here is keyed on html[data-ui=phone]; the desktop and tablet layouts never see it. */
+#pTop,#pTabs,#tfNow{display:none}   /* #tfNow only carries the interval sheet handler the shell calls */
+html[data-ui=phone]{--p-tabs:56px}
+html[data-ui=phone],html[data-ui=phone] body{height:100dvh;max-width:100%;overflow:hidden;overscroll-behavior:none}
+html[data-ui=phone] body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);-webkit-tap-highlight-color:transparent}
+html[data-ui=phone] :is(#top,#rail,#tools){display:none!important}
+html[data-ui=phone] #tabs:not(:has(.tab:nth-of-type(2))){display:none}
+
+/* one page at a time: the chart or a side page */
+html[data-ui=phone] #body,html[data-ui=phone] #body.no-panel{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+html[data-ui=phone] :is(#center,#panel){grid-row:1;grid-column:1;min-width:0;max-width:100%}
+html[data-ui=phone] #panel{border-left:0}
+html[data-ui=phone] #body:not(.no-panel) #center,html[data-ui=phone] #body.no-panel #panel{display:none}
+html[data-ui=phone] #bottom.collapsed #bTabs>:not(.grow):not(#bToggle){display:none}
+html[data-ui=phone] #bottom{height:min(var(--bottom-h,220px),45dvh)}
+html[data-ui=phone] #bottom.collapsed{display:none}   /* reached from More → Positions, Pine, Tester; the open panel still has #bToggle to close it */
+html[data-ui=phone] .cell .quick{display:none!important}
+
+/* top bar: symbol + price | timeframe | ƒx | alert | menu */
+html[data-ui=phone] #pTop{display:flex;align-items:center;gap:2px;flex:none;height:52px;padding:0 4px 0 12px;background:var(--bg);border-bottom:1px solid var(--line)}
+html[data-ui=phone] body[data-screen=side] #pTop{display:none}
+#pTop button{flex:none;display:grid;place-items:center;min-width:44px;height:44px;padding:0;border:0;border-radius:10px;background:none;color:var(--text);font-size:17px;font-weight:600}
+#pTop button:active,#pTabs button:active{background:var(--line)}
+#pTop .p-sym{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;padding:0 4px 0 0;text-align:left;font-weight:400}
+#pTop .p-sym b{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;line-height:1.15}
+#pTop .p-sym span{display:flex;gap:6px;align-items:baseline;max-width:100%;overflow:hidden;white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted)}
+#pTop .p-sym i{font-style:normal}#pTop .p-sym .px{color:var(--text);font-weight:600}
+#pTop .p-tf{min-width:48px;color:var(--accent);font-size:15px}
+#pTop svg{width:22px;height:22px}
+
+/* bottom tab bar */
+html[data-ui=phone] #pTabs{display:flex;flex:none;background:var(--panel);border-top:1px solid var(--line)}
+html[data-ui=phone] body:has(input:focus,textarea:focus,select:focus) #pTabs{display:none}
+#pTabs button{position:relative;flex:1 1 0;min-width:0;height:var(--p-tabs,56px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0;border:0;border-radius:0;background:none;color:var(--muted);font-size:11px;font-weight:500}
+#pTabs button.on{color:var(--accent)}
+#pTabs span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pTabs em{position:absolute;top:6px;left:calc(50% + 6px);min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--down);color:#fff;font-size:10px;font-style:normal;font-weight:700;line-height:16px;text-align:center}
+#pTabs em[hidden]{display:none}
+#pTabs button:focus-visible,#pTop button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* landscape phone: every pixel of height goes to the chart */
+@media (orientation:landscape) and (max-height:500px){
+  html[data-ui=phone]{--p-tabs:44px}
+  html[data-ui=phone] #pTop{height:44px}
+  #pTabs button{flex-direction:row;gap:6px;font-size:12px}
+  #pTabs svg{width:20px;height:20px}
+  #pTabs em{top:4px;left:calc(50% + 4px)}
+}
+/* toast and banners clear the tab bar */
+html[data-ui=phone] #toast{bottom:calc(env(safe-area-inset-bottom) + var(--p-tabs) + 16px)}
+html[data-ui=phone] .ct-banner{bottom:calc(env(safe-area-inset-bottom) + var(--p-tabs) + 10px)!important}
+html.fa #pTop,html.fa #pTabs{direction:ltr}
+/* the standalone/server chip is a permanent overlay: on a phone it lives in the ☰ menu (Server & notifications) instead */
+html[data-ui=phone] #standaloneChip{display:none!important}

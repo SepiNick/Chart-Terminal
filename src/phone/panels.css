@@ -1,1 +1,98 @@
-/* phone layout: side pages (watchlist, alerts, community, more), dialogs and search as full-screen sheets. Only applies on narrow screens. */
+/* side pages, dialogs, search: touch rules for phone+tablet, full-screen sheets for phone only. Keyed on html[data-ui] (src/phone/mode.ts). */
+
+/* ---- side pages: never wider than the screen; tables scroll inside themselves ---- */
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel,html:is([data-ui="phone"],[data-ui="tablet"]) .side{min-width:0;max-width:100%}
+html:is([data-ui="phone"],[data-ui="tablet"]) .side{overflow-x:hidden;padding:10px 12px;gap:10px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .side h3{font-size:14px;min-height:44px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel .side table:not(#watchT):not(#domLadder):not(#domTape){display:block;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel :is(input:not([type=checkbox],[type=radio],[type=range],[type=color],[type=file]),select,textarea){font-size:16px;min-height:42px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel button,html:is([data-ui="phone"],[data-ui="tablet"]) #panel label.btn{min-height:40px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel .x,html:is([data-ui="phone"],[data-ui="tablet"]) #panel label.x{min-width:40px;display:inline-flex;align-items:center;justify-content:center}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel .tabs,html:is([data-ui="phone"],[data-ui="tablet"]) #panel .seg,html:is([data-ui="phone"],[data-ui="tablet"]) #panel .row.wrap{flex-wrap:wrap}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel .tabs button,html:is([data-ui="phone"],[data-ui="tablet"]) #panel .seg button{min-height:40px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel .form{grid-template-columns:minmax(0,1fr)}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel :is(.field,.form) :is(input,select,textarea){max-width:100%;min-width:0}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel .field.row,html:is([data-ui="phone"],[data-ui="tablet"]) #panel .field>span{flex-wrap:wrap}
+html:is([data-ui="phone"],[data-ui="tablet"]) .buyc,html:is([data-ui="phone"],[data-ui="tablet"]) .sellc{min-width:56px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #panel img,html:is([data-ui="phone"],[data-ui="tablet"]) #panel canvas,html:is([data-ui="phone"],[data-ui="tablet"]) #panel svg{max-width:100%}
+html:is([data-ui="phone"],[data-ui="tablet"]) .wdet{max-height:none}
+
+/* ---- watchlist: big rows, symbol left, price, change as a pill, a visible row menu ---- */
+html:is([data-ui="phone"],[data-ui="tablet"]) #s-watch h3{position:sticky;top:-10px;z-index:3;background:var(--bg);margin:-10px -12px 0;padding:0 12px;font-size:17px;text-transform:none;letter-spacing:0}
+html:is([data-ui="phone"],[data-ui="tablet"]) #s-watch h3 .x{font-size:24px;min-width:44px;min-height:44px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT,html:is([data-ui="phone"],[data-ui="tablet"]) #watchT tbody{display:block;width:100%}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT tr:has(th){display:none}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT tr{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:0 8px;min-height:60px;padding:6px 4px;border-bottom:1px solid var(--line)}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td{border:0;padding:0;min-width:0}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td:first-child{font-size:17px;overflow:hidden;text-overflow:ellipsis}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td:first-child .muted{font-size:11px;margin-left:5px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td:nth-child(2){font-size:16px;font-variant-numeric:tabular-nums}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td.up,html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td.dn{justify-self:end;min-width:68px;padding:5px 8px;border-radius:6px;font-size:14px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td.up{background:color-mix(in srgb,var(--up) 18%,transparent)}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td.dn{background:color-mix(in srgb,var(--down) 18%,transparent)}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT td:last-child{display:flex}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT [data-rm],html:is([data-ui="phone"],[data-ui="tablet"]) #watchT [data-det]{display:none}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT [data-mv]{font-size:0;min-width:44px;min-height:44px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT [data-mv]::before{content:'⋯';font-size:26px;line-height:1}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT tr.wsec{display:flex;min-height:44px;background:var(--bg2,rgba(127,127,127,.08))}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT tr.wsec td:first-child{flex:1}
+html:is([data-ui="phone"],[data-ui="tablet"]) #watchT .wflag{width:14px;height:14px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #wlTabs{padding:2px 0}
+
+/* ---- toast and banners above the bottom bar ---- */
+html:is([data-ui="phone"],[data-ui="tablet"]) #toast{bottom:calc(env(safe-area-inset-bottom) + 72px);max-width:94vw;left:50%}
+html:is([data-ui="phone"],[data-ui="tablet"]) #toast div{max-width:94vw;overflow-wrap:anywhere}
+html:is([data-ui="phone"],[data-ui="tablet"]) #toast button{min-height:36px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .ct-banner{bottom:calc(env(safe-area-inset-bottom) + 66px)!important;left:8px!important;max-width:calc(100vw - 16px)}
+html:is([data-ui="phone"],[data-ui="tablet"]) #gateNote{bottom:calc(env(safe-area-inset-bottom) + 100px)!important}
+
+/* ---- context menus: on screen, 44px rows ---- */
+html:is([data-ui="phone"],[data-ui="tablet"]) .ctx{max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px)}
+html:is([data-ui="phone"],[data-ui="tablet"]) .ctx .ctx-i{min-height:44px;height:auto;padding:0 14px;white-space:normal}
+html:is([data-ui="phone"],[data-ui="tablet"]) .ctx .ctx-i .ci{min-width:24px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .ctx-h{padding-top:12px}
+
+/* ---- community: compose, post cards, chat pinned above the keyboard ---- */
+html:is([data-ui="phone"],[data-ui="tablet"]) #s-community{padding:8px;gap:8px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-compose{padding:10px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-compose textarea,html:is([data-ui="phone"],[data-ui="tablet"]) .cm-send textarea{min-height:88px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-post,html:is([data-ui="phone"],[data-ui="tablet"]) .cm-rep{padding:12px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-user{max-width:60%}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-post footer{flex-wrap:wrap}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-post footer button{min-height:40px;min-width:44px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-chips{gap:6px}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-msgs{max-height:none;min-height:0;flex:1 1 auto}
+html:is([data-ui="phone"],[data-ui="tablet"]) #s-community:has(.cm-send){overflow:hidden}
+html:is([data-ui="phone"],[data-ui="tablet"]) #s-community .cm-view:has(.cm-send){flex:1 1 auto;min-height:0}
+html:is([data-ui="phone"],[data-ui="tablet"]) .cm-send{position:sticky;bottom:0;background:var(--bg);padding:8px 0 0;border-top:1px solid var(--line);z-index:2}
+
+/* ---- dialogs and symbol search: full-screen sheets, sticky header with a close mark ---- */
+html[data-ui="phone"] dialog[open],html[data-ui="phone"] dialog.wide[open],html[data-ui="phone"] dialog.cx[open],html[data-ui="phone"] dialog.ip[open]{position:fixed;inset:0;width:100%!important;max-width:none!important;height:100dvh;max-height:none!important;margin:0;border:0;border-radius:0;padding:0 12px calc(env(safe-area-inset-bottom) + 12px);overflow:auto;box-sizing:border-box;overscroll-behavior:contain}
+html[data-ui="phone"] dialog[open]:not(.cx):not(.ip){display:block}
+html[data-ui="phone"] dialog::backdrop{background:var(--bg)}
+html[data-ui="phone"] dialog h3:first-of-type{position:sticky;top:0;z-index:5;margin:0 -12px 12px;padding:calc(env(safe-area-inset-top) + 14px) 56px 14px 12px;background:var(--panel);border-bottom:1px solid var(--line);font-size:17px}
+html[data-ui="phone"] dialog h3:first-of-type:not(:has(button))::after{content:'✕';position:absolute;right:0;top:env(safe-area-inset-top);bottom:0;width:52px;display:grid;place-items:center;font-size:20px;color:var(--muted);cursor:pointer}
+html[data-ui="phone"] dialog :is(input:not([type=checkbox],[type=radio],[type=range],[type=color],[type=file]),select,textarea){font-size:16px;min-height:44px;max-width:100%}
+html[data-ui="phone"] dialog button{min-height:44px;min-width:44px}
+html[data-ui="phone"] dialog .row{flex-wrap:wrap}
+html[data-ui="phone"] dialog form,html[data-ui="phone"] dialog .form,html[data-ui="phone"] #settingsForm,html[data-ui="phone"] .dlg-body{min-width:0;max-height:none}
+html[data-ui="phone"] .dlg-body{grid-template-columns:minmax(0,1fr)}
+html[data-ui="phone"] .vtabs{flex-direction:row;overflow-x:auto}
+html[data-ui="phone"] .vtabs button{flex:none}
+html[data-ui="phone"] dialog table{display:block;max-width:100%;overflow-x:auto}
+html[data-ui="phone"] #searchDlg #searchIn{flex:1 1 0;min-width:0}
+html[data-ui="phone"] #searchList .sl{min-height:52px}
+html[data-ui="phone"] #searchTabs{overflow-x:auto;scrollbar-width:none}
+html[data-ui="phone"] #searchTabs button{flex:none}
+html[data-ui="phone"] #tfDlg h3,html[data-ui="phone"] #gotoDlg h3{padding-top:14px}
+
+/* context menus on a phone: a bottom sheet-like popover, full width, thumb reachable (submenus stack on top of it) */
+html[data-ui="phone"] .ctx{left:8px!important;right:8px;top:auto!important;bottom:calc(env(safe-area-inset-bottom) + 8px);width:auto;max-width:none;max-height:70dvh!important;border-radius:14px;box-shadow:0 -4px 32px #0007;z-index:210}
+html[data-ui="phone"] .ctx .ctx-i:active{background:var(--accent);color:#fff}
+
+/* integration polish: no pop-out windows on touch, a full-width alert price row, uniform header buttons */
+html:is([data-ui="phone"],[data-ui="tablet"]) :is(.popbtn,.po-btn){display:none!important}
+html:is([data-ui="phone"],[data-ui="tablet"]) #alertPxRow:not([hidden]){display:flex;gap:8px}
+html:is([data-ui="phone"],[data-ui="tablet"]) #alertPxRow input{flex:1;min-width:0;width:auto}
+html:is([data-ui="phone"],[data-ui="tablet"]) #alertPxRow button{min-width:84px;background:var(--accent);border-color:var(--accent);color:#fff}
+html:is([data-ui="phone"],[data-ui="tablet"]) #s-watch h3 .x{border:0;background:none}

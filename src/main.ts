@@ -17,6 +17,9 @@ import { styleFor } from './drawings.ts';
 import { sizeOf } from './tools/basic.ts';
 import { isExpr, parse } from './symmath.ts';
 import { showMenu, type MenuItem } from './menu.ts';
+import { openSheet, sheetMenu } from './phone/sheet.ts';
+import { uiMode, uiOverride, setUiOverride, type UiMode } from './phone/mode.ts';
+import { initShell, syncShell } from './phone/shell.ts';
 import { openConnections, initConnections } from './connections.ts';
 import { exchangeOptions, groupOf } from './exchangegroups.ts'; import { searchAll, retryFailed } from './searchall.ts'; import { rank, kindLabel, toSymbol, type Kind } from './symsearch.ts';
 import { newAccount, onPrice, type Account, type Order, type OrderType, type Side } from './trading.ts';
@@ -55,9 +58,12 @@ import { SHOW_AI } from './flags.ts';
 import { registerServiceWorker } from './push.ts';
 import { rMultiple } from './journal.ts';
 import { initI18n, t as tr } from './i18n.ts';
+import { initPanelsUi } from './phone/panelsui.ts';
 import { OF_PRESETS, presetActive, presetToggle } from './orderflow/presets.ts';
 import { describePlan, parseExitPlan, resolvePlan, type ExitPlan } from './exits.ts';
 import { collectReport, installErrorLog } from './diagnostics.ts';
+import { initChartUi } from './phone/chartui.ts';
+import { initTablet } from './phone/tablet.ts';
 
 // ---------- layouts (grid arrangements) ----------
 interface Arrangement { n: number; cols: number; rows: number; areas?: string[] }
@@ -367,7 +373,23 @@ function connectTickers() {
   unsubTickers = streamTickers(syms.filter(x => !isRemote(x)), (s, t) => {
     tick24[s] = t;
     if (!panes.some(p => p.cfg.symbol === s)) handlePrice(s, t.c, Date.now() / 1000);
-    later(renderWatch);
+    later(tickWatch);
+  });
+}
+/** Ticker updates only touch the Last / Chg / Chg% cells in place (renderWatch rebuilds the whole table: janky on a long list, and a tap could hit a detached row). */
+function tickWatch() {
+  const rows = document.querySelectorAll<HTMLTableRowElement>('#watchT tr[data-sym]');
+  if (!rows.length) return renderWatch();
+  const cur = active()?.cfg.symbol;
+  rows.forEach(tr => {
+    const s = tr.dataset.sym!, t = tick24[s] ?? (lastPx[s] ? { c: lastPx[s], o: NaN } : undefined), ch = t && t.o > 0 ? ((t.c - t.o) / t.o) * 100 : null, c = tr.cells, n = c.length;
+    if (n < 4) return renderWatch();
+    const set = (td: HTMLTableCellElement, txt: string, cls?: string) => { if (td.textContent !== txt) td.textContent = txt; if (cls) td.className = cls };
+    const dir = (ch ?? 0) >= 0 ? 'up' : 'dn';
+    set(c[1], t ? t.c.toFixed(calcPrec(t.c)) : '–');
+    if (watchCols.chg) set(c[n - 3], t && ch != null ? (t.c - t.o).toFixed(calcPrec(t.c)) : '–', dir);
+    set(c[n - 2], ch == null ? '–' : ch.toFixed(2) + '%', dir);
+    tr.classList.toggle('sel', s === cur);
   });
 }
 function beep() {
@@ -476,6 +498,7 @@ const drawHost: DrawUIHost = {
 };
 setZoomOut(() => { const ts = active().chart.timeScale(), r = ts.getVisibleLogicalRange(); if (r) { const w = r.to - r.from; ts.setVisibleLogicalRange({ from: r.from - w / 2, to: r.to + w / 2 }) } });
 wireLeftToolbar(drawHost);
+initChartUi(id => setTool(drawHost, id), { get: () => active()?.cfg.type ?? 'candles', set: id => applyCfg(active(), { type: id as ChartType }, 'chart type') });
 
 // ---------- top bar ----------
 function setSymbol(raw: string) {
@@ -506,7 +529,8 @@ function syncUI() {
     if (b) { b.style.background = link || 'transparent'; b.style.borderColor = link || 'var(--muted)' }
   });
   $('#symBtn').textContent = p.cfg.symbol;
-  const tfs = [...new Set([...st.favTfs, p.cfg.tf])].sort((a, b) => tfSeconds(a) - tfSeconds(b));
+  $('#tfNow').textContent = p.cfg.tf; syncShell();
+  const tfs =[...new Set([...st.favTfs, p.cfg.tf])].sort((a, b) => tfSeconds(a) - tfSeconds(b));
   $('#tfs').innerHTML = tfs.filter(anyTf).map(t => `<button data-tf="${esc(t)}" class="${t === p.cfg.tf ? 'on' : ''}">${esc(t)}</button>`).join('');
   $('#typeBtn').textContent = CHART_TYPES.find(t => t.id === p.cfg.type)?.name ?? p.cfg.type;
   $('#layoutBtn').textContent = `⊞ ${st.layout.mode}`;
@@ -524,6 +548,16 @@ function syncUI() {
 }
 $('#symBtn').onclick = () => openSearch('');
 $('#cmpBtn').onclick = () => openSearch('', 'compare');
+// phone top bar: live price next to the symbol, and one timeframe button that opens a sheet with every interval
+$('#tfNow').onclick = () => {
+  const cur = active().cfg.tf, all = [...new Set([...TFS, ...st.customTfs])].sort((a, b) => tfSeconds(a) - tfSeconds(b));
+  const box = document.createElement('div'), grid = document.createElement('div'); grid.className = 'sheet-grid';
+  let sh: { close(): void };
+  for (const t of all) { const b = document.createElement('button'); b.className = 'sheet-i' + (t === cur ? ' on' : ''); b.textContent = t; b.title = tfLabel(t); b.onclick = () => { sh.close(); setTf(t) }; grid.append(b) }
+  const add = document.createElement('button'); add.className = 'sheet-i'; add.textContent = 'Add custom interval…';
+  add.onclick = () => { sh.close(); const t = parseTf(prompt('Interval, e.g. 45m, 3h, 2d, 2w') ?? ''); if (t) { st.customTfs = [...new Set([...st.customTfs, t])]; store.set('customTfs', st.customTfs); setTf(t) } };
+  box.append(grid, add); sh = openSheet({ title: 'Timeframe', body: box });
+};
 $('#tfs').onclick = e => { const tf = (e.target as HTMLElement).dataset.tf; if (tf) setTf(tf) };
 $('#tfMore').onclick = e => {
   const r = (e.target as HTMLElement).getBoundingClientRect(), cur = active().cfg.tf;
@@ -609,6 +643,7 @@ function shareShot(c: HTMLCanvasElement) {
 }
 function copyShot(c: HTMLCanvasElement) { c.toBlob(b => b && navigator.clipboard.write([new ClipboardItem({ 'image/png': b })]).then(() => toast('Chart image copied'), () => toast('Clipboard not available'))) }
 initI18n();
+initPanelsUi(); initTablet();
 initTour();
 installErrorLog();
 installCrashReporter(() => ({ charts: panes.length, theme: st.settings.theme, lang: document.documentElement.lang, charts_info: panes.map(p => `${p.cfg.symbol} ${p.cfg.tf} ${p.cfg.type}`).join('; ') }));
@@ -951,18 +986,27 @@ function showSide(name: string) {
   if (st.side === 'skills') renderSkills();
   if (st.side === 'community') void renderCommunity();
   if (SHOW_AI && st.side === 'ai') void refreshAi();
-  domSync();
+  domSync(); syncShell();
 }
-const phone = matchMedia('(max-width:900px)');   // phones show the side page or the chart, never both
+const phone = { get matches() { return uiMode() === 'phone' } };   // phones show the side page or the chart, never both (mode: src/phone/mode.ts)
 // Phones: the bottom bar keeps the five main pages; everything else (and the toolbar buttons hidden on a narrow screen) is under More / ☰.
 const RAIL_MORE: [string, string, string][] = [['trade', '⇅', 'Trade'], ['tree', '⧉', 'Object tree and Data window'], ['screener', '▤', 'Market'], ['dom', '≣', 'DOM / Time & Sales'], ['liqs', '💥', 'Liquidations'], ['journal', '📓', 'Journal'], ['accts', '🏦', 'Accounts'], ['skills', '🧰', 'Skills'], ['ai', '🤖', 'AI assistant']];
-$('#railMore').onclick = e => {
-  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-  showMenu(r.right - 220, r.top - 8, RAIL_MORE.filter(([id]) => { const b = document.querySelector<HTMLElement>(`#rail [data-side="${id}"]`); return !!b && !b.hidden }).map(([id, icon, label]) => ({ label, icon, checked: st.side === id, action: () => { if (st.side !== id) showSide(id) } })), 0, { left: r.left, bottom: r.top });
-};
 $('#rail').onclick = e => { const d = (e.target as HTMLElement).dataset; if (d.side) showSide(d.side); else if (d.chart !== undefined && st.side) showSide(st.side) };
 $('#bottom').classList.add('collapsed');   // positions / Pine / tester stay closed until opened (every screen size)
 $('#keysBtn').onclick = () => openKeys();
+// Phone shell (src/phone/shell.ts): own top bar + bottom tabs, driven by the same state and handlers as the desktop buttons.
+initShell({
+  quote: () => { const p = active(); if (!p) return null; const t = tick24[p.cfg.symbol], px = p.lastPrice() ?? null; return { sym: p.cfg.symbol, px, pct: t && t.o > 0 && px != null ? ((px - t.o) / t.o) * 100 : null } },
+  tf: () => active()?.cfg.tf ?? '',
+  side: () => st.side,
+  alerts: () => (serverMode ? serverAlerts().length : st.alerts.filter(a => a.on).length),
+  show: id => { if (id === 'chart') { if (st.side) showSide(st.side) } else if (st.side !== id) showSide(id) },
+  more: () => [
+    ...RAIL_MORE.filter(([id]) => { const b = document.querySelector<HTMLElement>(`#rail [data-side="${id}"]`); return !!b && !b.hidden }).map(([id, icon, label]) => ({ label, icon, checked: st.side === id, action: () => { if (st.side !== id) showSide(id) } })),
+    { sep: true }, { label: 'Positions, Pine, Tester', icon: '📈', action: () => { if (st.side) showSide(st.side); showBottom('positions') } },
+    { label: 'Screener Pro…', icon: '📊', action: openScreenerPro }, { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
+  ],
+});
 
 // ---------- watchlists ----------
 // Many named lists (src/watchlists.ts holds the pure logic). Synced key `watchLists`; the active list and the combined view
@@ -1158,7 +1202,7 @@ $('#wlTabs').ondrop = e => {
 
 function renderAlerts() {
   if (serverMode) return renderAlertsPanel();
-  $('#alertT').innerHTML = '<tr><th>Symbol</th><th>Condition</th><th>Status</th><th></th></tr>' + st.alerts.map(a =>
+  $('#alertT').innerHTML = (st.alerts.length || uiMode() === 'desktop' ? '<tr><th>Symbol</th><th>Condition</th><th>Status</th><th></th></tr>' : '<tr><td class="muted">No alerts yet. Tap the bell, or type a price above and press Add.</td></tr>') + st.alerts.map(a =>
     `<tr><td>${esc(a.sym)}</td><td>${a.note ? esc(a.note) + ' ' : ''}${a.dir === 'up' ? 'Crossing ↑' : 'Crossing ↓'} ${a.drawingId != null ? '' : a.price}</td><td class="${a.on ? '' : 'muted'}">${a.on ? 'Active' : 'Triggered'}</td>
      <td>${a.on ? '' : `<button class="x" data-re="${a.id}" title="Restart">↻</button>`}<button class="x" data-alert="${a.id}" title="Delete">×</button></td></tr>`).join('');
   $('#alertLog').innerHTML = alertLog.slice(0, 30).map(esc).join('<br>') || '—';
@@ -1541,7 +1585,7 @@ initAccountsUI();   // accounts: loads the exchange testnet accounts in server m
 
 // ---------- boot ----------
 document.documentElement.dataset.theme = st.settings.theme;
-const side = st.side; st.side = ''; if (side) showSide(side); else $('#body').classList.add('no-panel');
+const side = st.side; st.side = ''; if (side && !phone.matches) showSide(side); else $('#body').classList.add('no-panel');   // a phone always opens on the chart
 buildLayout();
 initSettingsUI();
 if (serverMode) {
@@ -1577,7 +1621,8 @@ function saveWatchLocal() { connectTickers(); renderWatch() }   // like saveWatc
 initConnections({ openMarkets: (ex, perp) => { searchEx = ex; store.set('searchEx2', ex); searchQuote = perp ? 'swap' : 'USDT'; openSearch('') } });
 $('#menuBtn').onclick = e => {
   const r = (e.currentTarget as HTMLElement).getBoundingClientRect(), click = (id: string) => () => $(id).click();
-  showMenu(r.right - 220, r.bottom + 2, [
+  (phone.matches ? (_x: number, _y: number, it: MenuItem[]) => void sheetMenu('Menu', it) : showMenu)(r.right - 220, r.bottom + 2, [
+    ...(phone.matches ? [{ head: 'General' }] : []),
     { label: 'Settings', icon: '⚙', action: click('#settingsBtn') },
     { label: 'New tab', icon: '＋', action: click('#tabAdd') },
     { label: 'Connections (live data)…', icon: '🔌', action: openConnections },
@@ -1586,11 +1631,13 @@ $('#menuBtn').onclick = e => {
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
     { label: 'Report a bug…', icon: '🐞', action: () => openBugReport({ charts: panes.length, theme: st.settings.theme, lang: document.documentElement.lang, charts_info: panes.map(p => `${p.cfg.symbol} ${p.cfg.tf} ${p.cfg.type}`).join('; ') }) },
     { label: 'Send crash logs automatically', icon: '🛟', checked: autoCrashOn(), action: () => { setAutoCrash(!autoCrashOn()); toast(autoCrashOn() ? 'Crash logs will be sent automatically (they contain no passwords or keys)' : 'Automatic crash logs are off') } },
-    ...(phone.matches ? [{ sep: true }, { head: 'Chart' }, ...([['#replayBtn', '⏪', 'Replay'], ['#ofBtn', '▦', 'Order flow'], ['#typeBtn', '🕯', 'Chart type'], ['#tplBtn', '▤', 'Templates'], ['#undoBtn', '↶', 'Undo'], ['#redoBtn', '↷', 'Redo'], ['#layoutBtn', '⊞', 'Chart layout'], ['#syncBtn', '🔗', 'Sync across charts'], ['#layoutsBtn', '💾', 'Layouts'], ['#srvBtn', '🔔', 'Server & notifications'], ['#fullBtn', '⛶', 'Fullscreen']] as const).map(([sel, icon, label]) => ({ label, icon, action: click(sel) })), { sep: true }] : []),
+    ...(phone.matches ? [{ label: 'Server & notifications', icon: '🔔', action: click('#srvBtn') }] : []),
     { label: 'Feature tour', icon: '❓', action: startTour },
     { label: 'Licences', icon: 'ⓘ', action: () => { window.open('/licenses.html', '_blank') } },
     ...(canWidget ? [{ label: 'Desktop widgets…', icon: '🧩', action: () => void widgetsMenu(r.right - 220, r.bottom + 2, { sym: active().cfg.symbol, tf: active().cfg.tf }, sortedIds(lists).map(i => ({ id: i, name: lists[i].name }))) }] : []),
     { sep: true },
+    { head: 'Interface' },
+    ...([['', 'Auto'], ['phone', 'Phone'], ['tablet', 'Tablet'], ['desktop', 'Desktop']] as [UiMode | '', string][]).map(([m, label]) => ({ label, checked: uiOverride() === m, action: () => setUiOverride(m) })),
     { head: 'Theme' },
     ...(['dark', 'light'] as const).map(t => ({ label: t === 'dark' ? 'Dark' : 'Light', checked: st.settings.theme === t, action: () => { if (st.settings.theme !== t) $('#themeBtn').click() } })),
     { head: 'Language' },

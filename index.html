@@ -15,6 +15,9 @@
 <link rel="stylesheet" href="/src/style.css">
 <link rel="stylesheet" href="/src/phone/chart.css">
 <link rel="stylesheet" href="/src/phone/panels.css">
+<link rel="stylesheet" href="/src/phone/sheet.css">
+<link rel="stylesheet" href="/src/phone/shell.css">
+<link rel="stylesheet" href="/src/phone/tablet.css">
 </head>
 <body>
 <div id="tabs"></div>
@@ -24,6 +27,7 @@
   <span class="sep"></span>
   <div id="tfs" class="seg"></div>
   <button id="tfMore" title="All intervals">▾</button>
+  <button id="tfNow" title="Timeframe" aria-label="Timeframe"></button>
   <span class="sep"></span>
   <button id="typeBtn" title="Chart type"></button>
   <button id="indBtn" title="Indicators (/)">ƒx Indicators</button>
@@ -218,7 +222,6 @@
     <button data-side="skills" title="Skills: sizing, risk, regime, screeners (rules, no AI)">🧰</button>
     <button data-side="community" data-l="Community" title="Community: share analyses, comment, follow and chat">💬</button>
     <button data-side="ai" data-feature="ai" title="AI assistant (local model): explain the chart, write Pine, review trades">🤖</button>
-    <button id="railMore" data-l="More" title="More: trade, market, journal, skills and the rest" aria-label="More">⋯</button><!-- phones only: the other pages -->
     <span class="grow"></span>
     <button id="keysBtn" title="Keyboard shortcuts (Ctrl+/)">⌨</button>
   </nav>

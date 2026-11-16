@@ -1,0 +1,26 @@
+/* bottom sheet (src/phone/sheet.ts). Phone: bottom sheet. Tablet: centred 560px card. */
+.sheet-bd{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;opacity:0;transition:opacity .18s}
+.sheet-bd.in{opacity:1}
+.sheet{width:100%;max-height:calc(100dvh - 56px - env(safe-area-inset-top));display:flex;flex-direction:column;background:var(--panel,var(--bg));color:var(--text);border-radius:14px 14px 0 0;border-top:1px solid var(--line);transform:translateY(100%);transition:transform .18s;padding-bottom:env(safe-area-inset-bottom);overscroll-behavior:contain}
+.sheet.full{height:calc(100dvh - 24px - env(safe-area-inset-top))}
+.sheet-bd.in .sheet{transform:none}
+.sheet-h{flex:none;padding:8px 16px 6px;text-align:center;touch-action:none}
+.sheet-grip{display:block;width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 8px}
+.sheet-h b{font-size:15px}
+.sheet-b{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 8px 8px}
+.sheet-i{display:flex;align-items:center;gap:12px;width:100%;min-height:48px;padding:0 12px;border:0;border-radius:8px;background:none;color:var(--text);font-size:15px;text-align:left}
+.sheet-i.on,button.sheet-i.on{color:var(--accent);font-weight:600;background:color-mix(in srgb,var(--accent) 14%,transparent);border-color:var(--accent)}
+.sheet-i:active{background:var(--line)}
+.sheet-i small{margin-left:auto;color:var(--muted);font-size:12px}
+.sheet-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.sheet-grid .sheet-i{justify-content:center;border:1px solid var(--line)}
+.sheet-sec{padding:12px 12px 4px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.sheet-ic{width:24px;text-align:center;flex:none}
+.sheet-ic svg{width:20px;height:20px;vertical-align:middle}
+.sheet-i:disabled{opacity:.4}
+html.fa .sheet{direction:rtl}html.fa .sheet-i{text-align:right}html.fa .sheet-i small{margin-left:0;margin-right:auto}
+html[data-ui=tablet] .sheet-bd{align-items:center;justify-content:center}
+html[data-ui=tablet] .sheet{width:560px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 48px);border-radius:14px;border:1px solid var(--line);transform:translateY(24px);padding-bottom:0}
+html[data-ui=tablet] .sheet.full{height:calc(100dvh - 48px)}
+html[data-ui=tablet] .sheet-grip{display:none}
+@media (prefers-reduced-motion:reduce){.sheet,.sheet-bd{transition:none}}
