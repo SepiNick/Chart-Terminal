@@ -39,7 +39,7 @@ function baseOf(tf: string): { base: string; n: number } {
   return { base, n: sec / tfSeconds(base) };
 }
 // Weeks are anchored to Monday (epoch day 0 was a Thursday), like exchange weekly candles.
-const bucket = (t: number, sec: number, weekAnchor = 345600) => { const a = sec % 604800 === 0 ? weekAnchor : 0; return Math.floor((t - a) / sec) * sec + a };
+export const bucket = (t: number, sec: number, weekAnchor = 345600) => { const a = sec % 604800 === 0 ? weekAnchor : 0; return Math.floor((t - a) / sec) * sec + a };
 /** `weekAnchor`: where week buckets start; Monday by default, Saturday for Iranian markets. */
 export function aggregate(bars: Bar[], sec: number, weekAnchor?: number): Bar[] {
   const out: Bar[] = [];
@@ -174,8 +174,12 @@ export async function fetch24h(): Promise<Ticker24[]> {
 }
 
 export interface RemoteMarket { sym: string; base: string; quote: string; type: string; name?: string }
-export const fetchExchanges = () => serverJson<{ id: string; name: string }[]>('/api/exchanges');
-export const fetchMarkets = (exchange: string) => serverJson<RemoteMarket[]>(`/api/markets?exchange=${encodeURIComponent(exchange)}`);
+/** Android standalone app only (src/providers/ccxthook.ts): the exchange and market lists come from the in-app CCXT instead of the server. */
+export interface AppSource { active: () => boolean; exchanges: () => Promise<{ id: string; name: string }[]>; markets: (exchange: string) => Promise<RemoteMarket[]> }
+let appSource: AppSource | null = null;
+export const setAppSource = (s: AppSource) => { appSource = s };
+export const fetchExchanges = () => appSource?.active() ? appSource.exchanges() : serverJson<{ id: string; name: string }[]>('/api/exchanges');
+export const fetchMarkets = (exchange: string) => appSource?.active() ? appSource.markets(exchange) : serverJson<RemoteMarket[]>(`/api/markets?exchange=${encodeURIComponent(exchange)}`);
 
 export async function fetchSymbols(): Promise<string[]> {
   const all = await (await fetch(`${API}/ticker/price`)).json();

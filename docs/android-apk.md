@@ -60,6 +60,12 @@ cd android && gradlew.bat assembleRelease    # app/build/outputs/apk/release/Cha
 
 امضای release از `android/keystore.properties` و `android/chartterminal.jks` خوانده می‌شود؛ هر دو در `.gitignore` هستند: **هرگز commit نکنید** و پشتیبان امن نگه دارید (بدون آن‌ها نمی‌توانید به‌روزرسانی با همان امضا بدهید). ساخت keystore تازه: `keytool -genkeypair -v -keystore chartterminal.jks -alias chartterminal -keyalg RSA -keysize 2048 -validity 10000`.
 
+## CCXT مرورگری (فقط اندروید)
+
+حالت محلی می‌تواند از طریق CCXT که داخل WebView اجرا می‌شود با صرافی‌هایی غیر از Binance هم کار کند. بسته‌ها را `npm run build:ccxt` (`scripts/build-ccxt-lite.mjs`، با `ccxt` و `esbuild` قفل‌شده در devDependencies) در `dist-ccxt/` (خارج از git) می‌سازد و `npm run build:android` آن‌ها را به‌صورت `ccxt/lite.js` (۳۷ صرافی منتخب (همه‌ی پیش‌فرض‌ها و همه‌ی ارائه‌دهنده‌های CCXT کاتالوگ)، ~۳٫۷ مگابایت خام / ~۷۴۰ کیلوبایت gzip. توجه: Hyperliquid فعلاً از فهرست پیش‌فرض کنار گذاشته شده است چون پروکسی بومی بدنه‌ی POST را عبور نمی‌دهد) و `ccxt/full.js` (همه‌ی صرافی‌های ccxt قفل‌شده، ~۶٫۱ مگابایت / ~۱٫۲ مگابایت gzip، برای مسیر «افزودن صرافی») داخل APK می‌گذارد. این فایل‌ها هرگز در `dist/` وب/دسکتاپ نیستند: اسکریپت فقط هنگام اجرای Gradle آن‌ها را در `dist/ccxt/` می‌گذارد و بعد پاک می‌کند. پس `gradlew assembleRelease` دستی بدون CCXT است، مگر اینکه پیش از آن `node scripts/build-ccxt-lite.mjs` را بزنید و `dist-ccxt` را در `dist/ccxt` کپی کنید.
+
+قرارداد: اپ ابتدا `ccxt/lite.js` (اسکریپت کلاسیک ساده) را از `https://appassets.androidplatform.net/ccxt/` می‌خواند؛ این فایل `globalThis.ccxtLite = { <id>: ExchangeClass, ..., ids: [<id>, ...] }` را تعریف می‌کند. فقط وقتی شناسه‌ای آن‌جا نباشد (مثلاً «Add exchange») `ccxt/full.js` بارگذاری می‌شود که `globalThis.ccxtLite` را با یک ابرمجموعه‌ی هم‌شکل جایگزین می‌کند (`ccxtFull` جداگانه‌ای وجود ندارد)؛ «Add exchange» شناسه را پیش از ذخیره با `ccxtLite.ids` می‌سنجد. نمونه‌سازی: `new ccxtLite.binance({ enableRateLimit: true })`. شناسه‌هایی که نسخه‌ی قفل‌شده‌ی ccxt ندارد از بسته حذف می‌شوند (فعلاً هیچ)؛ `ccxtLite.ids` را ببینید. تست همچنین بررسی می‌کند که همه‌ی `DEFAULT_EXCHANGES` و همه‌ی شناسه‌های `ccxt` کاتالوگ در lite باشند. تست: `node --test scripts/build-ccxt-lite.test.mjs` (جزو `npm test`).
+
 ## نصب روی گوشی
 
 نصب از منبع ناشناس را برای مرورگر یا مدیر فایل مجاز کنید و APK را باز کنید، یا با USB debugging: `adb install -r Chart-Terminal-<نسخه>-android.apk`.

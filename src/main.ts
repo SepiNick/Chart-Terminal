@@ -49,6 +49,7 @@ import { MSG, COLORS, COLOR_NAMES, addSymbol, checkBytes, combinedRows, createLi
 import { initAccountsUI, renderAccounts } from './broker/ui.ts';   // accounts
 import { chartEvents, initMarket, renderDetails, renderMarket } from './market/ui.ts';
 import './market/domhook.ts';
+import { appActive, changeExchange } from './providers/ccxthook.ts';
 import { APPROX_NOTE, DOM_SYMS, asDomSym, isDomSym, isShare } from './market/dominance.ts';
 import { autoAnalyze, clearAuto, higherTf, htfLevels } from './ai/ui.ts';
 import { initSkills, renderSkills } from './skills/ui.ts';
@@ -799,8 +800,13 @@ function renderAll(q: string, row: (s: string, d: string, i: number) => string) 
   });
   const desc = (e: (typeof r.list)[number]) => e.ex === 'cryptocap' ? domDesc(e.sym) : `${e.name ?? `${e.base} / ${e.quote}`} · ${kindLabel(e)} · ${e.ex}`;
   const s0 = r.list.map(toSymbol), at = keep ? s0.indexOf(keep) : -1;
-  const note = [isStandalone() ? 'Connect a data server to search other exchanges and perpetuals' : '', r.loading ? `Searching ${r.loading} more sources…` : '', r.failed ? `${r.failed} sources unavailable` : ''].filter(Boolean);
-  out.innerHTML = (r.list.map((e, i) => row(s0[i], desc(e), i === Math.max(at, 0) ? 0 : 1)).join('') || '<div class="muted sl-h">No matches</div>') + note.map(n => `<div class="muted sl-h">${esc(n)}</div>`).join('');
+  const note = [isStandalone() && !appActive() ? 'Connect a data server to search other exchanges and perpetuals' : '', r.loading ? `Searching ${r.loading} more sources…` : '', r.failed ? `${r.failed} sources unavailable` : ''].filter(Boolean);
+  out.innerHTML = (r.list.map((e, i) => row(s0[i], desc(e), i === Math.max(at, 0) ? 0 : 1)).join('') || '<div class="muted sl-h">No matches</div>') + note.map(n => `<div class="muted sl-h">${esc(n)}</div>`).join('') + addExHtml();
+}
+const addExHtml = () => appActive() ? '<div class="muted sl-h" data-addex style="cursor:pointer">+ Add exchange… (or remove one with a leading -)</div>' : '';
+async function addExchange() {
+  const v = prompt('Exchange id to add, e.g. bitso (a leading - removes it)')?.trim(); if (!v) return;
+  try { toast(await changeExchange(v)); exchangesLoaded = false; marketCache.delete(v.replace(/^-/, '').toLowerCase()); await loadExchanges(); renderSearch() } catch (e) { toast((e as Error).message, 5000) }
 }
 async function renderSearch() {
   const q = $<HTMLInputElement>('#searchIn').value.trim().toUpperCase();
@@ -828,6 +834,7 @@ async function renderSearch() {
     const premium = searchEx === 'nobitex' && (!q || 'PREMIUM'.includes(q) || 'TETHER'.includes(q) || 'USDT'.includes(q)) ? row('NOBITEX:USDTIRT/TGJU:USD-1', 'Tether premium over the free-market dollar · expression · use 1D', list.length ? 1 : 0) : '';
     const desc = (m: RemoteMarket) => (searchEx === 'cryptocap' ? domDesc(m.sym) : `${m.name ?? `${m.base} / ${m.quote}`} · ${m.type} · ${searchEx}`);
     $('#searchList').innerHTML = (list.map((m, i) => row(`${EX}:${m.sym}`, desc(m), i)).join('') + extra + tseExtra + premium) || '<div class="muted sl-h">No matches</div>';
+    if (appActive()) $('#searchList').insertAdjacentHTML('beforeend', addExHtml());
     return;
   }
   const quotes = ['USDT', 'USDC', 'FDUSD', 'BTC', 'ETH', 'TRY', 'EUR'];
@@ -863,7 +870,7 @@ $('#searchIn').onkeydown = e => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const j = Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))); rows.forEach((r, k) => r.classList.toggle('sel', k === j)); rows[j]?.scrollIntoView({ block: 'nearest' }) }
   if (e.key === 'Enter') { e.preventDefault(); const s = rows[i]?.dataset.s ?? $<HTMLInputElement>('#searchIn').value; if (s) pickSymbol(s) }
 };
-$('#searchList').onclick = e => { const s = (e.target as HTMLElement).closest<HTMLElement>('[data-s]')?.dataset.s; if (s) pickSymbol(s) };
+$('#searchList').onclick = e => { if ((e.target as HTMLElement).closest('[data-addex]')) return void addExchange(); const s = (e.target as HTMLElement).closest<HTMLElement>('[data-s]')?.dataset.s; if (s) pickSymbol(s) };
 $('#searchTabs').onclick = e => { const q = (e.target as HTMLElement).dataset.q; if (q) { searchQuote = q; renderSearch() } };
 
 // ---------- interval dialog (type a number on the chart) ----------

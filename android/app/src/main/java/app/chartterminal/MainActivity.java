@@ -42,7 +42,8 @@ import java.util.regex.Pattern;
 /**
  * One app, two modes (the last used one is restored at start):
  *  LOCAL  - the built web app (assets/www) is served from https://appassets.androidplatform.net by shouldInterceptRequest;
- *           no server, market data straight from Binance only.
+ *           no server, live data straight from Binance (REST and WebSocket); public REST of the other mainstream exchanges
+ *           goes through ExchangeProxy (fixed host allowlist, GET only), which is what makes ccxt-style markets/OHLCV/ticker work.
  *  SERVER - the WebView loads the chosen server's origin directly (same-origin cookies, WebSocket): every exchange/broker the server has.
  * Navigation never leaves the current origin (other links open in the system browser). window.CTNative is exposed only
  * to the asset origin and the saved server origin.
@@ -342,7 +343,8 @@ public class MainActivity extends Activity {
             String sch = u.getScheme(), host = u.getHost();
             if (local) {
                 if (HOST.equals(host)) return serve(r);
-                if (isAllowedHost(sch, host)) return null;      // Binance public data: straight to the network
+                if (isAllowedHost(sch, host)) return null;      // Binance public data: straight to the network (checked first)
+                if (ExchangeProxy.handles(sch, host)) return ExchangeProxy.serve(r);   // other exchanges' public REST: native proxy (no CORS)
                 return text(403, "Blocked");
             }
             if (HOST.equals(host) || ("http".equals(sch) && !isPrivateHost(host)) || "ws".equals(sch) && !isPrivateHost(host)) return text(403, "Blocked");

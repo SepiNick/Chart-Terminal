@@ -60,6 +60,12 @@ The Gradle task `syncWebAssets` copies `dist/` into `android/app/src/main/assets
 
 The release signature comes from `android/keystore.properties` and `android/chartterminal.jks`, both in `.gitignore`: **never commit them** and keep a safe backup (without them you cannot ship an update with the same signature). New keystore: `keytool -genkeypair -v -keystore chartterminal.jks -alias chartterminal -keyalg RSA -keysize 2048 -validity 10000`.
 
+## Browser CCXT (Android only)
+
+Local mode can talk to exchanges other than Binance through CCXT running inside the WebView. The bundles are built by `npm run build:ccxt` (`scripts/build-ccxt-lite.mjs`, pinned `ccxt` + `esbuild` devDependencies) into `dist-ccxt/` (git-ignored) and `npm run build:android` stages them in the APK as `ccxt/lite.js` (37 curated exchanges: every default exchange and every CCXT-routed provider of the catalog, ~3.7 MB raw / ~740 KB gzip; note: Hyperliquid is left out of the default list for now because the native proxy does not forward POST bodies, and its API is POST-only) and `ccxt/full.js` (every exchange the pinned ccxt ships, 103, ~6.1 MB / ~1.2 MB gzip, for the "Add exchange" path). They are never in the web/desktop `dist/`: the script copies them into `dist/ccxt/` only while Gradle runs and removes them afterwards. A manual `gradlew assembleRelease` therefore has no CCXT unless you run `node scripts/build-ccxt-lite.mjs` and copy `dist-ccxt` to `dist/ccxt` first.
+
+Contract: the app loads `ccxt/lite.js` first (plain classic script) from `https://appassets.androidplatform.net/ccxt/`; it defines `globalThis.ccxtLite = { <id>: ExchangeClass, ..., ids: [<id>, ...] }`. Only when an id is missing there (for example "Add exchange") it loads `ccxt/full.js`, which replaces `globalThis.ccxtLite` with a superset of the same shape (no separate `ccxtFull`); "Add exchange" checks the id against `ccxtLite.ids` before storing it. Instantiate with `new ccxtLite.binance({ enableRateLimit: true })`. Ids that the pinned ccxt version does not ship are dropped from the bundle (currently none); check `ccxtLite.ids`. The test also asserts that every `DEFAULT_EXCHANGES` id and every catalog `ccxt` id is in lite. Test: `node --test scripts/build-ccxt-lite.test.mjs` (part of `npm test`).
+
 ## Installing on the phone
 
 Allow installing from unknown sources for the browser or file manager and open the APK, or with USB debugging `adb install -r Chart-Terminal-<version>-android.apk`.

@@ -10,6 +10,7 @@ desktop/build/
 mt5bridge/token.txt
 __pycache__/
 dist-lite/
+dist-ccxt/
 
 android/keystore.properties
 android/*.jks

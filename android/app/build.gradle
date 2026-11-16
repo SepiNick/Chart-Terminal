@@ -39,6 +39,8 @@ android {
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 
+dependencies { testImplementation "junit:junit:4.13.2" }
+
 // One app: the built web app (npm run build -> ../dist) is bundled into assets/www for the local mode (no server, Binance only).
 def www = layout.projectDirectory.dir("src/main/assets/www")
 tasks.register("syncWebAssets", Sync) {
