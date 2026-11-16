@@ -4,6 +4,11 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
+import android.widget.FrameLayout;
+import android.view.WindowInsets;
+import android.view.View;
+import android.os.Build;
+import android.graphics.Insets;
 import android.os.Bundle;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -100,6 +105,31 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** targetSdk 35 draws edge-to-edge: keep the page clear of the status bar, the navigation/gesture bar, the cut-out and the keyboard. */
+    @SuppressWarnings("deprecation")
+    static void fitSystemBars(View root) {
+        root.setOnApplyWindowInsetsListener((v, i) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                Insets s = i.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()), k = i.getInsets(WindowInsets.Type.ime());
+                v.setPadding(s.left, s.top, s.right, Math.max(s.bottom, k.bottom));
+                return WindowInsets.CONSUMED;
+            }
+            v.setPadding(i.getSystemWindowInsetLeft(), i.getSystemWindowInsetTop(), i.getSystemWindowInsetRight(), i.getSystemWindowInsetBottom());
+            return i.consumeSystemWindowInsets();
+        });
+        root.requestApplyInsets();
+    }
+
+    /** One fixed page scale: no pinch zoom, no font scaling, no wide-viewport guessing, so the layout never jumps between sizes. */
+    static void fixScale(WebSettings s) {
+        s.setSupportZoom(false);
+        s.setBuiltInZoomControls(false);
+        s.setDisplayZoomControls(false);
+        s.setTextZoom(100);
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(false);
+    }
+
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         web = new WebView(this);
@@ -109,6 +139,7 @@ public class MainActivity extends Activity {
         s.setDomStorageEnabled(true);                           // localStorage + IndexedDB persist in the app's data
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
+        fixScale(s);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
@@ -137,10 +168,11 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-        // targetSdk 35 draws edge-to-edge: pad the page by the status/navigation bars (and the keyboard) so nothing sits under them.
-        web.setOnApplyWindowInsetsListener((v, i) -> { v.setPadding(i.getSystemWindowInsetLeft(), i.getSystemWindowInsetTop(), i.getSystemWindowInsetRight(), i.getSystemWindowInsetBottom()); return i; });
         getWindow().getDecorView().setBackgroundColor(Color.parseColor("#131722"));
-        setContentView(web);
+        FrameLayout root = new FrameLayout(this);
+        root.addView(web, new FrameLayout.LayoutParams(-1, -1));
+        fitSystemBars(root);
+        setContentView(root);
         if (b != null) web.restoreState(b); else web.loadUrl(HOME);
     }
 

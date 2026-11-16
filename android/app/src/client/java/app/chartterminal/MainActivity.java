@@ -6,6 +6,9 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
+import android.view.WindowInsets;
+import android.os.Build;
+import android.graphics.Insets;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -60,6 +63,31 @@ public class MainActivity extends Activity {
         + "function S(u,p){var a=new URL(u,location.href);if(a.protocol!=='wss:'&&a.protocol!=='https:'&&!re.test(a.hostname))"
         + "throw new DOMException('blocked','SecurityError');return p===undefined?new W(u):new W(u,p)}"
         + "S.prototype=W.prototype;['CONNECTING','OPEN','CLOSING','CLOSED'].forEach(function(k){S[k]=W[k]});window.WebSocket=S})()";
+
+    /** targetSdk 35 draws edge-to-edge: keep the page clear of the status bar, the navigation/gesture bar, the cut-out and the keyboard. */
+    @SuppressWarnings("deprecation")
+    static void fitSystemBars(View root) {
+        root.setOnApplyWindowInsetsListener((v, i) -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                Insets s = i.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()), k = i.getInsets(WindowInsets.Type.ime());
+                v.setPadding(s.left, s.top, s.right, Math.max(s.bottom, k.bottom));
+                return WindowInsets.CONSUMED;
+            }
+            v.setPadding(i.getSystemWindowInsetLeft(), i.getSystemWindowInsetTop(), i.getSystemWindowInsetRight(), i.getSystemWindowInsetBottom());
+            return i.consumeSystemWindowInsets();
+        });
+        root.requestApplyInsets();
+    }
+
+    /** One fixed page scale: no pinch zoom, no font scaling, no wide-viewport guessing, so the layout never jumps between sizes. */
+    static void fixScale(WebSettings s) {
+        s.setSupportZoom(false);
+        s.setBuiltInZoomControls(false);
+        s.setDisplayZoomControls(false);
+        s.setTextZoom(100);
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(false);
+    }
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -151,6 +179,7 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(false);
+        fixScale(s);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         CookieManager.getInstance().setAcceptCookie(true);
         web.setWebViewClient(new WebViewClient() {
@@ -183,7 +212,7 @@ public class MainActivity extends Activity {
         corner.setOnLongClickListener(v -> { showMenu(); return true; });
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
         root.addView(corner, new FrameLayout.LayoutParams(120, 120, Gravity.TOP | Gravity.END));
-        root.setOnApplyWindowInsetsListener((v, i) -> { v.setPadding(i.getSystemWindowInsetLeft(), i.getSystemWindowInsetTop(), i.getSystemWindowInsetRight(), i.getSystemWindowInsetBottom()); return i; });   // edge-to-edge (targetSdk 35)
+        fitSystemBars(root);
         getWindow().getDecorView().setBackgroundColor(Color.parseColor("#131722"));
         setContentView(root);
         web.loadUrl(origin);
