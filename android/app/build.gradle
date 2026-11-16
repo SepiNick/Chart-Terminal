@@ -33,7 +33,8 @@ android {
         }
     }
     buildTypes {
-        debug { if (ksFile.exists()) signingConfig signingConfigs.release }   // same key as release, so debug installs update in place and keep app data
+        // Debug builds (WebView debugging on) are a separate app next to the real one: own id, own data, the default debug key; they can never replace or read the release app.
+        debug { applicationIdSuffix '.debug' }
         release {
             minifyEnabled true
             shrinkResources true
