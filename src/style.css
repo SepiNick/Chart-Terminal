@@ -485,3 +485,29 @@ button.cm-dir.on.long{background:var(--up);color:#fff}button.cm-dir.on.short{bac
 .cm-send{align-items:flex-end}.cm-send textarea{flex:1}.cm-err{color:var(--down)}.cm-empty,.cm-gate{text-align:center;padding:12px}.cm-stats{display:flex;gap:12px}
 #cmMore{text-align:center}#cmNew{align-self:center}
 @media (max-width:900px){#s-community button,#s-community select{min-height:36px}#s-community input,#s-community textarea{font-size:16px}.cm-msgs{max-height:none;flex:1}}
+
+/* ---- phone layout, in the spirit of the TradingView mobile app: one clean top row, the chart as large as possible, a labelled bottom bar ---- */
+@media (max-width:900px){
+  /* top: symbol, timeframe strip, indicators, alert, menu. Everything else lives under ☰ (see main.ts) */
+  #tabs:not(:has(.tab:nth-of-type(2))){display:none}
+  #top{flex-wrap:nowrap;overflow-x:auto;gap:6px;padding:6px 8px;scrollbar-width:none}#top::-webkit-scrollbar{display:none}
+  #top > *{flex:0 0 auto}
+  #top :is(#cmpBtn,#typeBtn,#tplBtn,#replayBtn,#ofBtn,#undoBtn,#redoBtn,#layoutBtn,#syncBtn,#layoutsBtn,#srvBtn,#fullBtn,#monBtn,.sep,.grow){display:none}
+  #top #symBtn{max-width:36vw;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+  #top #tfs{display:flex;gap:2px}
+  #top button{min-height:38px;padding:0 10px}
+  #indBtn,#alertBtn{font-size:0}#indBtn::before{content:'ƒx';font-size:16px}#alertBtn::before{content:'⏰';font-size:16px}
+  #menuBtn{margin-left:auto;font-size:20px;min-width:42px}
+  /* chart: no quick buy/sell over the legend, the time-range strip stays small */
+  .cell .quick{display:none}
+  /* bottom bar: Chart, Watchlist, Alerts, Community, More */
+  #rail{justify-content:space-around;gap:0;padding:0;overflow:visible}
+  #rail > *{display:none!important}
+  #rail > :is([data-chart],[data-side=watch],[data-side=alerts],[data-side=community],#railMore){display:flex!important}
+  #rail button{flex:1 1 0;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:54px;border-radius:0;font-size:20px;line-height:1;background:none;border:0;color:var(--muted)}
+  #rail button::after{content:attr(data-l);font-size:11px;font-weight:500}
+  #rail button.on,#body.no-panel #rail [data-chart]{color:var(--accent);background:none}
+  #body:not(.no-panel) #rail [data-chart]{color:var(--muted)}
+  #rail [data-chart]{display:flex!important}
+}
+@media (min-width:901px){#railMore{display:none}}

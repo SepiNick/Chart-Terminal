@@ -954,6 +954,12 @@ function showSide(name: string) {
   domSync();
 }
 const phone = matchMedia('(max-width:900px)');   // phones show the side page or the chart, never both
+// Phones: the bottom bar keeps the five main pages; everything else (and the toolbar buttons hidden on a narrow screen) is under More / ☰.
+const RAIL_MORE: [string, string, string][] = [['trade', '⇅', 'Trade'], ['tree', '⧉', 'Object tree and Data window'], ['screener', '▤', 'Market'], ['dom', '≣', 'DOM / Time & Sales'], ['liqs', '💥', 'Liquidations'], ['journal', '📓', 'Journal'], ['accts', '🏦', 'Accounts'], ['skills', '🧰', 'Skills'], ['ai', '🤖', 'AI assistant']];
+$('#railMore').onclick = e => {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  showMenu(r.right - 220, r.top - 8, RAIL_MORE.filter(([id]) => { const b = document.querySelector<HTMLElement>(`#rail [data-side="${id}"]`); return !!b && !b.hidden }).map(([id, icon, label]) => ({ label, icon, checked: st.side === id, action: () => { if (st.side !== id) showSide(id) } })), 0, { left: r.left, bottom: r.top });
+};
 $('#rail').onclick = e => { const d = (e.target as HTMLElement).dataset; if (d.side) showSide(d.side); else if (d.chart !== undefined && st.side) showSide(st.side) };
 $('#bottom').classList.add('collapsed');   // positions / Pine / tester stay closed until opened (every screen size)
 $('#keysBtn').onclick = () => openKeys();
@@ -1580,6 +1586,7 @@ $('#menuBtn').onclick = e => {
     { label: 'Multi-monitor…', icon: '🖥', action: click('#monBtn') },
     { label: 'Report a bug…', icon: '🐞', action: () => openBugReport({ charts: panes.length, theme: st.settings.theme, lang: document.documentElement.lang, charts_info: panes.map(p => `${p.cfg.symbol} ${p.cfg.tf} ${p.cfg.type}`).join('; ') }) },
     { label: 'Send crash logs automatically', icon: '🛟', checked: autoCrashOn(), action: () => { setAutoCrash(!autoCrashOn()); toast(autoCrashOn() ? 'Crash logs will be sent automatically (they contain no passwords or keys)' : 'Automatic crash logs are off') } },
+    ...(phone.matches ? [{ sep: true }, { head: 'Chart' }, ...([['#replayBtn', '⏪', 'Replay'], ['#ofBtn', '▦', 'Order flow'], ['#typeBtn', '🕯', 'Chart type'], ['#tplBtn', '▤', 'Templates'], ['#undoBtn', '↶', 'Undo'], ['#redoBtn', '↷', 'Redo'], ['#layoutBtn', '⊞', 'Chart layout'], ['#syncBtn', '🔗', 'Sync across charts'], ['#layoutsBtn', '💾', 'Layouts'], ['#srvBtn', '🔔', 'Server & notifications'], ['#fullBtn', '⛶', 'Fullscreen']] as const).map(([sel, icon, label]) => ({ label, icon, action: click(sel) })), { sep: true }] : []),
     { label: 'Feature tour', icon: '❓', action: startTour },
     { label: 'Licences', icon: 'ⓘ', action: () => { window.open('/licenses.html', '_blank') } },
     ...(canWidget ? [{ label: 'Desktop widgets…', icon: '🧩', action: () => void widgetsMenu(r.right - 220, r.bottom + 2, { sym: active().cfg.symbol, tf: active().cfg.tf }, sortedIds(lists).map(i => ({ id: i, name: lists[i].name }))) }] : []),
