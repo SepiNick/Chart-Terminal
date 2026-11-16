@@ -305,19 +305,25 @@ export async function setPassword(userId: number, pw: string, o: { mustChange?: 
   revokeUserSessions(userId);   // a new password signs every device out
 }
 /** Reset with a recovery code. Same throttle as login; an unknown name costs the same work and gets the same answer. */
-export async function recover(b: { name?: unknown; code?: unknown; newPassword?: unknown }, req: IncomingMessage): Promise<{ user: User; recoveryCodes: string[] }> {
+export async function recover(b: { name?: unknown; code?: unknown; newPassword?: unknown }, req: IncomingMessage, hold?: (u: User) => boolean): Promise<{ user: User; recoveryCodes?: string[]; finish?: () => { recoveryCodes: string[] } }> {
   const ip = clientIp(req), name = typeof b.name === 'string' ? b.name.trim().toLowerCase().slice(0, 64) : '';
   const slot = reserve(ip, name);
   if (slot.delay) await new Promise(r => setTimeout(r, slot.delay));
   const pw = checkNewPassword(b.newPassword, name), hash = await hashPassword(pw);
   const row = byName(name), code = typeof b.code === 'string' ? b.code.slice(0, 64) : '';
-  const ok = !!row && row.status === 'active' && db.prepare('UPDATE recovery_codes SET used = 1 WHERE user_id = ? AND code_hash = ? AND used = 0').run(row.id, codeKey(code)).changes === 1;
+  const ok = !!row && row.status === 'active' && !!db.prepare('SELECT 1 FROM recovery_codes WHERE user_id = ? AND code_hash = ? AND used = 0').get(row.id, codeKey(code));
   if (!ok || !row) { audit(row?.id ?? null, ip, 'recover fail'); throw new HttpError(401, 'Wrong username or recovery code') }
   slot.success();
-  db.prepare('UPDATE users SET pw = ?, must_change = 0, has_pw = 1 WHERE id = ?').run(hash, row.id);   // the recovery codes are the way back for someone who lost their Google/Apple account
-  revokeUserSessions(row.id);
-  audit(row.id, ip, 'recover');
-  return { user: toUser(row), recoveryCodes: newRecoveryCodes(row.id) };
+  const user = toUser(row);
+  // Spend the code, set the password, end every session, issue new codes. Nothing of this happens before `hold` (the 2FA step) says it may.
+  const finish = () => {
+    if (db.prepare('UPDATE recovery_codes SET used = 1 WHERE user_id = ? AND code_hash = ? AND used = 0').run(row.id, codeKey(code)).changes !== 1) throw new HttpError(401, 'Wrong username or recovery code');
+    db.prepare('UPDATE users SET pw = ?, must_change = 0, has_pw = 1 WHERE id = ?').run(hash, row.id);   // the recovery codes are the way back for someone who lost their Google/Apple account
+    revokeUserSessions(row.id);
+    audit(row.id, ip, 'recover');
+    return { recoveryCodes: newRecoveryCodes(row.id) };
+  };
+  return hold?.(user) ? { user, finish } : { user, ...finish() };
 }
 
 // ---------- administration (CLI and /api/admin) ----------

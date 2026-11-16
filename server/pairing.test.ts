@@ -65,6 +65,16 @@ test('a code expires after 5 minutes; at most 5 are pending per user (the oldest
   assert.equal((await redeem(codes[1])).status, 200);
 });
 
+test('a code dies with the session that started it', async () => {
+  const second = (await call('POST', '/api/auth/login', { body: { password: PW, device: 'tablet' } })).body.token as string;
+  const p = (await call('POST', '/api/auth/pair/start', { token: second })).body;
+  const keep = (await call('POST', '/api/auth/pair/start', { token: second })).body;
+  const id = ((await call('GET', '/api/auth/devices', { token })).body as { id: string; label: string }[]).find(d => d.label === 'tablet')!.id;
+  assert.equal((await call('DELETE', `/api/auth/devices/${id}`, { token })).status, 204);
+  assert.equal((await redeem(p.code)).status, 401, 'its starting session is gone');
+  assert.equal((await redeem(keep.code)).status, 401, 'every code of that session is gone');
+});
+
 test('wrong codes are limited per address: after a few failures even a valid code is refused (429)', async () => {
   const good = await start();
   let last = 0;

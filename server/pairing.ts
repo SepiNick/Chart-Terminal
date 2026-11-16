@@ -7,7 +7,7 @@
 // ordinary device token: it shows in GET /api/auth/devices and DELETE /api/auth/devices/:id signs it out.
 import { createHash, randomInt } from 'node:crypto';
 import { HttpError, route, type Ctx } from './core/http.ts';
-import { clientIp, createDevice } from './core/auth.ts';
+import { clientIp, createDevice, userOfToken } from './core/auth.ts';
 import { HOST, SERVER_NAME, isPublic, publicUrl } from './core/mode.ts';
 import type { User } from './core/userdb.ts';
 import { qrCapacity, qrSvg } from './core/qrsvg.ts';
@@ -17,8 +17,8 @@ import { deviceLabel } from './twofa.ts';
 
 const U = isPublic ? await import('./core/users.ts') : null;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', TTL = 5 * 60_000, MAX_PENDING = 5;
-interface Pending { user: User; exp: number }
-const pending = new Map<string, Pending>();   // sha256(code) → who started it
+interface Pending { user: User; exp: number; session: string }
+const pending = new Map<string, Pending>();   // sha256(code) → who started it, and from which session (memory only)
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
 const norm = (s: unknown) => (typeof s === 'string' ? s.toUpperCase().replace(/[\s-]/g, '') : '');
 const gate = failGate(8, 10 * 60_000, 10 * 60_000);
@@ -50,7 +50,7 @@ route('POST', '/api/auth/pair/start', c => {
   const mine = [...pending].filter(([, v]) => v.user.id === c.user.id);
   while (mine.length >= MAX_PENDING) pending.delete(mine.shift()![0]);   // Map keeps insertion order: the oldest goes
   const code = Array.from({ length: 10 }, () => ALPHABET[randomInt(32)]).join(''), exp = Date.now() + TTL, urls = urlsFor(c);
-  pending.set(sha(code), { user: { id: c.user.id, name: c.user.name, role: c.user.role }, exp });
+  pending.set(sha(code), { user: { id: c.user.id, name: c.user.name, role: c.user.role }, exp, session: c.session! });
   U?.audit(c.user.id, clientIp(c.req), 'pair start');
   const payload = payloadFor(code, SERVER_NAME, urls);
   return { code, expires: exp, url: urls[0], urls, qrSvg: qrSvg(payload), payload };
@@ -61,7 +61,8 @@ route('POST', '/api/auth/pair/redeem', c => {
   const label = deviceLabel(c, true), ip = addrKey(clientIp(c.req)), wait = gate.wait(ip);
   if (wait) throw Object.assign(new HttpError(429, `Too many attempts. Try again in ${wait} s`), { retryAfter: wait });
   const key = sha(norm(b.code)), p = pending.get(key);
-  if (!p || p.exp < Date.now() || (U && !U.isActive(p.user.id))) {
+  // The session that started the code must still exist: logging out, signing the device out, a password change or a recovery kills the code with it.
+  if (!p || p.exp < Date.now() || userOfToken(p.session)?.id !== p.user.id || (U && !U.isActive(p.user.id))) {
     gate.fail(ip); pending.delete(key); U?.audit(null, clientIp(c.req), 'pair redeem fail');
     throw new HttpError(401, 'Invalid or expired pairing code');
   }

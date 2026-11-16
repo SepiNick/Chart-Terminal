@@ -110,7 +110,7 @@ async function confirm(c: Ctx, pw: unknown): Promise<boolean> {
 }
 
 // ---------- tickets (password step done, second step pending) ----------
-interface Ticket { user: User; ip: string; exp: number; kind: 'verify' | 'enroll'; tries: number; pending?: string }
+interface Ticket { user: User; ip: string; exp: number; kind: 'verify' | 'enroll'; tries: number; pending?: string; finish?: () => object }
 const tickets = new Map<string, Ticket>(), TICKET_MS = 3 * 60_000;
 const BAD_TICKET = 'Invalid or expired sign-in. Start again';
 function sweep() { const t = Date.now(); for (const [k, v] of tickets) if (v.exp < t) tickets.delete(k) }
@@ -118,13 +118,13 @@ function sweep() { const t = Date.now(); for (const [k, v] of tickets) if (v.exp
  * Called by /api/auth/login after the password is right. Null = no second step, carry on as before. Otherwise the body to answer with:
  * { twofa: true, ticket } (the account has 2FA) or { enroll: true, ticket } (the server requires it and the account has none).
  */
-export function challenge(user: User, c: Ctx): { twofa: true; ticket: string } | { enroll: true; ticket: string } | null {
+export function challenge(user: User, c: Ctx, finish?: () => object): { twofa: true; ticket: string } | { enroll: true; ticket: string } | null {
   const on = isEnabled(user.id);
   if (!on && !required(user.role)) return null;
   sweep();
   if (tickets.size >= 1000) throw tooMany(30);
   const ticket = randomBytes(24).toString('base64url');
-  tickets.set(sha(ticket), { user, ip: clientIp(c.req), exp: Date.now() + TICKET_MS, kind: on ? 'verify' : 'enroll', tries: 0 });
+  tickets.set(sha(ticket), { user, ip: clientIp(c.req), exp: Date.now() + TICKET_MS, kind: on ? 'verify' : 'enroll', tries: 0, finish });   // finish: work held back until the second factor passes (password recovery)
   audit(user.id, c.req, on ? 'login password ok, 2fa pending' : 'login password ok, 2fa enrolment pending');
   return on ? { twofa: true, ticket } : { enroll: true, ticket };
 }
@@ -161,7 +161,8 @@ route('POST', '/api/auth/login/2fa', c => {
   }
   tickets.delete(id);   // single use
   audit(t.user.id, c.req, 'login (2fa)');
-  return issue(c, label, t.user);
+  const extra = t.finish?.();
+  return { ...issue(c, label, t.user), ...extra };
 }, { public: true, ...LIM });
 route('POST', '/api/auth/login/2fa/setup', c => {
   const { t } = ticketOf(c, 'enroll');

@@ -27,7 +27,7 @@ import { HttpError, bad, closeClients, isLoopbackHost, route, type Ctx } from '.
 import { checkPassword, clearCookie, clientIp, createDevice, createSession, endDeviceById, endSession, endSessionById, hasPassword, listDevices, listSessions, sessionId, loginBlocked, loginFailed, loginOk, sessionCookie, setPassword } from './core/auth.ts';
 import { REGISTRATION, SERVER_NAME, isPublic } from './core/mode.ts';
 import { PRIVATE_USER } from './core/userdb.ts';
-import { challenge } from './twofa.ts';
+import { challenge, isEnabled } from './twofa.ts';
 
 const pw = (b: unknown, k = 'password') => { const v = (b as Record<string, unknown> | undefined)?.[k]; if (typeof v !== 'string' || !v) throw bad('Password required'); return v };
 const body = (c: Ctx) => ((c.body && typeof c.body === 'object' && !Array.isArray(c.body)) ? c.body : {}) as Record<string, unknown>;
@@ -130,11 +130,13 @@ if (!isPublic) {
   }, { limit: 4096 });
   route('POST', '/api/auth/recover', async c => {
     const label = device(c);
-    const r = await U.recover(body(c), c.req);
-    closeClients(cl => cl.userId === r.user.id);   // recovery ended every session and device token
-    const second = challenge(r.user, c);   // a recovery code replaces the password, never the TOTP
-    if (second) return { ...second, recoveryCodes: r.recoveryCodes };
-    return { ok: true, ...issue(c, label, r.user), user: { name: r.user.name, role: r.user.role }, recoveryCodes: r.recoveryCodes };
+    const r = await U.recover(body(c), c.req, u => isEnabled(u.id));   // with 2FA on nothing changes yet: the code, the password and the sessions wait for the TOTP
+    const done = () => { const f = r.finish?.(); closeClients(cl => cl.userId === r.user.id); return f ?? { recoveryCodes: r.recoveryCodes! } };   // recovery ends every session and device token
+    if (r.finish) return challenge(r.user, c, done)!;   // a recovery code replaces the password, never the TOTP; recoveryCodes come with the final answer
+    const second = challenge(r.user, c);   // 2FA required but not set up yet: the account enrols before it gets a session
+    const codes = done().recoveryCodes;
+    if (second) return { ...second, recoveryCodes: codes };
+    return { ok: true, ...issue(c, label, r.user), user: { name: r.user.name, role: r.user.role }, recoveryCodes: codes };
   }, { public: true, limit: 4096 });
   route('POST', '/api/auth/recovery-codes', async c => {
     if (!await U.confirmPassword(c.user.id, body(c).password, c.req)) throw new HttpError(401, 'Wrong password');
