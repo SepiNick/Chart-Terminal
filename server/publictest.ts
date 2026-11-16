@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 
 export async function boot(env: Record<string, string> = {}, port = 0) {
   const dir = mkdtempSync(join(tmpdir(), 'ct-pub-'));
-  Object.assign(process.env, { CT_MODE: 'public', CT_DATA_DIR: dir, CT_PUBLIC_URL: 'http://localhost', CT_ALLOWED_HOSTS: 'localhost', CT_NO_AUTOSTART: '1', CT_REGISTRATION: 'invite', CT_NO_PROXY: '1' }, env);
+  Object.assign(process.env, { CT_MODE: 'public', CT_DATA_DIR: dir, CT_PUBLIC_URL: 'http://localhost', CT_ALLOWED_HOSTS: 'localhost', CT_NO_AUTOSTART: '1', CT_REGISTRATION: 'invite', CT_NO_PROXY: '1', CT_REQUIRE_2FA: '0' }, env);
   delete process.env.CT_SECRET_KEY;
   const app = await import('./app.ts');
   const U = await import('./core/users.ts');

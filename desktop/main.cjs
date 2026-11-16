@@ -117,6 +117,16 @@ function createWindow(main = true, o = {}) {
   return w;
 }
 const showMain = () => { if (!win) createWindow(); else { if (win.isMinimized()) win.restore(); win.show(); win.focus() } };
+// LAN discovery: the page polls ctDiscover(); the UDP listener runs only while it does (and stops itself when the polling stops).
+const lanFinder = require('./discovery.cjs').create();
+ipcMain.handle('ct:discover', e => { try { return sameOrigin(e.senderFrame?.url || '') ? lanFinder.list() : [] } catch { return [] } });
+// Tray "Pair a phone": show the window and ask the page to open its Pair page (window.__ctPair, set by the web app).
+const showPair = () => {
+  showMain();
+  const w = win; if (!w) return;
+  const go = () => w.webContents.executeJavaScript('window.__ctPair && window.__ctPair()').catch(() => {});
+  if (w.webContents.isLoading()) w.webContents.once('did-finish-load', () => setTimeout(go, 1500)); else go();
+};
 const notify = (title, body) => { if (Notification.isSupported()) { const n = new Notification({ title, body, icon: join(__dirname, 'build', 'icon.png') }); n.on('click', showMain); n.show() } };
 
 function createTray() {
@@ -125,6 +135,7 @@ function createTray() {
   const menu = () => Menu.buildFromTemplate([
     { label: 'Open Chart Terminal', click: showMain },
     { label: 'New window', click: () => createWindow(false) },
+    { label: 'Pair a phone', click: showPair },
     { type: 'separator' },
     { label: 'Keep running in the tray when the window closes', type: 'checkbox', checked: settings().tray, click: i => { saveSettings({ ...settings(), tray: i.checked }) } },
     { label: 'Start with Windows', type: 'checkbox', visible: process.platform !== 'linux', checked: app.getLoginItemSettings().openAtLogin, click: i => app.setLoginItemSettings({ openAtLogin: i.checked, args: ['--hidden'] }) },

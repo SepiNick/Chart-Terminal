@@ -13,14 +13,8 @@ android {
         applicationId "app.chartterminal"
         minSdk 24
         targetSdk 35
-        versionCode 10
+        versionCode 11
         versionName "0.1.9"
-    }
-    // client = thin client (asks for a server address); standalone = bundles dist/ and needs no server.
-    flavorDimensions "mode"
-    productFlavors {
-        client { dimension "mode"; manifestPlaceholders = [appLabel: "Chart Terminal"] }
-        standalone { dimension "mode"; applicationIdSuffix ".standalone"; versionNameSuffix "-standalone"; manifestPlaceholders = [appLabel: "Chart Terminal Standalone"] }
     }
     signingConfigs {
         release {
@@ -45,13 +39,18 @@ android {
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 
-// Standalone: copy the built web app (npm run build -> ../dist) into the flavor's assets before they are merged.
-def standaloneWww = layout.projectDirectory.dir("src/standalone/assets/www")
-tasks.register("syncStandaloneAssets", Sync) {
+// One app: the built web app (npm run build -> ../dist) is bundled into assets/www for the local mode (no server, Binance only).
+def www = layout.projectDirectory.dir("src/main/assets/www")
+tasks.register("syncWebAssets", Sync) {
     from(rootProject.file("../dist")) { exclude "sw.js", "**/*.map" }   // the service worker is not registered in the bundled app
-    into standaloneWww
+    into www
     doFirst {
-        if (!rootProject.file("../dist/index.html").exists()) throw new GradleException("dist/ is missing: run `npm run build` in the project root first (or `npm run build:android-standalone`).")
+        if (!rootProject.file("../dist/index.html").exists()) throw new GradleException("dist/ is missing: run `npm run build` in the project root first (or `npm run build:android`).")
     }
 }
-tasks.matching { it.name ==~ /merge(Standalone\w*)Assets/ || it.name ==~ /lintVitalAnalyze(Standalone\w*)/ || it.name ==~ /generate(Standalone\w*)LintVitalReportModel/ }.configureEach { dependsOn "syncStandaloneAssets" }
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn "syncWebAssets" }
+
+// Chart-Terminal-<version>-android.apk (debug builds get a -debug suffix)
+android.applicationVariants.all { variant ->
+    variant.outputs.all { outputFileName = "Chart-Terminal-${variant.versionName}-android${variant.buildType.name == 'release' ? '' : '-' + variant.buildType.name}.apk" }
+}

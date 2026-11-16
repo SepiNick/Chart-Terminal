@@ -7,7 +7,8 @@ import { isPublic } from './core/mode.ts';
 
 // Order matters for route matching (first registered wins) and is the same as before in private mode.
 await import('./market.ts');
-await import('./authroutes.ts');
+await import('./authroutes.ts');   // also loads twofa.ts (two-factor sign-in)
+await import('./pairing.ts');
 await import('./state.ts');
 await import('./restore.ts');
 await import('./notify/index.ts');

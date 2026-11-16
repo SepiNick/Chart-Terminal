@@ -11,7 +11,7 @@
 | لینوکس، دسکتاپ (AppImage و deb) | [desktop.md](desktop.md) | `npm run dist:linux` در `desktop/` |
 | سرور همیشه‌روشن روی لپ‌تاپ لینوکسی | [lite.md](lite.md) (آماده) یا [headless-server.md](headless-server.md) (از سورس) | سرویس systemd، `CT_LAN=1` |
 | اندروید، اپ PWA (اعلان Push) | [android.md](android.md) | نصب CA، سپس Install app در Chrome |
-| اندروید، APK (دو نسخه: client و standalone) | [android-apk.md](android-apk.md) | client: آدرس سرور؛ standalone: بدون هیچ سرور، فقط روی گوشی |
+| اندروید، APK (یک اپ، دو حالت) | [android-apk.md](android-apk.md) | محلی: بدون سرور و فقط Binance؛ سرور: همه‌ی صرافی‌ها و بروکرها، پیدا‌کردن خودکار و جفت‌کردن با QR |
 | آیفون و دسترسی از شبکه‌ی خانه | [lan-setup.md](lan-setup.md) | HTTPS با CA محلی |
 | توسعه | [../README.md](../README.md) | `npm install`، `npm run server`، `npm run dev`، `npm test` |
 
@@ -32,7 +32,8 @@
 - [docker.md](docker.md): اجرا با Docker روی رزبری پای، لینوکس یا VPS (سرور خصوصی و عمومی با Caddy؛ ساخته‌نشده و تست‌نشده)
 - [lan-setup.md](lan-setup.md): HTTPS روی شبکه‌ی خانه، نصب گواهی روی اندروید و آیفون، فایروال ویندوز.
 - [android.md](android.md): نصب به‌صورت PWA روی اندروید، اعلان‌ها، باتری، IP ثابت.
-- [android-apk.md](android-apk.md): اپ APK با دو flavor (client و standalone)، حالت Standalone برنامه، قواعد HTTP/HTTPS، ساخت و امضا.
+- [android-apk.md](android-apk.md): اپ APK واحد (حالت محلی و حالت سرور)، انتخاب و پیدا‌کردن سرور، قواعد HTTP/HTTPS، ساخت و امضا.
+- [pairing.md](pairing.md): جفت‌کردن گوشی با QR کد، پیدا کردن سرور در شبکه و آنچه بین دستگاه‌ها هم‌گام می‌شود.
 - [competitor-gaps.md](competitor-gaps.md): مقایسه با رقبا و شکاف‌ها.
 - [dominance.md](dominance.md): دامیننس و سهم بازار.
 - [iran-market.md](iran-market.md): بازار ایران (نوبیتکس، tgju، بورس).

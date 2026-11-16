@@ -39,7 +39,7 @@ export const apiTrade: typeof api = (path, init) => api(path, { ...init, role: '
 /** Keys the running app applies live when another device or the server changes them (the server writes `acct` for forward-test fills). */
 const HOT_KEYS = new Set(['acct']);
 /** Per-device UI state: never sent to the server. */
-const LOCAL_KEYS = new Set(['bottomH', 'panelW', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'lastTool', 'searchEx', 'searchEx2', 'aiUrl', 'brokerActive', 'watchActive', 'watchView', 'winArr', 'widget', 'widgets', 'tourDone']);   // aiUrl may hold credentials / a LAN address; brokerActive names a broker that exists on one server only
+const LOCAL_KEYS = new Set(['bottomH', 'panelW', 'side', 'jwFormTab', 'tsTab', 'domCfg', 'pineEditing', 'pyEditing', 'lastTool', 'searchEx', 'searchEx2', 'aiUrl', 'brokerActive', 'watchActive', 'watchView', 'winArr', 'widget', 'widgets', 'tourDone', 'uiMode', 'mktTab']);   // aiUrl may hold credentials / a LAN address; brokerActive names a broker that exists on one server only
 const KEY_RE = /^[A-Za-z0-9_.-]{1,64}$/;   // same as server/state.ts
 export const isSynced = (key: string) => KEY_RE.test(key) && !LOCAL_KEYS.has(key) && !key.startsWith('po.');   // po.*: a pop-out window's own layout
 
@@ -106,7 +106,7 @@ async function send(key: string, attempt: number) {
   try {
     if (value === undefined) { await api(`/api/state/${key}`, { method: 'DELETE' }); revs.delete(key) }
     else revs.set(key, (await api<{ rev: number }>(`/api/state/${key}`, { method: 'PUT', body: { value, baseRev: revs.get(key) ?? 0 } })).rev);
-    failing = false; attempt = 0;
+    failing = false; attempt = 0; lastOk = Date.now();
   } catch (e) {
     const s = (e as { status?: number }).status;
     if (s === 409) conflict(key, (e as { data?: { rev?: number; value?: unknown } }).data);
@@ -154,7 +154,10 @@ export async function flushNow(keepalive = false): Promise<boolean> {
 // ---------- status for the account button ----------
 export type SyncStatus = 'synced' | 'saving' | 'offline';
 const statusFns = new Set<(s: SyncStatus) => void>();
-export function onSyncStatus(fn: (s: SyncStatus) => void) { statusFns.add(fn); fn(syncStatus()) }
+export function onSyncStatus(fn: (s: SyncStatus) => void) { statusFns.add(fn); fn(syncStatus()); return () => { statusFns.delete(fn) } }
+/** When this device last talked to the server successfully (ms; 0 = not yet): the "Synced with …" line on the Servers page. */
+let lastOk = 0;
+export const lastSyncAt = () => lastOk;
 const syncStatus = (): SyncStatus => (!online || failing ? 'offline' : pending.size || busy.size ? 'saving' : 'synced');
 function status() { const s = syncStatus(); statusFns.forEach(f => f(s)) }
 
@@ -209,11 +212,11 @@ function connect(again: boolean) {
   const ws = (sock = serverSocket('/ws'));
   let opened = false;
   ws.onopen = () => {
-    opened = true; online = true; wait = 1000; status();
+    opened = true; online = true; wait = 1000; lastOk = Date.now(); status();
     ws.send(JSON.stringify({ op: 'sync.hello', client: clientId }));
     if (again) void resync();
   };
-  ws.onmessage = e => { let m: unknown; try { m = JSON.parse(String(e.data)) } catch { return } if (m && typeof (m as { type?: unknown }).type === 'string') dispatchServer(m as Record<string, unknown>) };
+  ws.onmessage = e => { let m: unknown; try { m = JSON.parse(String(e.data)) } catch { return } if (m && typeof (m as { type?: unknown }).type === 'string') { lastOk = Date.now(); dispatchServer(m as Record<string, unknown>) } };
   ws.onclose = async () => {
     online = false; status();
     if (!opened) {   // refused before opening: maybe the session ended (password changed on another device)

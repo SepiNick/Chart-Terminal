@@ -11,7 +11,7 @@
 | Linux desktop (AppImage and deb) | [desktop.en.md](desktop.en.md) | `npm run dist:linux` in `desktop/` |
 | Always-on server on a Linux laptop | [lite.en.md](lite.en.md) (prebuilt) or [headless-server.en.md](headless-server.en.md) (from source) | systemd service, `CT_LAN=1` |
 | Android, PWA app (Push notifications) | [android.en.md](android.en.md) | install the CA, then Install app in Chrome |
-| Android, APK (two flavours: client and standalone) | [android-apk.en.md](android-apk.en.md) | client: server address; standalone: no server at all, phone only |
+| Android, APK (one app, two modes) | [android-apk.en.md](android-apk.en.md) | local: no server, Binance only; server: every exchange and broker, auto-discovery and QR pairing |
 | iPhone and access from the home network | [lan-setup.en.md](lan-setup.en.md) | HTTPS with a local CA |
 | Development | [../README.en.md](../README.en.md) | `npm install`, `npm run server`, `npm run dev`, `npm test` |
 
@@ -32,7 +32,8 @@ Sign-in buttons ("Continue with Google / Apple / Telegram") exist only on a **pu
 - [docker.en.md](docker.en.md): running with Docker on a Raspberry Pi, Linux or VPS (private and public server with Caddy; not built or tested).
 - [lan-setup.en.md](lan-setup.en.md): HTTPS on the home network, installing the certificate on Android and iPhone, Windows firewall.
 - [android.en.md](android.en.md): installing as a PWA on Android, notifications, battery, fixed IP.
-- [android-apk.en.md](android-apk.en.md): the APK app with two flavours (client and standalone), the app's Standalone mode, HTTP/HTTPS rules, building and signing.
+- [android-apk.en.md](android-apk.en.md): the single APK app (local mode and server mode), picking and discovering a server, HTTP/HTTPS rules, building and signing.
+- [pairing.en.md](pairing.en.md): pairing a phone with a QR code, finding a server on the network, and what syncs between devices.
 - [competitor-gaps.en.md](competitor-gaps.en.md): comparison with competitors and gaps.
 - [dominance.en.md](dominance.en.md): dominance and market share.
 - [iran-market.en.md](iran-market.en.md): the Iranian market (Nobitex, tgju, TSE).

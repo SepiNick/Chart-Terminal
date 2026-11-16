@@ -11,6 +11,7 @@ import { HttpError, RAW, bad, closeClients, route, type Ctx } from './core/http.
 import { OAUTH, clientIp, publicUrl } from './core/mode.ts';
 import { Jwks, OidcError, appleClientSecret, b64u, fetchJson, verifyIdToken, type Jwk } from './core/oidc.ts';
 import * as U from './core/users.ts';
+import { challenge } from './twofa.ts';
 
 type Name = 'google' | 'apple' | 'telegram';
 interface Urls { authorize: string; token: string; jwks: string }
@@ -151,6 +152,8 @@ export function mountOAuth({ device, body, issue, start }: Deps) {
       if (!iu) return { signup: true, ticket: U.oauthTicketNew(id, row.c_challenge, label), hint: { provider: row.provider, email: id.email ?? null, relay: id.relay } };   // never an account lookup by e-mail
       if (!iu.ok) { U.audit(iu.user.id, ip, 'oauth disabled'); throw fail() }
       U.identitySeen(row.provider, row.subject, id.email, id.relay); U.stepupMark(iu.user.id); U.audit(iu.user.id, ip, `oauth login ${row.provider}`);
+      const second = challenge(iu.user, c);   // 2FA on or required: ticket first, no session yet
+      if (second) return second;
       return { ok: true, ...issue(c, label, iu.user), user: { name: iu.user.name, role: iu.user.role, mustChange: !!iu.user.mustChange } };
     }
     // link / reauth: only for the session that started it
@@ -177,6 +180,8 @@ export function mountOAuth({ device, body, issue, start }: Deps) {
       throw new HttpError(400, GENERIC);
     }
     const r = U.createOAuthUser(ticket, b, c.req);
+    const second = challenge(r.user, c);
+    if (second) return { ...second, recoveryCodes: r.recoveryCodes };
     return { ok: true, ...issue(c, label, r.user), user: { name: r.user.name, role: r.user.role }, recoveryCodes: r.recoveryCodes };
   }, { public: true, limit: 4096 });
 

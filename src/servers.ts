@@ -170,6 +170,44 @@ export function removeServer(id: string) {
   if (c.trade === id) c.trade = null;
   save();
 }
+/** Rename and/or re-address a saved server; a new address drops the token and the learned status (it may be another server now). */
+export function updateServer(id: string, patch: { name?: string; baseUrl?: string }) {
+  const c = load(), s = serverById(id); if (!s || s.id === LOCAL) return;
+  if (patch.baseUrl !== undefined) {
+    const u = normalizeBaseUrl(patch.baseUrl);
+    if (u !== s.baseUrl) {
+      if (c.servers.some(x => x !== s && x.baseUrl === u)) throw Error('That address is already in the list');
+      s.baseUrl = u; s.token = undefined; s.mode = undefined; s.features = undefined; s.serverName = undefined;
+    }
+  }
+  if (patch.name !== undefined && patch.name.trim()) s.name = patch.name.trim().slice(0, 60);
+  save();
+}
+
+// ---------- servers heard on the local network (beacon: Android CTNative.discover(), Windows app ctDiscover()) ----------
+export interface Found { id?: string; name: string; urls: string[]; mode?: 'public' | 'private'; twofa?: boolean; version?: string; saved?: boolean }
+/** Beacon list (array or its JSON text) -> clean entries: only valid http(s) origins, https first, deduped by shared address only (the id is unauthenticated). Never throws. */
+export function parseDiscovered(raw: unknown): Found[] {
+  let a = raw;
+  if (typeof a === 'string') { try { a = JSON.parse(a) } catch { return [] } }
+  if (!Array.isArray(a)) return [];
+  const out: Found[] = [];
+  for (const x of a.slice(0, 50)) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>, urls: string[] = [];
+    for (const u of Array.isArray(o.urls) ? o.urls.slice(0, 12) : []) { try { const n = normalizeBaseUrl(String(u)); if (!urls.includes(n)) urls.push(n) } catch { /* skip */ } }
+    if (!urls.length) continue;
+    urls.sort((p, q) => +q.startsWith('https:') - +p.startsWith('https:'));
+    const id = typeof o.id === 'string' && /^[\w-]{1,64}$/.test(o.id) ? o.id : undefined;
+    const f: Found = { id, name: (typeof o.name === 'string' && o.name.trim() ? o.name : new URL(urls[0]).host).slice(0, 60), urls, mode: o.mode === 'public' ? 'public' : o.mode === 'private' ? 'private' : undefined, twofa: o.twofa === true, version: typeof o.v === 'string' ? o.v.slice(0, 20) : undefined };
+    const dup = out.find(e => e.urls.some(u => urls.includes(u)));
+    if (dup) { for (const u of urls) if (!dup.urls.includes(u)) dup.urls.push(u); } else out.push(f);
+  }
+  return out;
+}
+/** Mark which heard servers are already saved (any shared address). */
+export const markSaved = (found: Found[], saved: { baseUrl: string }[]): Found[] => found.map(f => ({ ...f, saved: saved.some(s => s.baseUrl && f.urls.includes(s.baseUrl)) }));
+
 export function setSyncServer(id: string) { if (serverById(id)) { load().sync = id; save() } }
 /** null = automatic (the sync server when it is private or this machine). Refuses a server that cannot trade. */
 export function setTradeServer(id: string | null) {

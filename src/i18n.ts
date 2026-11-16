@@ -198,6 +198,25 @@ export const FA: Record<string, string> = {
   'Interface': 'نمای برنامه', 'Auto': 'خودکار', 'Phone': 'موبایل', 'Tablet': 'تبلت', 'Desktop': 'دسکتاپ', 'Templates': 'قالب‌ها', 'Layout': 'چیدمان', 'Replay': 'بازپخش', 'Redo': 'جلو',
   'Saved layouts': 'چیدمان‌های ذخیره‌شده', 'More': 'بیشتر', 'Community': 'انجمن', 'Screener Pro…': 'اسکرینر حرفه‌ای…', 'Main': 'اصلی',
   'Chart': 'نمودار', 'DOM / Time & Sales': 'DOM / ریز معاملات', 'Positions & orders': 'پوزیشن‌ها و سفارش‌ها', 'Pine / Python editor': 'ویرایشگر Pine / Python',
+  // servers, pairing, two-step verification
+  'Servers': 'سرورها', 'Servers on this network': 'سرورهای این شبکه', 'Saved on this phone': 'ذخیره‌شده روی این گوشی', 'Connect': 'اتصال', 'Connect to a server': 'اتصال به سرور', 'Forget': 'فراموش کن',
+  'Check': 'بررسی', 'Add server': 'افزودن سرور', 'Pair': 'جفت‌سازی', 'Scan QR': 'اسکن QR', 'Pairing code': 'کد جفت‌سازی', 'Server address': 'آدرس سرور', 'Trading server': 'سرور معاملات',
+  'Use for sync': 'استفاده برای همگام‌سازی', 'Use this device only (local mode)': 'فقط این دستگاه (حالت محلی)', '(sync)': '(همگام‌سازی)', '(trading)': '(معاملات)', '(team)': '(تیمی)', '(saved)': '(ذخیره‌شده)',
+  'Code or chartterminal:// link from Pair a phone': 'کد یا لینک chartterminal:// از بخش «جفت‌سازی گوشی»', 'Only needed when you type the code by hand': 'فقط وقتی کد را دستی می‌نویسید لازم است',
+  'Local mode (no server) has Binance only. A server gives every exchange and broker: a PC running Chart Terminal with Home network access, a Raspberry Pi, or a VPS.': 'حالت محلی (بدون سرور) فقط بایننس دارد. سرور همه‌ی صرافی‌ها و بروکرها را می‌دهد: یک کامپیوتر با Chart Terminal و دسترسی شبکه‌ی خانگی، رزبری‌پای یا VPS.',
+  'Local mode: everything stays on this device. Connect to a server to sync and to use every exchange and broker.': 'حالت محلی: همه‌چیز روی همین دستگاه می‌ماند. برای همگام‌سازی و استفاده از همه‌ی صرافی‌ها و بروکرها به سرور وصل شوید.',
+  'Not connected to a server.': 'به سرور وصل نیست.',
+  'Looking… Only servers on the same Wi-Fi network (subnet) are found, and not on guest networks that isolate devices. Turn on Home network access in the PC app.': 'در حال جستجو… فقط سرورهای هم‌شبکه (همان وای‌فای) پیدا می‌شوند، نه در شبکه‌ی مهمان که دستگاه‌ها را جدا می‌کند. در برنامه‌ی کامپیوتر «دسترسی شبکه‌ی خانگی» را روشن کنید.',
+  'Pair a phone': 'جفت‌سازی گوشی', 'Paired devices': 'دستگاه‌های جفت‌شده', 'New code': 'کد جدید', 'Copy link': 'کپی لینک', 'Sign out': 'خروج', 'None yet.': 'هنوز هیچ‌کدام.', '(this device)': '(این دستگاه)', 'Making a code…': 'در حال ساخت کد…',
+  'Expired: press New code': 'منقضی شد: «کد جدید» را بزنید', 'Or type this code:': 'یا این کد را بنویسید:', 'Scan QR code': 'اسکن کد QR', 'Starting the camera…': 'در حال روشن‌کردن دوربین…', 'Point the camera at the QR code.': 'دوربین را روی کد QR بگیرید.',
+  'That QR code is not from Chart Terminal.': 'این کد QR از Chart Terminal نیست.', 'Camera permission was refused. Allow it in the app settings, or type the pairing code instead.': 'اجازه‌ی دوربین رد شد. در تنظیمات برنامه اجازه دهید یا کد جفت‌سازی را بنویسید.',
+  'Could not start the camera. Type the pairing code instead.': 'دوربین روشن نشد. کد جفت‌سازی را بنویسید.',
+  'Two-step verification': 'تأیید دومرحله‌ای', 'Turn on two-step verification': 'روشن‌کردن تأیید دومرحله‌ای', 'Use a recovery code': 'استفاده از کد بازیابی', 'Use the authenticator code': 'استفاده از کد برنامه‌ی احراز هویت', 'Recovery code': 'کد بازیابی', 'Verify': 'تأیید',
+  'Scan this code': 'این کد را اسکن کنید', 'Turn on': 'روشن کن', 'Turn on…': 'روشن کن…', 'Turn off': 'خاموش کن', 'Continue': 'ادامه', 'Code': 'کد', 'Save your recovery codes': 'کدهای بازیابی را ذخیره کنید',
+  'This server requires it, so it cannot be turned off.': 'این سرور آن را الزامی کرده، پس نمی‌توان خاموشش کرد.',
+  'On. Signing in needs your password and a code from your authenticator app.': 'روشن است. ورود به رمز و یک کد از برنامه‌ی احراز هویت نیاز دارد.',
+  'Off. Add a code from an authenticator app to every sign-in for more safety.': 'خاموش است. برای امنیت بیشتر، کد برنامه‌ی احراز هویت را به هر ورود اضافه کنید.',
+  'In your authenticator app add an account and scan the picture, or type the key by hand. Then enter the 6 digits it shows.': 'در برنامه‌ی احراز هویت یک حساب اضافه کنید و تصویر را اسکن کنید یا کلید را دستی بنویسید. سپس ۶ رقمی که نشان می‌دهد را وارد کنید.',
 };
 
 const SKIP = 'canvas, #grid, #pnEditor, #pnConsole, textarea, code, pre, script, style, .cm-editor, [data-i18n="off"]';

@@ -18,6 +18,8 @@
 // Both servers, clients on another origin (docs/multi-server.md): login/register/recover accept "device": "<label>" and then
 // answer { ok, token, user } with NO cookie. Every route accepts `Authorization: Bearer <token>`.
 //   GET /api/auth/devices → [{ id, label, created, lastUsed, ip, current }] · DELETE /api/auth/devices/:id (the caller's own)
+// Two-factor sign-in (twofa.ts): /api/auth/login may answer { twofa: true, ticket } or { enroll: true, ticket } instead of a session; /api/auth/login/2fa* completes it.
+// Phone pairing by QR (pairing.ts): POST /api/auth/pair/start (signed in) and POST /api/auth/pair/redeem { code, device } (public) hand out a device token.
 //   POST /api/admin/invites { password, uses?, days?, note? } · GET /api/admin/users   (admins; others get a 404)
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,6 +27,7 @@ import { HttpError, bad, closeClients, isLoopbackHost, route, type Ctx } from '.
 import { checkPassword, clearCookie, clientIp, createDevice, createSession, endDeviceById, endSession, endSessionById, hasPassword, listDevices, listSessions, sessionId, loginBlocked, loginFailed, loginOk, sessionCookie, setPassword } from './core/auth.ts';
 import { REGISTRATION, SERVER_NAME, isPublic } from './core/mode.ts';
 import { PRIVATE_USER } from './core/userdb.ts';
+import { challenge } from './twofa.ts';
 
 const pw = (b: unknown, k = 'password') => { const v = (b as Record<string, unknown> | undefined)?.[k]; if (typeof v !== 'string' || !v) throw bad('Password required'); return v };
 const body = (c: Ctx) => ((c.body && typeof c.body === 'object' && !Array.isArray(c.body)) ? c.body : {}) as Record<string, unknown>;
@@ -58,6 +61,8 @@ if (!isPublic) {
     if (wait) throw new HttpError(429, `Too many attempts — try again in ${wait} s`);
     if (!checkPassword(pw(c.body))) { loginFailed(ip); throw new HttpError(401, 'Wrong password') }
     loginOk(ip);
+    const second = challenge(PRIVATE_USER, c);   // 2FA on: { twofa: true, ticket }, no session yet (twofa.ts)
+    if (second) return second;
     if (label) return { ok: true, token: createDevice(c.req, label), user: { name: PRIVATE_USER.name, role: PRIVATE_USER.role } };
     c.res.setHeader('set-cookie', sessionCookie(createSession(c.req), c.secure));
     return { ok: true };
@@ -99,11 +104,15 @@ if (!isPublic) {
   route('POST', '/api/auth/register', async c => {
     const label = device(c);
     const r = await U.register(body(c), c.req);
+    const second = challenge(r.user, c);   // 2FA required: the new account enrols before it gets a session
+    if (second) return { ...second, recoveryCodes: r.recoveryCodes };
     return { ok: true, ...issue(c, label, r.user), user: { name: r.user.name, role: r.user.role }, recoveryCodes: r.recoveryCodes };
   }, { public: true, limit: 4096 });
   route('POST', '/api/auth/login', async c => {
     const label = device(c);
     const u = await U.login(body(c), c.req);
+    const second = challenge(u, c);   // 2FA on (or required and not yet set up): { twofa|enroll, ticket }, no session yet (twofa.ts)
+    if (second) return second;
     return { ok: true, ...issue(c, label, u), user: { name: u.name, role: u.role, mustChange: !!u.mustChange } };
   }, { public: true, limit: 4096 });
   route('POST', '/api/auth/logout', c => {
@@ -123,6 +132,8 @@ if (!isPublic) {
     const label = device(c);
     const r = await U.recover(body(c), c.req);
     closeClients(cl => cl.userId === r.user.id);   // recovery ended every session and device token
+    const second = challenge(r.user, c);   // a recovery code replaces the password, never the TOTP
+    if (second) return { ...second, recoveryCodes: r.recoveryCodes };
     return { ok: true, ...issue(c, label, r.user), user: { name: r.user.name, role: r.user.role }, recoveryCodes: r.recoveryCodes };
   }, { public: true, limit: 4096 });
   route('POST', '/api/auth/recovery-codes', async c => {

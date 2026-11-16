@@ -43,6 +43,7 @@
     "files": [
       "main.cjs",
       "preload.cjs",
+      "discovery.cjs",
       "app/**",
       "!**/*.map",
       "build/icon.png",

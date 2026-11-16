@@ -1,7 +1,9 @@
 {
   "name": "chart-terminal",
   "private": true,
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "version": "0.1.9",
   "license": "GPL-2.0-or-later",
   "type": "module",
@@ -16,7 +18,7 @@
     "audit:html": "node scripts/audit-html.mjs",
     "bench": "node --experimental-strip-types --expose-gc scripts/bench.ts",
     "build:lite": "node lite/build.mjs",
-    "build:android-standalone": "node android/build-standalone.mjs"
+    "build:android": "node android/build-android.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",
@@ -29,6 +31,7 @@
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.14",
     "@lezer/highlight": "1.2.5",
+    "jsqr": "1.4.0",
     "lightweight-charts": "5.0.8"
   },
   "devDependencies": {

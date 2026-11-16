@@ -110,7 +110,7 @@ const inBytesBy = new Map<string, number>();   // per principal: one account or 
 const ANON_RPS = Number(process.env.CT_ANON_RPS) || 5, ANON_BURST = Number(process.env.CT_ANON_BURST) || 30;   // anonymous requests per address
 const AUTH_RPS = Number(process.env.CT_AUTH_RPS) || 1, AUTH_BURST = Number(process.env.CT_AUTH_BURST) || 60;   // anonymous /api/auth/* bucket per address
 const MUST_CHANGE_OK = new Set(['/api/auth/password', '/api/auth/logout']);
-const DEVICE_AUTH = new Set(['/api/auth/login', '/api/auth/register', '/api/auth/recover', '/api/auth/oauth/start', '/api/auth/oauth/exchange', '/api/auth/oauth/signup']);
+const DEVICE_AUTH = new Set(['/api/auth/login', '/api/auth/register', '/api/auth/recover', '/api/auth/login/2fa', '/api/auth/login/2fa/setup', '/api/auth/login/2fa/enroll', '/api/auth/pair/redeem', '/api/auth/oauth/start', '/api/auth/oauth/exchange', '/api/auth/oauth/signup']);
 /** Apple posts its answer from appleid.apple.com with a browser form: no Origin of ours, no x-ct-client. Authenticated by the one-time `state`, not by a cookie, so CSRF does not apply. This one path only. */
 const APPLE_CALLBACK = '/api/auth/oauth/callback/apple';
 const slow = (s: number, msg: string) => Object.assign(new HttpError(429, msg), { retryAfter: s });

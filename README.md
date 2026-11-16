@@ -87,8 +87,7 @@
 | دستگاه | فایل | مراحل |
 |---|---|---|
 | **ویندوز** | `Chart Terminal Setup <نسخه>.exe` (x64 یا ARM64) | اجرایش کنید. اگر SmartScreen هشدار داد: *More info ← Run anyway*. بار اول برنامه از شما یک رمز می‌خواهد. |
-| **اندروید، بدون سرور** | `…standalone.apk` | نصب از مرورگر یا مدیر فایل را مجاز کنید و APK را باز کنید. تنها روی گوشی و با داده‌ی Binance کار می‌کند. |
-| **اندروید، با سرور خودتان** | `…client.apk` | نصبش کنید و در صفحه‌ی اول آدرس سرور را بزنید. |
+| **اندروید** | `Chart-Terminal-<نسخه>-android.apk` | نصب از مرورگر یا مدیر فایل را مجاز کنید و APK را باز کنید. یک اپ واحد: تنهایی فقط Binance دارد؛ به سرور خودتان وصلش کنید (روی همان وای‌فای خودکار پیدا می‌شود، یا با QR جفت کنید) تا همه‌ی صرافی‌ها و بروکرها را داشته باشد. |
 | **لینوکس** | `.AppImage`، `.deb` یا بسته‌ی pacman | `sudo apt install ./<فایل>.deb` یا `chmod +x <فایل>.AppImage` و اجرا. |
 | **نسخه‌ی سبک (ویندوز/لینوکس)** | zip / tar.gz | باز کنید و `install.ps1` / `install.sh` را اجرا کنید؛ [docs/lite.md](docs/lite.md). |
 
@@ -139,7 +138,7 @@ npm run dev      # برنامه روی http://localhost:5173
 npm test         # تست‌ها
 npm run build    # بیلد نهایی
 ```
-ساخت نصبی‌ها: ویندوز `cd desktop && npm run dist:win`، اندروید `cd android && ./gradlew assembleStandaloneRelease assembleClientRelease`، نسخه‌ی سبک `npm run build:lite`. برای توسعه‌دهندگان: نقشه‌ی کد در [docs/development.md](docs/development.md).
+ساخت نصبی‌ها: ویندوز `cd desktop && npm run dist:win`، اندروید `cd android && ./gradlew assembleRelease`، نسخه‌ی سبک `npm run build:lite`. برای توسعه‌دهندگان: نقشه‌ی کد در [docs/development.md](docs/development.md).
 
 ## مستندات
 

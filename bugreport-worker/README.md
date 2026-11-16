@@ -61,7 +61,7 @@ npx wrangler deploy
   ```powershell
   $env:VITE_BUG_REPORT_URL = "https://<آدرس-گیرنده>"
   cd desktop; npm run dist:win                        # نصب‌کننده‌ی ویندوز
-  cd ..\android; .\gradlew.bat assembleStandaloneRelease assembleClientRelease -PbugReportHost=<فقط-نام-دامنه>
+  cd ..\android; .\gradlew.bat assembleRelease -PbugReportHost=<فقط-نام-دامنه>
   ```
   (برای اندروید standalone، `bugReportHost` همان نام دامنه‌ی بدون `https://` است تا برنامه اجازه‌ی اتصال به آن را داشته باشد؛ ابتدا `npm run build` از ریشه با همان متغیر.)
 - **لینوکس (GitHub Actions):** در ریپو: Settings ← Secrets and variables ← Actions ← Variables ← یک متغیر به اسم `BUG_REPORT_URL` با همان آدرس بسازید.

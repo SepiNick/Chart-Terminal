@@ -87,8 +87,7 @@ Download the latest version from the **[Releases](../../releases)** page.
 | Your device | File | Steps |
 |---|---|---|
 | **Windows** | `Chart Terminal Setup <version>.exe` (x64 or ARM64) | Run it. If SmartScreen warns, click *More info → Run anyway*. On first start the app asks you to choose a password. |
-| **Android, no server** | `…standalone.apk` | Allow installing from your browser/file manager, open the APK. Works alone on the phone, with Binance data. |
-| **Android, with your server** | `…client.apk` | Install it, then type your server's address on the first screen. |
+| **Android** | `Chart-Terminal-<version>-android.apk` | Allow installing from your browser/file manager, open the APK. One app: alone on the phone it has Binance only; connect it to your server (found automatically on the same Wi-Fi, or paired by QR) for every exchange and broker. |
 | **Linux** | `.AppImage`, `.deb` or pacman package | `sudo apt install ./<file>.deb`, or `chmod +x <file>.AppImage` and run it. |
 | **Light version (Windows/Linux)** | zip / tar.gz | Extract and run `install.ps1` / `install.sh`; see [docs/lite.en.md](docs/lite.en.md). |
 
@@ -139,7 +138,7 @@ npm run dev      # the app at http://localhost:5173
 npm test         # tests
 npm run build    # production build
 ```
-Build the installers yourself: Windows `cd desktop && npm run dist:win`, Android `cd android && ./gradlew assembleStandaloneRelease assembleClientRelease`, light package `npm run build:lite`. Contributors: see [docs/development.en.md](docs/development.en.md) for the code map.
+Build the installers yourself: Windows `cd desktop && npm run dist:win`, Android `cd android && ./gradlew assembleRelease`, light package `npm run build:lite`. Contributors: see [docs/development.en.md](docs/development.en.md) for the code map.
 
 ## Documentation
 

@@ -2,82 +2,70 @@
 
 # Android app (APK) for Chart Terminal
 
-There are two product flavors that install side by side (separate applicationId) and produce differently named outputs:
+There is **one** app (`app.chartterminal`, file `Chart-Terminal-<version>-android.apk`). It replaces the old `client` and `standalone` builds. It has two modes and starts in the one you used last:
 
-| flavor | output file | what it does |
+| mode | what it is | exchanges and brokers |
 |---|---|---|
-| `client` | `app-client-release.apk` (about 14 KB) | Thin client: takes the server address (see the sections below) |
-| `standalone` | `app-standalone-release.apk` (about 880 KB) | No server at all; `dist/` is inside the APK and everything stays on this phone |
+| **Local** (no server) | the web app is bundled in the APK; everything stays on this phone | **Binance only** |
+| **Server** | the app opens your Chart Terminal server full-screen | **everything the server has** (every exchange and broker, as on Windows), server-side alerts, sync |
 
-## The standalone version
+For the full set of exchanges and brokers on the phone, connect to a server: the Windows app with *Home network access* on, a Raspberry Pi, or a VPS. See [lan-setup.en.md](lan-setup.en.md) (the Windows firewall rule is there too).
 
-- The built app (`dist/`) is packaged into `assets/www` and served through `WebViewClient.shouldInterceptRequest` from the secure address `https://appassets.androidplatform.net` (nonexistent paths and `/api/*` get a 404 response; `..` and `\` in the path are rejected; the MIME type is derived from the extension).
-- At boot the app calls `GET /api/auth/status`; a 404 means **Standalone mode**: no login page, charts and live data straight from Binance (`data-api.binance.vision` and `wss://data-stream.binance.vision`), Pine/MQL/Ninja scripts, paper trading, journal, layers, watchlist, replay and strategy tester all run inside the app itself. A small «Standalone · data stays on this device» bar sits at the bottom of the screen.
-- Data is stored in this WebView's `localStorage` and IndexedDB (closing the app does not erase it; it is erased by "Clear app data" or by uninstalling the app; `allowBackup` is off). Features that need a server (server-side alerts, broker account, non-Binance screener, news/calendar, AI, forward test, the 25 skills that read from `/api`) are hidden or disabled with the message "Standalone mode: this needs a server".
-- Navigation is allowed only to the app's own origin; other links open in the system browser, and requests to any host other than the app's origin and the two Binance hosts are blocked. The app's only permission is `INTERNET`. Back returns to the previous page and exits on the first page.
-- To use your own server, install the `client` version (in this version the "Connect to a server" button only explains this).
-- Limitations: without the microphone permission, journal voice recording does not work; file download (Export, backup) is not supported in the WebView; file picking (Import) works. Not tested on an emulator or a real phone.
+Upgrading: the app id is the old client's id, so it installs over the old client app and keeps its saved server. The old standalone app (id `app.chartterminal.standalone`) is a different app and its data cannot move; export what you need from it, then uninstall it.
 
-### Building standalone
+## Picking a server
 
-```
-npm run build:android-standalone           # signed release  (npm run build:android-standalone debug for debug)
-# or manually: npm run build , then in the android folder:
-gradlew.bat assembleStandaloneRelease      # app/build/outputs/apk/standalone/release/app-standalone-release.apk
-```
+Open the menu (Back on the first page, or long-press the top-right corner) and choose **Servers...**; it opens the Servers page in local mode.
 
-The Gradle task named `syncStandaloneAssets` copies the `dist/` folder into `android/app/src/standalone/assets/www` before merging assets (it is not in git). If `dist/` is missing, the build stops with a clear message. Every time the web code changes, `npm run build` is needed again (the script above runs it too).
+- **Servers on this network**: servers found automatically (see Discovery). Tap one to connect.
+- **Add a server** by address, for example `https://192.168.1.20:8443` or `http://192.168.1.20:8787`. Saved servers can be renamed and removed.
+- **Scan QR** / **Enter pairing code**: pair this phone with a server you are signed in to on the PC, see [pairing.en.md](pairing.en.md).
+- **Use this device only (local mode)** goes back to the bundled app.
 
-## The client version
+On a team server the server asks for username, password and the 2FA code when needed: [team-server.en.md](team-server.en.md).
 
-This APK is a "thin client": the server does **not** run on the phone. The app only takes your server's address and shows the Chart Terminal interface full-screen in a WebView.
+## Discovery
 
-**Why a plain WebView and not Capacitor?** We only open a single web page, so Capacitor (with Node and its plugins) adds unnecessary weight; a Java Activity without AndroidX keeps the APK under a few hundred kilobytes and gives full control over TLS and HTTP.
+The server (private mode with Home network access, or `CT_LAN`) broadcasts a small UDP beacon every 2 seconds on port **41771**. The phone listens only while the Servers page is open. It works only on the same subnet; guest Wi-Fi with client isolation, a VPN on the phone or on the PC, and the Windows firewall block it. Add the address by hand in that case.
 
-## First run
+## Menu
 
-1. Open the app and enter the server address, for example `https://192.168.1.20:8443` or `http://192.168.1.20:8787`.
-2. The app reads `/api/auth/status`. If the response is valid, the address is saved and the interface opens.
-3. On later launches the interface opens directly.
-
-## Menu and changing the server
-
-- The **Back** button goes back as long as there is a page to return to; on the first page it opens the menu.
-- Or **long-press** the top-right corner of the screen.
-- Menu: Reload, Change server, Keep screen on (off by default), Exit.
+Back goes back while there is a page to return to; on the first page it opens the menu: **Servers...**, Reload, Keep screen on (off by default), Exit.
 
 ## HTTP and HTTPS (security)
 
-- **Plain HTTP** is allowed only for home-network addresses: `10/8`, `172.16/12`, `192.168/16` and `localhost`. The app checks this both when the address is entered and for every request inside the WebView; any `http://` to a public address is blocked. (Android's `network-security-config` does not understand IP ranges, which is why the check is done in code.)
-- **WebSocket**: `ws://` is likewise allowed only to these private addresses; a JavaScript guard in every page rejects `ws://` to a public host (`wss://` is unrestricted). This guard is injected in `onPageStarted` and is not an absolute guarantee against a malicious page; your own server is the only origin that gets loaded.
-- **HTTPS**: certificate validation is not disabled anywhere. The **release version accepts only system CAs** and not a user-installed CA. So for release, either use `http://` on the LAN, or have a valid publicly trusted certificate.
-- **Local CA (debug version only)**: the debug build trusts user-installed CAs (`debug-overrides`). Move the CA file to the phone as described in `docs/lan-setup.en.md`, install it from Android Settings > Security > Encryption & credentials > **Install a certificate > CA certificate**, and use `app-client-debug.apk`.
-- Navigation to another origin (different scheme/host/port) is not performed inside the WebView; only http(s) links are opened in the external browser.
+- **Plain HTTP** is allowed only for home-network addresses: `10/8`, `172.16/12`, `192.168/16` and `localhost`, checked when the address is entered and for every request. (`network-security-config` cannot express IP ranges, so it is done in code.)
+- **WebSocket**: `ws://` is allowed only to those private addresses; a script injected into every page refuses `ws://` to a public host.
+- **HTTPS**: certificate validation is never disabled. The release build trusts **system CAs only**, not a user-installed CA. Use `http://` on the LAN or a publicly trusted certificate. The debug build also trusts user CAs (install the CA as in `docs/lan-setup.en.md` and use `Chart-Terminal-<version>-android-debug.apk`).
+- Navigation never leaves the current origin: other links open in the system browser.
+- Local mode only reaches the app itself and the two Binance public hosts (`data-api.binance.vision`, `wss://data-stream.binance.vision`); everything else is blocked.
+- The native bridge `window.CTNative` (server list, discovery, switching mode) exists only for the bundled app and the saved server, never for other sites. Camera access (QR scanning) is granted only to those pages, video only.
+- Permissions: Internet, Wi-Fi state and multicast (discovery), Camera (QR scan, asked at first use).
+
+## Local mode
+
+The built app (`dist/`) is packaged into `assets/www` and served from `https://appassets.androidplatform.net` (missing paths and `/api/*` answer 404; `..` and `\` are rejected). At start the app calls `GET /api/auth/status`; a 404 means local mode: no login, charts and live data straight from Binance. Data lives in the WebView's localStorage and IndexedDB (cleared by "Clear app data" or uninstalling; `allowBackup` is off). Features that need a server (server-side alerts, broker accounts, non-Binance markets, news/calendar, AI, forward test) are disabled with a message.
 
 ## Building
 
-Prerequisites: JDK 17 and the Android SDK (platform 35, build-tools 35.0.0). Put the SDK path in `android/local.properties` (`sdk.dir=C\:\\Users\\<name>\\Android\\Sdk`).
+Prerequisites: JDK 17 and the Android SDK (platform 35, build-tools 35.0.0); put the SDK path in `android/local.properties` (`sdk.dir=C\:\\Users\\<name>\\Android\\Sdk`).
 
 ```
-cd android
-gradlew.bat assembleClientDebug        # app/build/outputs/apk/client/debug/app-client-debug.apk
-gradlew.bat assembleClientRelease      # app/build/outputs/apk/client/release/app-client-release.apk (signed)
+npm run build:android            # builds dist/, bundles it, signed release  (npm run build:android debug for debug)
+# or: npm run build, then
+cd android && gradlew.bat assembleRelease    # app/build/outputs/apk/release/Chart-Terminal-<version>-android.apk
 ```
 
-(`assembleDebug` / `assembleRelease` build both flavors together.)
+The Gradle task `syncWebAssets` copies `dist/` into `android/app/src/main/assets/www` (not in git) before every build and stops with a clear message if `dist/` is missing. Run `npm run build` again after every web change (the script does it).
 
-The release signature is read from `android/keystore.properties` and the file `android/chartterminal.jks`. Both are in `.gitignore`, so **never commit them** and keep a secure backup of them (without them you cannot build an updated version with the same signature). To create a new keystore:
-
-```
-keytool -genkeypair -v -keystore chartterminal.jks -alias chartterminal -keyalg RSA -keysize 2048 -validity 10000
-```
+The release signature comes from `android/keystore.properties` and `android/chartterminal.jks`, both in `.gitignore`: **never commit them** and keep a safe backup (without them you cannot ship an update with the same signature). New keystore: `keytool -genkeypair -v -keystore chartterminal.jks -alias chartterminal -keyalg RSA -keysize 2048 -validity 10000`.
 
 ## Installing on the phone
 
-1. Enable "install from unknown sources" on the phone for the browser/file manager, transfer the APK file and open it; or
-2. With USB debugging: `adb install -r app-client-release.apk`
+Allow installing from unknown sources for the browser or file manager and open the APK, or with USB debugging `adb install -r Chart-Terminal-<version>-android.apk`.
 
 ## Limitations
 
-- **Push notifications are not supported.** For notifications you must install the PWA over HTTPS (Web Push); the APK, in exchange, works without any certificate hassle.
-- The current version has not been tested on a real device or an emulator.
+- No push notifications from the APK; alerts live on the server and show when the app is open. For push install the PWA over HTTPS ([android.en.md](android.en.md)).
+- The camera (QR scan) needs a secure page: use local mode, or an `https://` server.
+- Not every phone/Wi-Fi allows the discovery broadcast; typing the address always works.

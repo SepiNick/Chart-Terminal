@@ -8,12 +8,17 @@ import { configGet, configSet, DATA_DIR } from './core/db.ts';
 import { hostname } from 'node:os';
 import { ensureCerts, lanIps, lanNames, readCa, caFingerprint, mobileconfig, type Certs } from './lan/tls.ts';
 import { hasPassword } from './core/auth.ts';
+import { HOST, SERVER_NAME } from './core/mode.ts';
+import { discoveryEnabled, lanStarted, lanStopped } from './discovery.ts';
+import { isEnabled as twofaOn } from './twofa.ts';
 import { banner, isPrivateAddr, lanAuthClosed, lanPort, lanRequested } from './lan/startup.ts';
 
-interface LanConfig { enabled: boolean; port: number }
+interface LanConfig { enabled: boolean; port: number; discovery?: boolean }
 const TLS_DIR = join(DATA_DIR, 'tls');
 const cfg = () => { const c = { enabled: false, port: 8443, ...configGet<Partial<LanConfig>>('lan', {}) }; return { ...c, port: lanPort(c.port) } };
 
+/** Discovery beacon (discovery.ts): on while Home network access is on, unless CT_DISCOVERY=0 or the `discovery` setting is off. */
+const beacon = () => lanStarted({ httpsPort: cfg().port, dir: DATA_DIR, host: HOST, httpPort: Number(process.env.PORT ?? 8787), name: SERVER_NAME || hostname(), twofa: () => twofaOn(1), discovery: discoveryEnabled(process.env, cfg().discovery !== false) });
 let server: https.Server | null = null;
 let certs: Certs | null = null;
 let watch: ReturnType<typeof setInterval> | undefined;
@@ -45,13 +50,14 @@ function start(port: number): Promise<void> {
         try { certs = ensureCerts(TLS_DIR); s.setSecureContext({ key: certs.key, cert: certs.cert }) } catch (e) { console.error('LAN certificate:', (e as Error).message) }
       }, 60_000);
       watch.unref();
+      beacon();
       process.stdout.write(banner({ urls: urls(port), port, httpPort: Number(process.env.PORT ?? 8787), hasPassword: hasPassword() }));
       resolve();
     });
   });
 }
 function stop(): Promise<void> {
-  clearInterval(watch);
+  clearInterval(watch); lanStopped();
   const s = server; server = null;
   if (!s) return Promise.resolve();
   return new Promise(r => { s.close(() => r()); s.closeAllConnections() });
@@ -60,7 +66,7 @@ function stop(): Promise<void> {
 const urls = (port: number) => lanIps().map(ip => `https://${ip}:${port}`);
 function status() {
   const c = cfg(), ca = readCa(TLS_DIR);
-  return { enabled: !!server, port: c.port, urls: urls(c.port), caFingerprint: ca ? caFingerprint(ca) : null };
+  return { enabled: !!server, port: c.port, discovery: discoveryEnabled(process.env, c.discovery !== false), urls: urls(c.port), caFingerprint: ca ? caFingerprint(ca) : null };
 }
 
 /** Called once from index.ts after the HTTP server starts. CT_LAN=1 or --lan turns it on without the browser (not saved). */
@@ -74,7 +80,12 @@ route('POST', '/api/lan', async c => {
   // Only this PC may open or close the server to the network.
   const ip = c.req.socket.remoteAddress ?? '';
   if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip)) throw new HttpError(403, 'Home network access can only be changed on this PC');
-  const { enabled } = (c.body ?? {}) as { enabled?: unknown };
+  const { enabled, discovery } = (c.body ?? {}) as { enabled?: unknown; discovery?: unknown };
+  if (typeof discovery === 'boolean' && enabled === undefined) {   // only the discovery switch
+    configSet('lan', { ...configGet<Partial<LanConfig>>('lan', {}), discovery });
+    if (server) beacon();
+    return status();
+  }
   if (typeof enabled !== 'boolean') throw new HttpError(400, 'enabled must be true or false');
   const conf = cfg();
   await stop();

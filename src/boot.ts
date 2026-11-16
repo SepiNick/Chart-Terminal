@@ -37,6 +37,8 @@ async function boot() {
   await import('./main.ts');
   applyGates();
   if (st) accountMenu();
+  (window as { __ctPair?: () => void }).__ctPair = () => { if (st) void import('./pairui.ts').then(m => m.openPair()) };   // desktop tray "Pair a phone"
+  if (location.hash === '#servers') { history.replaceState(null, '', location.pathname + location.search); void import('./serversui.ts').then(m => m.openServers()) }   // Android menu "Servers…"
   const n = takeNotice(); if (n) toast(n, 5000);
 }
 

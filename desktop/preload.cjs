@@ -7,4 +7,6 @@ contextBridge.exposeInMainWorld('ctDesktop', {
   prompt: (msg, def) => ipcRenderer.sendSync('ct:prompt', String(msg ?? ''), def == null ? '' : String(def)),
   win: (op, arg) => ipcRenderer.invoke('ct:win', String(op), arg),
 });
+// Servers heard on the LAN (UDP beacon, validated in discovery.cjs): Promise of [{id,name,urls,v,mode,twofa,ageMs}]. Data only.
+contextBridge.exposeInMainWorld('ctDiscover', () => ipcRenderer.invoke('ct:discover'));
 webFrame.executeJavaScript('window.prompt = (m, d) => window.ctDesktop.prompt(m, d)');

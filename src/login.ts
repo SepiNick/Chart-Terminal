@@ -1,7 +1,7 @@
 // Sign-in screens (first password, login) and the account menu in the top bar. Built at runtime so index.html stays
 // the app's markup; styled with the app's CSS variables.
 import { api, clearSynced, downloadBackup, flushNow, onSyncStatus, type SyncStatus } from './sync.ts';
-import { deviceLabel, gate, isSameOrigin, setToken, syncServer } from './servers.ts';
+import { deviceLabel, gate, isSameOrigin, parseStatus, setToken, syncServer } from './servers.ts';
 import { releasePushOnServer } from './push.ts';
 import { esc, toast } from './store.ts';
 import { codesOf } from './authrules.ts';
@@ -65,11 +65,32 @@ export async function authPost<T = { ok: true }>(path: string, body: Record<stri
   return j;
 }
 
-export function loginScreen() {
-  const done = screen(`<h2>Chart Terminal</h2><p class="muted">Sign in to your server.</p>
+/** Answer of a password step -> the code step when the account has two-step verification, then forced enrolment when the server demands it. */
+export async function secondStep<T extends object>(j: T): Promise<T> {
+  const { nextLoginStep, twofaStatus } = await import('./twofaapi.ts');
+  let step = nextLoginStep(j);
+  if (step.kind === 'code') j = await (await import('./twofaui.ts')).twofaStep(step.ticket, (p, b) => authPost<T>(p, b));
+  if (step.kind !== 'enrol') step = nextLoginStep(j, await twofaStatus().catch(() => null));   // an older server has no such route
+  if (step.kind === 'enrol' && !(await (await import('./twofaui.ts')).enrolScreen(true))) throw Error('This server requires two-step verification');
+  return j;
+}
+
+/** Android opens a server as `<server>/#pair=<code>` after a QR scan: redeem it here (same origin => the session cookie lands in this page). '' when there was nothing to do or it worked (the page reloads). */
+export async function pairFlash(): Promise<string> {
+  const { takePairHash } = await import('./pairing.ts'), code = takePairHash(location.hash);
+  if (!code) return '';
+  history.replaceState(null, '', location.pathname + location.search);
+  if (!(globalThis as { CTNative?: unknown }).CTNative) return '';   // only the Android app sets this fragment; in a browser a link must not sign anyone in
+  try { await (await import('./pairui.ts')).redeemHere(code) } catch (e) { return (e as Error).message }
+  return new Promise<string>(() => {});   // reloading
+}
+
+export async function loginScreen() {
+  const flash = await pairFlash();
+  const done = screen(`<h2>Chart Terminal</h2><p class="muted">Sign in to your server.</p>${flash ? `<p class="ct-err" role="alert">${esc(flash)}</p>` : ''}
     <input type="password" name="pw" placeholder="Password" autocomplete="current-password">`, async f => {
     const pw = val(f, 'pw'); if (!pw) throw Error('Enter your password');
-    await authPost('/api/auth/login', { password: pw });   // the server's message covers wrong password and lockout
+    await secondStep(await authPost<Record<string, unknown>>('/api/auth/login', { password: pw }));   // the server's message covers wrong password and lockout
   }, '<button type="button" data-tg hidden>Sign in with Telegram</button><div class="muted" data-tgmsg></div>');
   void telegramButton();
   return done;
@@ -119,6 +140,7 @@ export function accountMenu() {
   const top = document.getElementById('top'); if (!top || document.getElementById('acctBtn')) return;
   const b = document.createElement('button'); b.id = 'acctBtn'; b.innerHTML = '👤<i></i>';
   top.insertBefore(b, document.getElementById('menuBtn'));
+  if (location.hash === '#pair') { history.replaceState(null, '', location.pathname + location.search); void import('./pairui.ts').then(m => m.openPair()) }   // the desktop tray's "Pair a phone"
   let st: SyncStatus = 'synced';
   onSyncStatus(s => { st = s; b.querySelector('i')!.className = s; b.title = `Account · ${LABEL[s]}` });
   b.onclick = e => {
@@ -128,9 +150,10 @@ export function accountMenu() {
     const r = b.getBoundingClientRect();
     m.style.top = `${r.bottom + 4}px`; m.style.right = `${Math.max(4, innerWidth - r.right)}px`;
     m.innerHTML = `<div class="ctx-i muted" style="pointer-events:none">Signed in · ${esc(LABEL[st])}</div><hr>
-      ${gate('trading').on ? '<div class="ctx-i" data-a="accts">Exchange accounts…</div>' : ''}<div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div>${syncServer().mode === 'public' ? '<div class="ctx-i" data-a="methods">Sign-in methods…</div><div class="ctx-i" data-a="codes">New recovery codes…</div>' : ''}<div class="ctx-i" data-a="restore">Restore points…</div><div class="ctx-i" data-a="servers">Servers…</div><hr>
+      ${gate('trading').on ? '<div class="ctx-i" data-a="accts">Exchange accounts…</div>' : ''}<div class="ctx-i" data-a="sessions">Devices &amp; sessions…</div><div class="ctx-i" data-a="shares">Shared links…</div><div class="ctx-i" data-a="password">Change password…</div><div class="ctx-i" data-a="twofa">Two-step verification…</div><div class="ctx-i" data-a="pair">Pair a phone…</div>${syncServer().mode === 'public' ? '<div class="ctx-i" data-a="methods">Sign-in methods…</div><div class="ctx-i" data-a="codes">New recovery codes…</div>' : ''}<div class="ctx-i" data-a="restore">Restore points…</div><div class="ctx-i" data-a="servers">Servers…</div><hr>
       <div class="ctx-i" data-a="logout">Log out</div>`;
     document.body.append(m);
+    if (syncServer().mode === 'public') void api<unknown>('/api/auth/status').then(j => { const u = parseStatus(j)?.user; if (u && m.isConnected) m.firstElementChild!.textContent = `Signed in as ${u.name} · ${LABEL[st]}` }).catch(() => {});
     const off = () => { m.remove(); removeEventListener('pointerdown', out, true) };
     const out = (ev: Event) => { if (!m.contains(ev.target as Node)) off() };
     addEventListener('pointerdown', out, true);
@@ -141,6 +164,8 @@ export function accountMenu() {
       if (a === 'sessions') void sessions();
       if (a === 'shares') void shares();
       if (a === 'password') changePassword();
+      if (a === 'twofa') void import('./twofaui.ts').then(m => m.twofaSettings());
+      if (a === 'pair') void import('./pairui.ts').then(m => m.openPair());
       if (a === 'servers') openServers();
       if (a === 'codes') newCodes();
       if (a === 'methods') void import('./signinmethods.ts').then(m => m.signInMethods());

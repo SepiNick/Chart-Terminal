@@ -2,7 +2,7 @@
 // and the forced password change. Private servers keep the single-password loginScreen in login.ts.
 import { api } from './sync.ts';
 import { esc } from './store.ts';
-import { authPost, screen, val } from './login.ts';
+import { authPost, pairFlash, screen, secondStep, val } from './login.ts';
 import { checkName, checkPassword, codesOf, formatRecoveryCodes } from './authrules.ts';
 import { parseStatus, type ServerStatus } from './servers.ts';
 import { oauthSignup, type Provider } from './oauthapi.ts';
@@ -17,14 +17,14 @@ const oauthButtons = (st: ServerStatus) => !(st.oauth.google || st.oauth.apple |
   `<hr style="width:100%;border:0;border-top:1px solid var(--line)">${st.oauth.google ? '<button type="button" data-go="oauth:google">Continue with Google</button>' : ''}${st.oauth.apple ? '<button type="button" data-go="oauth:apple">Continue with Apple</button>' : ''}${st.oauth.telegram ? '<button type="button" data-go="oauth:telegram">Continue with Telegram</button><p class="muted">Telegram needs a VPN where it is blocked.</p>' : ''}`;
 
 export async function accountScreen(st: ServerStatus): Promise<User> {
-  let view = 'login', user: User, msg = takeFlash();
+  let view = 'login', user: User, msg = takeFlash() || await pairFlash();
   for (;;) {
     let n: string;
     const flashed = msg ? `<p class="ct-err" role="alert">${esc(msg)}</p>` : ''; msg = '';
     if (view === 'login') {
       n = await screen(`${head(st)}${flashed}${NAME}<input type="password" name="pw" placeholder="Password" autocomplete="current-password">`, async f => {
         const name = val(f, 'name').trim(), pw = val(f, 'pw'); if (!name || !pw) throw Error('Enter your username and password');
-        user = (await authPost<{ user?: User }>('/api/auth/login', { name, password: pw })).user;
+        user = (await secondStep(await authPost<{ user?: User }>('/api/auth/login', { name, password: pw }))).user;
       }, `<div class="row"><button type="button" data-go="recover">Forgot password?</button><span class="grow"></span>${st.registration !== 'closed' ? '<button type="button" data-go="register">Create account</button>' : ''}</div>${oauthButtons(st)}`, 'Sign in');
     } else if (view === 'register') {
       n = await screen(`${head(st)}<p>Create an account</p>${NAME}

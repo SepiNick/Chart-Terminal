@@ -61,7 +61,7 @@ The address is embedded into the app at **build** time:
   ```powershell
   $env:VITE_BUG_REPORT_URL = "https://<receiver-address>"
   cd desktop; npm run dist:win                        # Windows installer
-  cd ..\android; .\gradlew.bat assembleStandaloneRelease assembleClientRelease -PbugReportHost=<domain-name-only>
+  cd ..\android; .\gradlew.bat assembleRelease -PbugReportHost=<domain-name-only>
   ```
   (For the standalone Android app, `bugReportHost` is the domain name without `https://`, so that the app is allowed to connect to it; first run `npm run build` from the root with the same variable.)
 - **Linux (GitHub Actions):** in the repo: Settings ← Secrets and variables ← Actions ← Variables ← create a variable named `BUG_REPORT_URL` with the same address.
