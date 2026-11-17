@@ -29,7 +29,7 @@ final class ExchangeProxy {
     /** host -> exact paths that may be POSTed (ccxt loads hyperliquid markets via POST /info). */
     static final Map<String, Set<String>> POST_PATHS = Collections.singletonMap("api.hyperliquid.xyz", Collections.singleton("/info"));
 
-    static final int MAX_BYTES = 10 * 1024 * 1024;
+    static final int MAX_BYTES = 32 * 1024 * 1024;   // decompressed: Binance spot exchangeInfo alone is 17 MB
     static final int MAX_POST_BODY = 64 * 1024;
     static final long DEADLINE_MS = 30_000;
     private static final int STEP_TIMEOUT_MS = 15_000;
